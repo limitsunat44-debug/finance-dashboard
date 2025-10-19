@@ -13,7 +13,7 @@ let appData = {
 
 // JSONBin configuration
 const JSONBIN_CONFIG = {
-    binId: '68f4f918d0ea881f40ac10bb',
+    binId: '68f52d5ed0ea881f40ac8865',
     masterKey: '$2a$10$yPjteU2c8x7lEUMZP8ATfOl.tiI/urEhy.bluxcsANuBQR/J9tN8q',
     baseUrl: 'https://api.jsonbin.io/v3/b/68f4f918d0ea881f40ac10bb'
 };

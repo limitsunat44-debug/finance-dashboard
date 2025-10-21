@@ -22,7 +22,7 @@ const JSONBIN_CONFIG = {
 // Admin accounts
 const ADMIN_ACCOUNTS = {
     'Sunnat': { password: 'Sunna0909', displayName: 'Sunnat' },
-    'Iskandar': { password: 'iskandar0909', displayName: 'Iskandar' },
+    'Iskandar': { password: '1111', displayName: 'Iskandar' },
     'Shahida': { password: 's2364170', displayName: 'Shahida' }
 };
 

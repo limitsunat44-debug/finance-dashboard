@@ -672,6 +672,13 @@ function updateDashboard() {
     const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
+	const last3DaysRevenue = appData.sales
+      .filter(sale => {
+      const saleDate = new Date(sale.date);
+      return saleDate >= startOf3DaysAgo && saleDate < endOfYesterday;
+     })
+     .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+	
     const todayRevenue = appData.sales
         .filter(sale => new Date(sale.date) >= startOfToday)
         .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);

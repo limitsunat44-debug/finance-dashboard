@@ -1738,7 +1738,7 @@ function generateReport() {
     const totalPurchases = periodPurchases.reduce((sum, purchase) => sum + parseFloat(purchase.amount), 0);
     const totalSupplierPayments = periodSupplierPayments.reduce((sum, payment) => sum + parseFloat(payment.amount), 0);
     const totalSalaryPayments = periodSalaryPayments.reduce((sum, payment) => sum + parseFloat(payment.amount), 0);
-    const balance = totalProfit - totalExpenses - totalPurchases - totalSupplierPayments - totalSalaryPayments;
+    const balance = totalRevenue - totalExpenses - totalPurchases - totalSupplierPayments - totalSalaryPayments;
 
     const salesCount = periodSales.length;
     const avgCheck = salesCount > 0 ? totalRevenue / salesCount : 0;

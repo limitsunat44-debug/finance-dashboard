@@ -665,6 +665,8 @@ function switchSectionTab(sectionName, tabName) {
 
 // Dashboard functions
 function updateDashboard() {
+	const endOfYesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // сегодня в 00:00
+    const startOf3DaysAgo = new Date(endOfYesterday.getTime() - 3 * 24 * 60 * 60 * 1000);
     const today = new Date();
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -685,7 +687,7 @@ function updateDashboard() {
     const totalRevenue = appData.sales.reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
     const netProfit = totalRevenue * 0.3;
 
-    document.getElementById('todayRevenue').textContent = formatCurrency(todayRevenue);
+    document.getElementById('todayRevenue').textContent = formatCurrency(last3DaysRevenue);
     document.getElementById('weekRevenue').textContent = formatCurrency(weekRevenue);
     document.getElementById('monthRevenue').textContent = formatCurrency(monthRevenue);
     document.getElementById('netProfit').textContent = formatCurrency(netProfit);

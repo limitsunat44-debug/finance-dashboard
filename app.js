@@ -665,9 +665,9 @@ function switchSectionTab(sectionName, tabName) {
 
 // Dashboard functions
 function updateDashboard() {
+    const today = new Date();
 	const endOfYesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate()); // сегодня в 00:00
     const startOf3DaysAgo = new Date(endOfYesterday.getTime() - 3 * 24 * 60 * 60 * 1000);
-    const today = new Date();
     const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);

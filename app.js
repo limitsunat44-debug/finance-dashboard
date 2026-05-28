@@ -238,6 +238,7 @@ async function loadData() {
         appData.auditLog = appData.auditLog || [];
         appData.fixedExpenses = appData.fixedExpenses || [];
         appData.fixedExpenseCategories = appData.fixedExpenseCategories || null;
+        appData.fixedExpensesAutofillLog = appData.fixedExpensesAutofillLog || {};
 
         console.log('✓ Data loaded successfully. Exchange rate:', appData.exchangeRate);
     } catch (error) {
@@ -701,7 +702,7 @@ function updateDashboard() {
     document.getElementById('monthRevenue').textContent = formatCurrency(monthRevenue);
     document.getElementById('netProfit').textContent = formatCurrency(netProfit);
 
-    renderDashboardFixedExpenses();
+    rolloverFixedExpensesIfNeeded().then(() => renderDashboardFixedExpenses());
 
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     const reportFromDate = document.getElementById('reportFromDate');
@@ -2083,7 +2084,12 @@ function switchExpensesTab(tabName) {
     if (tabEl) tabEl.classList.add('active');
     const btn = section.querySelector(`[data-section="${tabName}"]`);
     if (btn) btn.classList.add('active');
-    if (tabName === 'fixed-expenses') renderFixedExpenses();
+    if (tabName === 'fixed-expenses') {
+        rolloverFixedExpensesIfNeeded().then(() => {
+            renderFixedExpenses();
+            renderDashboardFixedExpenses();
+        });
+    }
 }
 
 function sumFixedExpensesBySalon(salon, ym) {
@@ -2096,6 +2102,78 @@ function sumFixedExpensesByCategory(salon, categoryKey, ym) {
     return (appData.fixedExpenses || [])
         .filter(e => e.salon === salon && e.categoryKey === categoryKey && isInMonth(e.date, ym))
         .reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+}
+
+function getCurrentYM() {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
+}
+
+function getPrevYM(ym) {
+    // ym format 'YYYY-MM'
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 2, 1); // m-2: month is 1-indexed, go back 1
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+// Автоперенос постоянных затрат из предыдущего месяца на текущий.
+// Срабатывает только один раз в месяц (флаг в appData.fixedExpensesAutofillLog).
+async function rolloverFixedExpensesIfNeeded() {
+    try {
+        if (!appData) return;
+        appData.fixedExpenses = appData.fixedExpenses || [];
+        appData.fixedExpensesAutofillLog = appData.fixedExpensesAutofillLog || {};
+
+        const currentYM = getCurrentYM();
+
+        // Уже переносили в этом месяце?
+        if (appData.fixedExpensesAutofillLog[currentYM]) return;
+
+        const prevYM = getPrevYM(currentYM);
+        const prevItems = appData.fixedExpenses.filter(e => isInMonth(e.date, prevYM));
+        if (prevItems.length === 0) {
+            // Нечего копировать — помечаем как выполненный, чтобы не проверять каждый раз
+            appData.fixedExpensesAutofillLog[currentYM] = { ts: new Date().toISOString(), copied: 0 };
+            try { await saveData(); } catch(e) {}
+            return;
+        }
+
+        // Доп. защита: если в текущем месяце уже есть записи — пропускаем
+        const hasCurrent = appData.fixedExpenses.some(e => isInMonth(e.date, currentYM));
+        if (hasCurrent) {
+            appData.fixedExpensesAutofillLog[currentYM] = { ts: new Date().toISOString(), copied: 0, skippedReason: 'already_has_records' };
+            try { await saveData(); } catch(e) {}
+            return;
+        }
+
+        // Копируем записи прошлого месяца с датой 1-го числа текущего
+        const newDate = `${currentYM}-01`;
+        const copied = prevItems.map(it => ({
+            ...it,
+            id: 'fx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+            date: newDate,
+            rolledFrom: it.id,
+            rolledFromMonth: prevYM,
+            createdAt: new Date().toISOString(),
+            createdBy: 'auto-rollover'
+        }));
+
+        appData.fixedExpenses.push(...copied);
+        appData.fixedExpensesAutofillLog[currentYM] = {
+            ts: new Date().toISOString(),
+            copied: copied.length,
+            from: prevYM
+        };
+
+        await saveData();
+        console.log(`✓ Fixed expenses rollover: ${copied.length} записей из ${prevYM} в ${currentYM}`);
+
+        if (typeof showSuccess === 'function') {
+            showSuccess(`Постоянные затраты за ${prevYM} автоматически перенесены на ${currentYM} (${copied.length} записей). При необходимости откорректируйте.`);
+        }
+    } catch (err) {
+        console.error('Rollover error:', err);
+    }
 }
 
 function renderDashboardFixedExpenses() {

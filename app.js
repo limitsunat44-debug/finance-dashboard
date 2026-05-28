@@ -43,7 +43,7 @@ const ADMIN_ACCOUNTS = {
 };
 
 // Salons
-const SALONS = ['Ортосалон Муниса', 'Ортосалон Сиема', 'Ортосалон Баракат', 'Ортосалон Айни'];
+const SALONS = ['Ортосалон СитиМолл', 'Ортосалон Сиема', 'Ортосалон Баракат', 'Ортосалон Айни'];
 
 // Countries
 const COUNTRIES = {
@@ -1001,7 +1001,7 @@ function loadExpensesTable() {
 function updateExpensesSummary() {
     // Calculate expenses by salon
     const expensesBySalon = {
-        'Ортосалон Муниса': 0,
+        'Ортосалон СитиМолл': 0,
         'Ортосалон Сиема': 0,
         'Ортосалон Баракат': 0,
         'Ортосалон Айни': 0,
@@ -1017,7 +1017,7 @@ function updateExpensesSummary() {
     const totalExpenses = Object.values(expensesBySalon).reduce((sum, amount) => sum + amount, 0);
 
     // Update UI
-    document.getElementById('expenseMunisa').textContent = formatCurrency(expensesBySalon['Ортосалон Муниса']);
+    document.getElementById('expenseMunisa').textContent = formatCurrency(expensesBySalon['Ортосалон СитиМолл']);
     document.getElementById('expenseSiema').textContent = formatCurrency(expensesBySalon['Ортосалон Сиема']);
     document.getElementById('expenseBarakat').textContent = formatCurrency(expensesBySalon['Ортосалон Баракат']);
     document.getElementById('expenseAini').textContent = formatCurrency(expensesBySalon['Ортосалон Айни']);
@@ -1786,7 +1786,7 @@ function generateExpensesBySalonChart(expenses) {
 
     const ctx = canvas.getContext('2d');
     const expensesBySalon = {
-        'Ортосалон Муниса': 0,
+        'Ортосалон СитиМолл': 0,
         'Ортосалон Сиема': 0,
         'Ортосалон Баракат': 0,
         'Ортосалон Айни': 0,

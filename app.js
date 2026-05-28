@@ -1771,11 +1771,6 @@ function generateReport() {
     document.getElementById('reportBalance').textContent = formatCurrency(balance);
     document.getElementById('reportBalance').style.color = balance >= 0 ? '#38a169' : '#e53e3e';
 
-    document.getElementById('reportAvgCheck').textContent = formatCurrency(avgCheck);
-    document.getElementById('reportSalesCount').textContent = salesCount;
-    document.getElementById('reportProfitMargin').textContent = profitMargin + '%';
-    document.getElementById('reportBestSalon').textContent = bestSalon;
-    document.getElementById('reportBestSalonRevenue').textContent = formatCurrency(bestSalonRevenue);
     document.getElementById('reportCurrentDebt').textContent = formatCurrency(currentDebt);
 
     loadAuditLogTable(fromDateTime, toDateTime);

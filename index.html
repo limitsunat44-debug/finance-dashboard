@@ -96,6 +96,12 @@
                 </div>
             </div>
 
+            <!-- Fixed expenses summary by salon (current month) -->
+            <div class="card" id="dashboardFixedExpensesCard">
+                <h3 style="margin-bottom: 16px;">📌 Постоянные затраты за текущий месяц</h3>
+                <div id="dashboardFixedExpenses" class="fixed-expenses-summary"></div>
+            </div>
+
             <div class="card">
                 <h3>Генерация отчета</h3>
                 <div class="form-row">
@@ -262,6 +268,12 @@
 
         <!-- Expenses Section -->
         <section id="expensesSection" class="section">
+            <div class="section-tabs">
+                <button class="section-tab active" data-section="variable-expenses" onclick="switchExpensesTab('variable-expenses')">Разовые расходы</button>
+                <button class="section-tab" data-section="fixed-expenses" onclick="switchExpensesTab('fixed-expenses')">Постоянные затраты</button>
+            </div>
+
+            <div id="variable-expensesTab" class="tab-content active">
             <div class="card">
                 <h3>Добавить расход</h3>
                 <form id="addExpenseForm">
@@ -408,6 +420,27 @@
                     </table>
                 </div>
             </div>
+            </div>
+            <!-- /variable-expensesTab -->
+
+            <!-- Fixed Expenses Tab -->
+            <div id="fixed-expensesTab" class="tab-content">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h3 style="margin: 0;">📌 Постоянные затраты по салонам</h3>
+                        <div class="form-group" style="margin: 0;">
+                            <label for="fixedExpensesMonth" style="font-size: 13px;">Месяц</label>
+                            <input type="month" id="fixedExpensesMonth" onchange="renderFixedExpenses()">
+                        </div>
+                    </div>
+                    <p style="color: var(--color-text-secondary); margin-top: 8px;">
+                        Раскройте салон, чтобы увидеть и редактировать его постоянные затраты.
+                    </p>
+                </div>
+
+                <div id="fixedExpensesContainer" class="fixed-expenses-container"></div>
+            </div>
+            <!-- /fixed-expensesTab -->
         </section>
 
         <!-- Salaries Section -->

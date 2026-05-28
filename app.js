@@ -236,6 +236,8 @@ async function loadData() {
         appData.employees = appData.employees || [];
         appData.salaryPayments = appData.salaryPayments || [];
         appData.auditLog = appData.auditLog || [];
+        appData.fixedExpenses = appData.fixedExpenses || [];
+        appData.fixedExpenseCategories = appData.fixedExpenseCategories || null;
 
         console.log('✓ Data loaded successfully. Exchange rate:', appData.exchangeRate);
     } catch (error) {
@@ -698,6 +700,8 @@ function updateDashboard() {
     document.getElementById('weekRevenue').textContent = formatCurrency(weekRevenue);
     document.getElementById('monthRevenue').textContent = formatCurrency(monthRevenue);
     document.getElementById('netProfit').textContent = formatCurrency(netProfit);
+
+    renderDashboardFixedExpenses();
 
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     const reportFromDate = document.getElementById('reportFromDate');
@@ -2024,4 +2028,294 @@ document.addEventListener('DOMContentLoaded', function() {
     window.deleteSupplier = deleteSupplier;
     window.showSupplierPaymentModal = showSupplierPaymentModal;
     window.deletePurchase = deletePurchase;
+    window.switchExpensesTab = switchExpensesTab;
+    window.renderFixedExpenses = renderFixedExpenses;
+    window.toggleSalonBlock = toggleSalonBlock;
+    window.addFixedExpenseItem = addFixedExpenseItem;
+    window.deleteFixedExpenseItem = deleteFixedExpenseItem;
+    window.addFixedExpenseCategory = addFixedExpenseCategory;
+
+    // Init fixed expenses month selector
+    const fxMonthInput = document.getElementById('fixedExpensesMonth');
+    if (fxMonthInput) {
+        const t = new Date();
+        const ym = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
+        fxMonthInput.value = ym;
+    }
 });
+
+// ═════════════════════════════════════════════════════════════
+// FIXED EXPENSES — ПОСТОЯННЫЕ ЗАТРАТЫ ПО САЛОНАМ
+// ═════════════════════════════════════════════════════════════
+
+const DEFAULT_FX_CATEGORIES = [
+    { key: 'rent',     name: 'Аренда',              icon: '🏢', isSalary: false },
+    { key: 'salary',   name: 'Зарплаты',           icon: '👥', isSalary: true  },
+    { key: 'utility',  name: 'Коммунальные услуги', icon: '💧', isSalary: false },
+    { key: 'electric', name: 'Электроэнергия',     icon: '⚡', isSalary: false },
+    { key: 'tax',      name: 'Налоги',              icon: '📝', isSalary: false }
+];
+
+function getFixedExpenseCategories() {
+    // Не мутируем дефолт. Сохраняем в appData только пользовательские расширения.
+    const userExtra = (appData.fixedExpenseCategories || []).filter(c => !DEFAULT_FX_CATEGORIES.find(d => d.key === c.key));
+    return [...DEFAULT_FX_CATEGORIES, ...userExtra];
+}
+
+function getSelectedFixedMonth() {
+    const el = document.getElementById('fixedExpensesMonth');
+    if (el && el.value) return el.value; // 'YYYY-MM'
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
+}
+
+function isInMonth(dateStr, ym) {
+    if (!dateStr || !ym) return false;
+    return String(dateStr).startsWith(ym);
+}
+
+function switchExpensesTab(tabName) {
+    const section = document.getElementById('expensesSection');
+    if (!section) return;
+    section.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    section.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+    const tabEl = document.getElementById(tabName + 'Tab');
+    if (tabEl) tabEl.classList.add('active');
+    const btn = section.querySelector(`[data-section="${tabName}"]`);
+    if (btn) btn.classList.add('active');
+    if (tabName === 'fixed-expenses') renderFixedExpenses();
+}
+
+function sumFixedExpensesBySalon(salon, ym) {
+    return (appData.fixedExpenses || [])
+        .filter(e => e.salon === salon && isInMonth(e.date, ym))
+        .reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+}
+
+function sumFixedExpensesByCategory(salon, categoryKey, ym) {
+    return (appData.fixedExpenses || [])
+        .filter(e => e.salon === salon && e.categoryKey === categoryKey && isInMonth(e.date, ym))
+        .reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+}
+
+function renderDashboardFixedExpenses() {
+    const container = document.getElementById('dashboardFixedExpenses');
+    if (!container) return;
+    const t = new Date();
+    const ym = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}`;
+    const allSalons = [...SALONS, 'Общие'];
+    let total = 0;
+    let html = '';
+    allSalons.forEach(salon => {
+        const sum = sumFixedExpensesBySalon(salon, ym);
+        total += sum;
+        html += `
+            <div class="fx-summary-card">
+                <div class="fx-salon-name">${salon}</div>
+                <div class="fx-amount">${formatCurrency(sum)}</div>
+                <div class="fx-amount-sub">за текущий месяц</div>
+            </div>`;
+    });
+    html += `
+        <div class="fx-summary-card total">
+            <div class="fx-salon-name">Итого</div>
+            <div class="fx-amount">${formatCurrency(total)}</div>
+            <div class="fx-amount-sub">по всем салонам</div>
+        </div>`;
+    container.innerHTML = html;
+}
+
+function renderFixedExpenses() {
+    const container = document.getElementById('fixedExpensesContainer');
+    if (!container) return;
+    const ym = getSelectedFixedMonth();
+    const categories = getFixedExpenseCategories();
+    const allSalons = [...SALONS, 'Общие'];
+    const employees = (appData.employees || []).filter(e => e.isActive !== false && e.is_active !== false);
+
+    // сохраняем открытое состояние перед перерисовкой
+    const openSalons = Array.from(container.querySelectorAll('.fx-salon-block.open'))
+        .map(b => b.getAttribute('data-salon'));
+
+    let html = '';
+    allSalons.forEach(salon => {
+        const salonTotal = sumFixedExpensesBySalon(salon, ym);
+        const isOpen = openSalons.includes(salon);
+        html += `
+        <div class="fx-salon-block ${isOpen ? 'open' : ''}" data-salon="${escapeHtml(salon)}">
+            <div class="fx-salon-header" onclick="toggleSalonBlock(this)">
+                <div class="fx-salon-title">🏪 ${escapeHtml(salon)}</div>
+                <div class="fx-salon-total">
+                    <span>${formatCurrency(salonTotal)}</span>
+                    <span class="fx-arrow">▼</span>
+                </div>
+            </div>
+            <div class="fx-salon-body">`;
+        categories.forEach(cat => {
+            const catTotal = sumFixedExpensesByCategory(salon, cat.key, ym);
+            const items = (appData.fixedExpenses || []).filter(e =>
+                e.salon === salon && e.categoryKey === cat.key && isInMonth(e.date, ym)
+            );
+            html += `
+            <div class="fx-category" data-cat="${cat.key}">
+                <div class="fx-category-header">
+                    <div class="fx-category-title">${cat.icon || ''} ${escapeHtml(cat.name)}</div>
+                    <div class="fx-category-total">${formatCurrency(catTotal)}</div>
+                </div>
+                <div class="fx-items-list">`;
+            if (items.length === 0) {
+                html += `<div style="color: var(--color-text-secondary); font-size: 12px; padding: 4px 6px;">Записей нет</div>`;
+            } else {
+                items.forEach(it => {
+                    html += `
+                    <div class="fx-item">
+                        <div class="fx-item-name">${escapeHtml(it.name || '—')}</div>
+                        <div class="fx-item-amount">${formatCurrency(it.amount)}</div>
+                        <div class="fx-item-date">${escapeHtml(it.date || '')}</div>
+                        <button class="fx-btn-delete" onclick="deleteFixedExpenseItem('${it.id}')">✕</button>
+                    </div>`;
+                });
+            }
+            html += `</div>`;
+
+            // форма добавления
+            if (cat.isSalary) {
+                // выбор сотрудника
+                const empOptions = employees.map(e => {
+                    const id = e.id;
+                    const label = `${escapeHtml(e.name)}${e.position ? ' (' + escapeHtml(e.position) + ')' : ''}`;
+                    return `<option value="${id}" data-name="${escapeHtml(e.name)}">${label}</option>`;
+                }).join('');
+                html += `
+                <div class="fx-add-row" data-row="${cat.key}-${escapeHtml(salon)}">
+                    <select class="fx-employee">
+                        <option value="">— выберите сотрудника —</option>
+                        ${empOptions}
+                    </select>
+                    <input type="number" class="fx-amount-input" placeholder="Сумма (TJS)" step="0.01" min="0">
+                    <input type="date" class="fx-date-input" value="${ym}-01">
+                    <button class="fx-btn-add" onclick="addFixedExpenseItem('${escapeHtml(salon)}','${cat.key}', this)">+ Добавить</button>
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: var(--color-text-secondary);">
+                    Сотрудника можно добавить в разделе «Зарплаты» → «Сотрудники».
+                </div>`;
+            } else {
+                html += `
+                <div class="fx-add-row" data-row="${cat.key}-${escapeHtml(salon)}">
+                    <input type="text" class="fx-name-input" placeholder="Название (например: Октябрь)">
+                    <input type="number" class="fx-amount-input" placeholder="Сумма (TJS)" step="0.01" min="0">
+                    <input type="date" class="fx-date-input" value="${ym}-01">
+                    <button class="fx-btn-add" onclick="addFixedExpenseItem('${escapeHtml(salon)}','${cat.key}', this)">+ Добавить</button>
+                </div>`;
+            }
+            html += `</div>`;
+        });
+
+        // блок добавления новой категории
+        html += `
+            <div class="fx-add-category-row">
+                <input type="text" placeholder="Новая категория (например: Охрана)" id="newCat-${escapeAttr(salon)}">
+                <button class="fx-btn-add" onclick="addFixedExpenseCategory(document.getElementById('newCat-${escapeAttr(salon)}').value)">+ Категория</button>
+            </div>`;
+
+        html += `
+            </div>
+        </div>`;
+    });
+
+    container.innerHTML = html;
+}
+
+function toggleSalonBlock(headerEl) {
+    const block = headerEl.closest('.fx-salon-block');
+    if (block) block.classList.toggle('open');
+}
+
+async function addFixedExpenseItem(salon, categoryKey, btnEl) {
+    const row = btnEl.closest('.fx-add-row');
+    const amountInput = row.querySelector('.fx-amount-input');
+    const dateInput = row.querySelector('.fx-date-input');
+    const amount = parseFloat(amountInput.value);
+    const date = dateInput.value;
+
+    if (!amount || amount <= 0) { showError('Укажите сумму'); return; }
+    if (!date) { showError('Укажите дату'); return; }
+
+    let name = '';
+    let employeeId = null;
+    const empSelect = row.querySelector('.fx-employee');
+    if (empSelect) {
+        const opt = empSelect.options[empSelect.selectedIndex];
+        employeeId = empSelect.value;
+        if (!employeeId) { showError('Выберите сотрудника'); return; }
+        name = opt ? opt.getAttribute('data-name') : '';
+    } else {
+        const nameInput = row.querySelector('.fx-name-input');
+        name = nameInput ? nameInput.value.trim() : '';
+        if (!name) name = '—';
+    }
+
+    const cat = getFixedExpenseCategories().find(c => c.key === categoryKey);
+    const item = {
+        id: 'fx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+        salon,
+        categoryKey,
+        categoryName: cat ? cat.name : categoryKey,
+        name,
+        amount,
+        date,
+        employeeId,
+        createdBy: (currentUser && currentUser.displayName) || (currentUser && currentUser.username) || 'system',
+        createdAt: new Date().toISOString()
+    };
+
+    appData.fixedExpenses = appData.fixedExpenses || [];
+    appData.fixedExpenses.push(item);
+
+    try {
+        await saveData();
+        showSuccess('Запись добавлена');
+        renderFixedExpenses();
+        renderDashboardFixedExpenses();
+    } catch (e) {
+        console.error(e);
+        showError('Не удалось сохранить');
+    }
+}
+
+async function deleteFixedExpenseItem(itemId) {
+    if (!confirm('Удалить эту запись?')) return;
+    appData.fixedExpenses = (appData.fixedExpenses || []).filter(e => e.id !== itemId);
+    try {
+        await saveData();
+        showSuccess('Удалено');
+        renderFixedExpenses();
+        renderDashboardFixedExpenses();
+    } catch (e) {
+        showError('Ошибка удаления');
+    }
+}
+
+async function addFixedExpenseCategory(name) {
+    name = (name || '').trim();
+    if (!name) { showError('Введите название категории'); return; }
+    const key = 'custom_' + name.toLowerCase().replace(/[^a-z0-9а-яё]+/gi, '_').slice(0, 24) + '_' + Math.random().toString(36).substr(2, 5);
+    appData.fixedExpenseCategories = appData.fixedExpenseCategories || [];
+    appData.fixedExpenseCategories.push({ key, name, icon: '📌', isSalary: false });
+    try {
+        await saveData();
+        showSuccess('Категория добавлена');
+        renderFixedExpenses();
+    } catch (e) {
+        showError('Не удалось сохранить');
+    }
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(s) {
+    return String(s == null ? '' : s).replace(/[^a-z0-9А-яЁё_-]/gi, '_');
+}

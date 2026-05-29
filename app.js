@@ -705,6 +705,7 @@ function updateDashboard() {
     document.getElementById('netProfit').textContent = formatCurrency(netProfit);
 
     rolloverFixedExpensesIfNeeded().then(() => renderDashboardFixedExpenses());
+    if (typeof renderDashboardDailySales === 'function') renderDashboardDailySales();
 
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     const reportFromDate = document.getElementById('reportFromDate');
@@ -2826,8 +2827,7 @@ function renderDailySales() {
                             id="dsRevenue_${safeId}"
                             value="${revenue || ''}"
                             placeholder="0.00"
-                            oninput="updateDailySalesPreview('${escapeHtml(salon)}', '${dateStr}', this.value)"
-                            onchange="saveDailySalesEntry('${escapeHtml(salon)}', '${dateStr}', this.value)">
+                            oninput="updateDailySalesPreview('${escapeHtml(salon)}', '${dateStr}', this.value)">
                     </div>
                 </div>
                 <div class="ds-breakdown" id="dsBreakdown_${safeId}">
@@ -2849,12 +2849,54 @@ function renderDailySales() {
                         <span>${profitSign}${formatCurrency(profit)}</span>
                     </div>
                 </div>
+                <div class="ds-actions">
+                    <button type="button" class="ds-save-btn" id="dsSaveBtn_${safeId}"
+                        onclick="handleDailySalesSaveClick('${escapeHtml(salon)}', '${dateStr}')">
+                        💾 Сохранить
+                    </button>
+                </div>
             </div>
         `;
         container.appendChild(card);
     });
 
     renderDailySalesTotals(dateStr);
+}
+
+async function handleDailySalesSaveClick(salon, dateStr) {
+    const safeId = salon.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_');
+    const input = document.getElementById(`dsRevenue_${safeId}`);
+    const btn = document.getElementById(`dsSaveBtn_${safeId}`);
+    if (!input) return;
+    const value = input.value;
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Сохранение...';
+    }
+    try {
+        await saveDailySalesEntry(salon, dateStr, value);
+        if (btn) {
+            btn.classList.add('saved');
+            btn.textContent = '✓ Сохранено';
+            setTimeout(() => {
+                btn.classList.remove('saved');
+                btn.textContent = '💾 Сохранить';
+                btn.disabled = false;
+            }, 1600);
+        }
+        if (typeof renderDashboardDailySales === 'function') {
+            renderDashboardDailySales();
+        }
+    } catch (e) {
+        console.error(e);
+        if (btn) {
+            btn.textContent = '❌ Ошибка';
+            setTimeout(() => {
+                btn.textContent = '💾 Сохранить';
+                btn.disabled = false;
+            }, 1600);
+        }
+    }
 }
 
 function updateDailySalesPreview(salon, dateStr, rawValue) {
@@ -2994,3 +3036,94 @@ function renderDailySalesTotals(dateStr, overrides = {}) {
 window.renderDailySales = renderDailySales;
 window.updateDailySalesPreview = updateDailySalesPreview;
 window.saveDailySalesEntry = saveDailySalesEntry;
+window.handleDailySalesSaveClick = handleDailySalesSaveClick;
+
+// ============================================================
+// Дашборд: сводка ежедневных продаж за вчера по салонам
+// (отдельная логика, не влияет на основные продажи Excel)
+// ============================================================
+
+function getYesterdayDateStr() {
+    const t = new Date();
+    t.setDate(t.getDate() - 1);
+    return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+}
+
+function formatDateRu(dateStr) {
+    if (!dateStr) return '';
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+    return `${d} ${months[m-1]} ${y}`;
+}
+
+function renderDashboardDailySales() {
+    const container = document.getElementById('dashboardDailySales');
+    const label = document.getElementById('dashboardDailySalesDateLabel');
+    if (!container) return;
+
+    const dateStr = getYesterdayDateStr();
+    if (label) label.textContent = `за ${formatDateRu(dateStr)}`;
+
+    let totalRevenue = 0;
+    let totalProfit = 0;
+    let cardsHtml = '';
+
+    SALONS.forEach(salon => {
+        const entry = findDailySalesEntry(salon, dateStr);
+        const revenue = entry ? parseFloat(entry.revenue) || 0 : 0;
+        const fixedShare = getDailyFixedShare(salon, dateStr);
+        const profit = (revenue / 2) - fixedShare;
+
+        totalRevenue += revenue;
+        totalProfit += profit;
+
+        let cardClass, statusText, profitDisplay;
+        if (revenue === 0) {
+            cardClass = 'empty';
+            statusText = 'Нет данных';
+            profitDisplay = '—';
+        } else if (profit >= 0) {
+            cardClass = 'positive';
+            statusText = '▲ В плюсе';
+            profitDisplay = `+${formatCurrency(profit)}`;
+        } else {
+            cardClass = 'negative';
+            statusText = '▼ В минусе';
+            profitDisplay = `−${formatCurrency(Math.abs(profit))}`;
+        }
+
+        cardsHtml += `
+            <div class="dds-card ${cardClass}">
+                <div class="dds-salon-name">🏪 ${escapeHtml(salon)}</div>
+                <div class="dds-revenue">Выручка: ${formatCurrency(revenue)}</div>
+                <div class="dds-profit">${profitDisplay}</div>
+                <div class="dds-status">${statusText}</div>
+            </div>`;
+    });
+
+    let totalClass = '';
+    let totalValueDisplay;
+    if (totalRevenue === 0) {
+        totalClass = '';
+        totalValueDisplay = '— нет данных';
+    } else if (totalProfit >= 0) {
+        totalClass = 'positive';
+        totalValueDisplay = `▲ +${formatCurrency(totalProfit)} — в плюсе`;
+    } else {
+        totalClass = 'negative';
+        totalValueDisplay = `▼ −${formatCurrency(Math.abs(totalProfit))} — в минусе`;
+    }
+
+    cardsHtml += `
+        <div class="dds-total-card ${totalClass}">
+            <div>
+                <div class="dds-total-label">Итого за вчера (все салоны)</div>
+                <div style="font-size:12px;opacity:0.75;margin-top:2px;">Общая выручка: ${formatCurrency(totalRevenue)}</div>
+            </div>
+            <div class="dds-total-value">${totalValueDisplay}</div>
+        </div>`;
+
+    container.innerHTML = cardsHtml;
+}
+
+window.renderDashboardDailySales = renderDashboardDailySales;

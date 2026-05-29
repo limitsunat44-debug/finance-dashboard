@@ -102,6 +102,18 @@
                 <div id="dashboardFixedExpenses" class="fixed-expenses-summary"></div>
             </div>
 
+            <!-- Daily Sales summary for yesterday -->
+            <div class="card" id="dashboardDailySalesCard">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">📅 Чистая прибыль за вчера по салонам</h3>
+                    <span id="dashboardDailySalesDateLabel" style="font-size:13px;color:var(--color-text-secondary);"></span>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
+                    Данные из подраздела <i>Продажи → Ежедневные продажи</i>. Расчёт не зависит от продаж из Excel.
+                </p>
+                <div id="dashboardDailySales" class="daily-sales-dashboard"></div>
+            </div>
+
             <div class="card">
                 <h3>Генерация отчета</h3>
                 <div class="form-row">
@@ -280,6 +292,9 @@
                         Формула: <b>Прибыль дня</b> = (Выручка ÷ 2) − Доля постоянных затрат за день.
                         Себестоимость товара = 50% от выручки.
                         Постоянные затраты берутся из раздела <i>Расходы → Постоянные затраты</i> (за месяц ÷ дней в месяце).
+                    </p>
+                    <p style="color: var(--color-warning, #d97706); margin-top: 4px; font-size: 12px;">
+                        ℹ️ Этот расчёт живёт отдельно и <b>не влияет</b> на основные продажи, загружаемые из Excel.
                     </p>
                 </div>
 

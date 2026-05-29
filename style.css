@@ -2146,3 +2146,162 @@ tbody tr:hover {
     font-family: 'SF Mono', Consolas, monospace;
     background: #fefce8;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   DAILY SALES — Ежедневные продажи и расчёт прибыли
+   ═══════════════════════════════════════════════════════════════ */
+
+.daily-sales-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.ds-salon-card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    transition: box-shadow 0.15s ease;
+}
+
+.ds-salon-card:hover {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+}
+
+.ds-salon-header {
+    background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
+    color: #fff;
+    padding: 14px 18px;
+    font-weight: 600;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ds-salon-body {
+    padding: 16px 18px;
+}
+
+.ds-input-group {
+    display: flex;
+    gap: 8px;
+    align-items: end;
+    margin-bottom: 14px;
+}
+
+.ds-input-group .form-group { flex: 1; margin: 0; }
+
+.ds-input-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin-bottom: 4px;
+}
+
+.ds-input-group input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.ds-input-group input:focus {
+    outline: none;
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+}
+
+.ds-breakdown {
+    border-top: 1px dashed #e2e8f0;
+    padding-top: 12px;
+    margin-top: 6px;
+}
+
+.ds-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    font-size: 13px;
+    color: #4a5568;
+}
+
+.ds-row.ds-row-revenue { font-weight: 500; color: #2d3748; }
+.ds-row.ds-row-cogs    { color: #c53030; }
+.ds-row.ds-row-fixed   { color: #d97706; }
+
+.ds-row-divider {
+    border-top: 1px solid #e2e8f0;
+    margin: 6px 0;
+}
+
+.ds-row-profit {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ds-row-profit.positive {
+    background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+    color: #065f46;
+}
+
+.ds-row-profit.negative {
+    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+    color: #991b1b;
+}
+
+.ds-row-profit.neutral {
+    background: #f1f5f9;
+    color: #475569;
+}
+
+.ds-save-status {
+    font-size: 11px;
+    color: #10b981;
+    margin-top: 6px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.ds-save-status.show { opacity: 1; }
+
+.daily-sales-totals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.ds-total-tile {
+    background: #f7fafc;
+    border-radius: 8px;
+    padding: 14px 16px;
+    border-left: 4px solid #6366f1;
+}
+
+.ds-total-tile.profit-positive { border-left-color: #10b981; }
+.ds-total-tile.profit-negative { border-left-color: #ef4444; }
+
+.ds-total-label {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 6px;
+}
+
+.ds-total-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: #2d3748;
+}

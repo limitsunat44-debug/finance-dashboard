@@ -2074,3 +2074,75 @@ tbody tr:hover {
     font-size: 12px;
     font-style: italic;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   INLINE EDITABLE CELLS — редактируемые ячейки сотрудников
+   ═══════════════════════════════════════════════════════════════ */
+
+.editable-cell {
+    position: relative;
+    cursor: text;
+    transition: background 0.15s ease;
+    border-radius: 4px;
+}
+
+.editable-cell:hover {
+    background: #fef9c3;
+    outline: 1px dashed #d97706;
+    outline-offset: -1px;
+}
+
+.editable-cell:focus {
+    background: #fefce8;
+    outline: 2px solid #f59e0b;
+    outline-offset: -2px;
+}
+
+.editable-cell.cell-saved {
+    background: #d1fae5 !important;
+    outline: 2px solid #10b981 !important;
+}
+
+.editable-cell.cell-error {
+    background: #fee2e2 !important;
+    outline: 2px solid #ef4444 !important;
+    animation: cellShake 0.3s;
+}
+
+@keyframes cellShake {
+    0%, 100% { transform: translateX(0); }
+    25%      { transform: translateX(-4px); }
+    75%      { transform: translateX(4px); }
+}
+
+.wallet-cell {
+    position: relative;
+}
+
+.wallet-edit-btn {
+    background: transparent;
+    border: 1px solid #cbd5e0;
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin-left: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    opacity: 0.6;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.wallet-cell:hover .wallet-edit-btn {
+    opacity: 1;
+    background: #edf2f7;
+}
+
+.wallet-input {
+    width: 100%;
+    min-width: 160px;
+    padding: 5px 8px;
+    border: 2px solid #f59e0b;
+    border-radius: 5px;
+    font-size: 13px;
+    font-family: 'SF Mono', Consolas, monospace;
+    background: #fefce8;
+}

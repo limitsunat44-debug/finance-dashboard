@@ -1094,20 +1094,43 @@ async function saveEmployee() {
 function loadEmployeesTable() {
     const tbody = document.querySelector('#employeesTable tbody');
     tbody.innerHTML = appData.employees.map(employee => {
-        const walletHtml = employee.wallet
-            ? `<span class="wallet-chip" onclick="copyWalletToClipboard(this, '${escapeHtml(employee.wallet).replace(/'/g, "\\'")}')" title="Нажмите, чтобы скопировать">
+        const walletDisplay = employee.wallet || '';
+        const walletCellHtml = employee.wallet
+            ? `<span class="wallet-chip" onclick="copyWalletToClipboard(event, this, '${escapeHtml(employee.wallet).replace(/'/g, "\\'")}')" title="Клик — скопировать">
                 <span class="wallet-chip-text">${escapeHtml(employee.wallet)}</span>
                 <span class="wallet-chip-icon">📋</span>
                </span>`
             : `<span class="wallet-empty">не указан</span>`;
         return `
-        <tr>
+        <tr data-emp-id="${employee.id}">
             <td>${employee.id.slice(-8)}</td>
             <td>${escapeHtml(employee.name)}</td>
             <td>${escapeHtml(employee.position)}</td>
-            <td>${formatCurrency(employee.salary)}</td>
-            <td>${employee.commission}%</td>
-            <td>${walletHtml}</td>
+            <td class="editable-cell"
+                contenteditable="true"
+                data-field="salary"
+                data-emp-id="${employee.id}"
+                title="Клик — редактировать"
+                onblur="saveEmployeeField(this)"
+                onkeydown="handleEditableKey(event)"
+                onfocus="selectAllText(this)"
+            >${formatCurrency(employee.salary)}</td>
+            <td class="editable-cell"
+                contenteditable="true"
+                data-field="commission"
+                data-emp-id="${employee.id}"
+                title="Клик — редактировать"
+                onblur="saveEmployeeField(this)"
+                onkeydown="handleEditableKey(event)"
+                onfocus="selectAllText(this)"
+            >${employee.commission}%</td>
+            <td class="editable-cell wallet-cell"
+                data-field="wallet"
+                data-emp-id="${employee.id}"
+                data-wallet="${escapeHtml(walletDisplay)}">
+                <span class="wallet-display">${walletCellHtml}</span>
+                <button class="wallet-edit-btn" title="Изменить" onclick="startWalletEdit(this)">✏️</button>
+            </td>
             <td>
                 <div class="action-buttons">
                     <button class="btn btn-danger btn-sm" onclick="deleteEmployee('${employee.id}')">Удалить</button>
@@ -2531,7 +2554,8 @@ function applyCalcAsPayment() {
 // ═════════════════════════════════════════════════════════════
 // WALLET COPY — копирование номера кошелька одним кликом
 // ═════════════════════════════════════════════════════════════
-async function copyWalletToClipboard(chipEl, walletText) {
+async function copyWalletToClipboard(evt, chipEl, walletText) {
+    if (evt && evt.stopPropagation) evt.stopPropagation();
     try {
         await navigator.clipboard.writeText(walletText);
     } catch (err) {
@@ -2562,3 +2586,175 @@ window.copyCalcResult = copyCalcResult;
 window.applyCalcAsPayment = applyCalcAsPayment;
 window.copyWalletToClipboard = copyWalletToClipboard;
 window.populateCalcEmployeeSelect = populateCalcEmployeeSelect;
+
+// ═════════════════════════════════════════════════════════════
+// INLINE EMPLOYEE EDIT — редактирование оклада/процента/кошелька
+// ═════════════════════════════════════════════════════════════
+
+function selectAllText(el) {
+    // выделить весь текст в contenteditable, чтобы пользователь сразу мог печатать
+    setTimeout(() => {
+        try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            el._origValue = el.textContent;
+        } catch (e) {}
+    }, 0);
+}
+
+function handleEditableKey(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        event.target.blur();
+    } else if (event.key === 'Escape') {
+        event.preventDefault();
+        if (event.target._origValue !== undefined) {
+            event.target.textContent = event.target._origValue;
+        }
+        event.target.blur();
+    }
+}
+
+async function saveEmployeeField(cell) {
+    const empId = cell.getAttribute('data-emp-id');
+    const field = cell.getAttribute('data-field');
+    const raw = cell.textContent.trim();
+    const origValue = cell._origValue;
+
+    // Если значение не менялось — ничего не делаем
+    if (raw === origValue) return;
+
+    const emp = (appData.employees || []).find(e => e.id === empId);
+    if (!emp) return;
+
+    let newValue;
+    let displayValue;
+
+    if (field === 'salary') {
+        // Убираем все нечисловые символы (TJS, пробелы, запятые)
+        const num = parseFloat(raw.replace(/[^\d.,-]/g, '').replace(',', '.'));
+        if (isNaN(num) || num < 0) {
+            flashCell(cell, false);
+            cell.textContent = formatCurrency(emp.salary);
+            return;
+        }
+        newValue = num;
+        displayValue = formatCurrency(num);
+        emp.salary = num;
+    } else if (field === 'commission') {
+        const num = parseFloat(raw.replace(/[^\d.,-]/g, '').replace(',', '.'));
+        if (isNaN(num) || num < 0 || num > 100) {
+            flashCell(cell, false);
+            cell.textContent = emp.commission + '%';
+            return;
+        }
+        newValue = num;
+        displayValue = num + '%';
+        emp.commission = num;
+    } else {
+        return;
+    }
+
+    cell.textContent = displayValue;
+
+    try {
+        await saveData();
+        flashCell(cell, true);
+        if (typeof addToAuditLog === 'function') {
+            addToAuditLog('Изменено', 'Сотрудник', `${emp.name}: ${field} → ${newValue}`);
+        }
+        // Обновляем зависимые элементы
+        if (typeof populateEmployeeSelect === 'function') populateEmployeeSelect();
+        if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
+    } catch (err) {
+        console.error('Ошибка сохранения:', err);
+        flashCell(cell, false);
+        alert('Не удалось сохранить изменения. Попробуйте ещё раз.');
+    }
+}
+
+function flashCell(cell, success) {
+    cell.classList.remove('cell-saved', 'cell-error');
+    cell.classList.add(success ? 'cell-saved' : 'cell-error');
+    setTimeout(() => cell.classList.remove('cell-saved', 'cell-error'), 1200);
+}
+
+function startWalletEdit(btnEl) {
+    const cell = btnEl.closest('.wallet-cell');
+    if (!cell || cell.querySelector('input.wallet-input')) return;
+    const empId = cell.getAttribute('data-emp-id');
+    const currentVal = cell.getAttribute('data-wallet') || '';
+
+    const display = cell.querySelector('.wallet-display');
+    if (display) display.style.display = 'none';
+    btnEl.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'wallet-input';
+    input.value = currentVal;
+    input.placeholder = '+992... или номер карты';
+    input.setAttribute('data-emp-id', empId);
+    input.onblur = () => saveWalletEdit(input);
+    input.onkeydown = (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        else if (e.key === 'Escape') {
+            e.preventDefault();
+            input.value = currentVal; // отменим
+            cancelWalletEdit(cell);
+        }
+    };
+    cell.appendChild(input);
+    input.focus();
+    input.select();
+}
+
+function cancelWalletEdit(cell) {
+    const input = cell.querySelector('input.wallet-input');
+    const display = cell.querySelector('.wallet-display');
+    const btn = cell.querySelector('.wallet-edit-btn');
+    if (input) input.remove();
+    if (display) display.style.display = '';
+    if (btn) btn.style.display = '';
+}
+
+async function saveWalletEdit(input) {
+    const cell = input.closest('.wallet-cell');
+    if (!cell) return;
+    const empId = input.getAttribute('data-emp-id');
+    const newVal = input.value.trim();
+    const emp = (appData.employees || []).find(e => e.id === empId);
+    if (!emp) { cancelWalletEdit(cell); return; }
+
+    const oldVal = emp.wallet || '';
+    if (newVal === oldVal) {
+        cancelWalletEdit(cell);
+        return;
+    }
+
+    emp.wallet = newVal;
+    cell.setAttribute('data-wallet', newVal);
+
+    try {
+        await saveData();
+        flashCell(cell, true);
+        if (typeof addToAuditLog === 'function') {
+            addToAuditLog('Изменено', 'Сотрудник', `${emp.name}: wallet → ${newVal || '(пусто)'}`);
+        }
+        loadEmployeesTable(); // перерисуем строку, чтобы появился чип
+    } catch (err) {
+        console.error(err);
+        emp.wallet = oldVal;
+        flashCell(cell, false);
+        alert('Не удалось сохранить кошелёк');
+        cancelWalletEdit(cell);
+    }
+}
+
+window.saveEmployeeField = saveEmployeeField;
+window.handleEditableKey = handleEditableKey;
+window.selectAllText = selectAllText;
+window.startWalletEdit = startWalletEdit;

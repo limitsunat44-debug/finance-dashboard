@@ -54,6 +54,7 @@
             <button class="nav-tab" data-tab="settings" onclick="switchTab('settings')">⚙️ Настройки</button>
             <button class="nav-tab" data-tab="suppliers">Поставщики</button>
             <button class="nav-tab" data-tab="purchases">Закупки</button>
+            <button class="nav-tab" data-tab="shipments" onclick="switchTab('shipments')">🚚 Товар в пути</button>
             
         </nav>
 
@@ -118,6 +119,18 @@
                     <span id="dashboardDailyHistoryChevron" class="dds-chevron">▼</span>
                 </button>
                 <div id="dashboardDailyHistory" class="dds-history-content" style="display:none;"></div>
+            </div>
+
+            <!-- Shipments in transit summary on dashboard -->
+            <div class="card" id="dashboardShipmentsCard">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">🚚 Товар в пути</h3>
+                    <span id="dashboardShipmentsCount" style="font-size:13px;color:var(--color-text-secondary);"></span>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
+                    Активные отправки из раздела <i>Товар в пути</i>.
+                </p>
+                <div id="dashboardShipmentsList" class="dashboard-shipments-list"></div>
             </div>
 
             <div class="card">
@@ -897,6 +910,82 @@
                             </ul>
                         </div>
                     </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Shipments Section (Товар в пути) -->
+        <section id="shipmentsSection" class="section">
+            <div class="section-tabs">
+                <button class="section-tab active" data-section="active-shipments" onclick="switchShipmentsTab('active-shipments')">🚚 Активные отправки</button>
+                <button class="section-tab" data-section="archived-shipments" onclick="switchShipmentsTab('archived-shipments')">✓ Архив (получено)</button>
+            </div>
+
+            <!-- Активные отправки -->
+            <div id="activeShipmentsTab" class="tab-content active">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+                        <div>
+                            <h3 style="margin:0;">📦 Товары в дороге</h3>
+                            <p style="color: var(--color-text-secondary); margin-top: 4px; font-size: 13px;">
+                                Учёт посылок, которые ещё не полностью получены. При частичном прибытии остаток считается «в пути».
+                            </p>
+                        </div>
+                        <button class="btn btn-primary" onclick="openShipmentForm()">➕ Новая отправка</button>
+                    </div>
+
+                    <!-- Форма создания отправки -->
+                    <div id="shipmentFormContainer" class="shipment-form-container" style="display:none;">
+                        <h4 id="shipmentFormTitle" style="margin:0 0 14px 0;">Новая отправка</h4>
+                        <input type="hidden" id="shipmentEditId" value="">
+                        <div class="shipment-form-grid">
+                            <div class="form-group">
+                                <label for="shipmentSendDate">Дата отправки *</label>
+                                <input type="date" id="shipmentSendDate">
+                            </div>
+                            <div class="form-group">
+                                <label for="shipmentCargo">Карго / перевозчик *</label>
+                                <input type="text" id="shipmentCargo" placeholder="Напр. Карго Лотос / SF Express">
+                            </div>
+                            <div class="form-group">
+                                <label for="shipmentPlacesTotal">Количество мест *</label>
+                                <input type="number" min="1" step="1" id="shipmentPlacesTotal" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="shipmentWeightTotal">Общий вес (кг, если известен)</label>
+                                <input type="number" min="0" step="0.01" id="shipmentWeightTotal" placeholder="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="shipmentSupplier">Поставщик / отправитель</label>
+                                <input type="text" id="shipmentSupplier" placeholder="Напр. Guangzhou Ortho Co.">
+                            </div>
+                            <div class="form-group">
+                                <label for="shipmentDeliveryCost">Стоимость доставки (TJS)</label>
+                                <input type="number" min="0" step="0.01" id="shipmentDeliveryCost" placeholder="0.00">
+                            </div>
+                            <div class="form-group form-group-full">
+                                <label for="shipmentContents">Что внутри коробок (необязательно)</label>
+                                <textarea id="shipmentContents" rows="3" placeholder="Напр. Стельки, ортезы, локтевые бандажи..."></textarea>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="saveShipment()">💾 Сохранить</button>
+                            <button class="btn btn-secondary" onclick="closeShipmentForm()">Отмена</button>
+                        </div>
+                    </div>
+
+                    <div id="activeShipmentsContainer" class="shipments-container"></div>
+                </div>
+            </div>
+
+            <!-- Архив (получено) -->
+            <div id="archivedShipmentsTab" class="tab-content">
+                <div class="card">
+                    <h3 style="margin-bottom:14px;">✓ Полученные отправки</h3>
+                    <p style="color: var(--color-text-secondary); margin:0 0 14px 0; font-size: 13px;">
+                        История полностью полученных отправок.
+                    </p>
+                    <div id="archivedShipmentsContainer" class="shipments-container"></div>
                 </div>
             </div>
         </section>

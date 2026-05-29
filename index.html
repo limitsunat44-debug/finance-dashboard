@@ -112,6 +112,12 @@
                     Данные из подраздела <i>Продажи → Ежедневные продажи</i>. Расчёт не зависит от продаж из Excel.
                 </p>
                 <div id="dashboardDailySales" class="daily-sales-dashboard"></div>
+
+                <button type="button" id="dashboardDailyHistoryToggle" class="dds-history-toggle" onclick="toggleDashboardDailyHistory()">
+                    <span id="dashboardDailyHistoryToggleText">📊 Показать историю за неделю</span>
+                    <span id="dashboardDailyHistoryChevron" class="dds-chevron">▼</span>
+                </button>
+                <div id="dashboardDailyHistory" class="dds-history-content" style="display:none;"></div>
             </div>
 
             <div class="card">

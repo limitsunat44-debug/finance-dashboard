@@ -240,6 +240,7 @@ async function loadData() {
         appData.fixedExpenseCategories = appData.fixedExpenseCategories || null;
         appData.fixedExpensesAutofillLog = appData.fixedExpensesAutofillLog || {};
         appData.dailySalesEntries = appData.dailySalesEntries || [];
+        appData.shipments = appData.shipments || [];
 
         console.log('✓ Data loaded successfully. Exchange rate:', appData.exchangeRate);
     } catch (error) {
@@ -650,6 +651,8 @@ function switchTab(tabName) {
     } else if (tabName === 'salaries') {
         populateEmployeeSelect();
     if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
+    } else if (tabName === 'shipments') {
+        if (typeof renderShipments === 'function') renderShipments();
     }
 }
 
@@ -706,6 +709,7 @@ function updateDashboard() {
 
     rolloverFixedExpensesIfNeeded().then(() => renderDashboardFixedExpenses());
     if (typeof renderDashboardDailySales === 'function') renderDashboardDailySales();
+    if (typeof renderDashboardShipments === 'function') renderDashboardShipments();
 
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     const reportFromDate = document.getElementById('reportFromDate');
@@ -3304,3 +3308,481 @@ function renderDashboardDailyHistory() {
 
 window.toggleDashboardDailyHistory = toggleDashboardDailyHistory;
 window.renderDashboardDailyHistory = renderDashboardDailyHistory;
+
+// ============================================================
+// ТОВАР В ПУТИ (Shipments)
+//   Модель: appData.shipments = [{
+//     id, sendDate, cargo, supplier, placesTotal, weightTotal,
+//     deliveryCost, contents,
+//     receipts: [{id, date, places, weightKg, note}],
+//     archived: false, createdAt
+//   }]
+//   Статусы:
+//     - in-transit : ничего не получено
+//     - partial    : часть получена, ещё в пути
+//     - received   : всё получено (archived = true)
+// ============================================================
+
+function shipmentReceivedPlaces(s) {
+    return (s.receipts || []).reduce((sum, r) => sum + (parseInt(r.places, 10) || 0), 0);
+}
+function shipmentReceivedWeight(s) {
+    return (s.receipts || []).reduce((sum, r) => sum + (parseFloat(r.weightKg) || 0), 0);
+}
+function shipmentRemainingPlaces(s) {
+    return Math.max(0, (parseInt(s.placesTotal, 10) || 0) - shipmentReceivedPlaces(s));
+}
+function shipmentStatus(s) {
+    if (s.archived) return 'received';
+    const total = parseInt(s.placesTotal, 10) || 0;
+    const recvd = shipmentReceivedPlaces(s);
+    if (recvd === 0) return 'in-transit';
+    if (recvd >= total) return 'received';
+    return 'partial';
+}
+function shipmentStatusLabel(status) {
+    if (status === 'received') return { text: '✓ Получено', cls: 'received', icon: '✓' };
+    if (status === 'partial')  return { text: '🚚 Частично получено', cls: 'partial', icon: '🚚' };
+    return { text: 'В пути', cls: 'in-transit', icon: '🚚' };
+}
+
+function formatShipmentDate(dateStr) {
+    if (!dateStr) return '—';
+    return formatDateRu(dateStr);
+}
+
+function openShipmentForm(editId = null) {
+    const container = document.getElementById('shipmentFormContainer');
+    const title     = document.getElementById('shipmentFormTitle');
+    const idField   = document.getElementById('shipmentEditId');
+    if (!container) return;
+
+    if (editId) {
+        const sh = (appData.shipments || []).find(x => x.id == editId);
+        if (!sh) return;
+        title.textContent = 'Редактировать отправку';
+        idField.value = sh.id;
+        document.getElementById('shipmentSendDate').value     = sh.sendDate || '';
+        document.getElementById('shipmentCargo').value        = sh.cargo || '';
+        document.getElementById('shipmentPlacesTotal').value  = sh.placesTotal || '';
+        document.getElementById('shipmentWeightTotal').value  = sh.weightTotal || '';
+        document.getElementById('shipmentSupplier').value     = sh.supplier || '';
+        document.getElementById('shipmentDeliveryCost').value = sh.deliveryCost || '';
+        document.getElementById('shipmentContents').value     = sh.contents || '';
+    } else {
+        title.textContent = 'Новая отправка';
+        idField.value = '';
+        const t = new Date();
+        const today = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+        document.getElementById('shipmentSendDate').value     = today;
+        document.getElementById('shipmentCargo').value        = '';
+        document.getElementById('shipmentPlacesTotal').value  = '';
+        document.getElementById('shipmentWeightTotal').value  = '';
+        document.getElementById('shipmentSupplier').value     = '';
+        document.getElementById('shipmentDeliveryCost').value = '';
+        document.getElementById('shipmentContents').value     = '';
+    }
+    container.style.display = 'block';
+    container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeShipmentForm() {
+    const container = document.getElementById('shipmentFormContainer');
+    if (container) container.style.display = 'none';
+}
+
+async function saveShipment() {
+    const editId       = document.getElementById('shipmentEditId').value;
+    const sendDate     = document.getElementById('shipmentSendDate').value;
+    const cargo        = document.getElementById('shipmentCargo').value.trim();
+    const placesTotal  = parseInt(document.getElementById('shipmentPlacesTotal').value, 10);
+    const weightTotal  = parseFloat(document.getElementById('shipmentWeightTotal').value) || 0;
+    const supplier     = document.getElementById('shipmentSupplier').value.trim();
+    const deliveryCost = parseFloat(document.getElementById('shipmentDeliveryCost').value) || 0;
+    const contents     = document.getElementById('shipmentContents').value.trim();
+
+    if (!sendDate)                  { alert('Укажите дату отправки'); return; }
+    if (!cargo)                     { alert('Укажите карго / перевозчика'); return; }
+    if (!placesTotal || placesTotal < 1) { alert('Укажите количество мест (минимум 1)'); return; }
+
+    appData.shipments = appData.shipments || [];
+
+    if (editId) {
+        const sh = appData.shipments.find(x => x.id == editId);
+        if (!sh) return;
+        sh.sendDate     = sendDate;
+        sh.cargo        = cargo;
+        sh.placesTotal  = placesTotal;
+        sh.weightTotal  = weightTotal;
+        sh.supplier     = supplier;
+        sh.deliveryCost = deliveryCost;
+        sh.contents     = contents;
+        sh.updatedAt    = new Date().toISOString();
+    } else {
+        appData.shipments.push({
+            id: Date.now() + Math.floor(Math.random() * 1000),
+            sendDate, cargo, supplier,
+            placesTotal, weightTotal, deliveryCost, contents,
+            receipts: [],
+            archived: false,
+            createdAt: new Date().toISOString()
+        });
+    }
+
+    try {
+        await saveData();
+        closeShipmentForm();
+        renderShipments();
+        if (typeof renderDashboardShipments === 'function') renderDashboardShipments();
+        if (typeof showSuccess === 'function') showSuccess('Отправка сохранена');
+    } catch (e) {
+        console.error(e);
+        alert('Не удалось сохранить отправку');
+    }
+}
+
+async function deleteShipment(id) {
+    if (!confirm('Удалить эту отправку? Это действие необратимо.')) return;
+    appData.shipments = (appData.shipments || []).filter(x => x.id != id);
+    try {
+        await saveData();
+        renderShipments();
+        if (typeof renderDashboardShipments === 'function') renderDashboardShipments();
+    } catch (e) {
+        console.error(e);
+        alert('Не удалось удалить отправку');
+    }
+}
+
+function toggleReceiveForm(id) {
+    const form = document.getElementById(`receiveForm_${id}`);
+    if (!form) return;
+    const isOpen = form.style.display !== 'none';
+    // Закрываем все остальные формы приёма
+    document.querySelectorAll('.receive-form').forEach(f => { f.style.display = 'none'; });
+    form.style.display = isOpen ? 'none' : 'block';
+    if (!isOpen) {
+        const placesInput = form.querySelector(`#receivePlaces_${id}`);
+        if (placesInput) {
+            placesInput.focus();
+            placesInput.select();
+        }
+    }
+}
+
+function toggleReceiptsHistory(id) {
+    const block = document.getElementById(`receiptsHistory_${id}`);
+    if (!block) return;
+    block.style.display = block.style.display === 'none' ? 'block' : 'none';
+}
+
+async function addReceipt(id) {
+    const placesInput = document.getElementById(`receivePlaces_${id}`);
+    const weightInput = document.getElementById(`receiveWeight_${id}`);
+    const dateInput   = document.getElementById(`receiveDate_${id}`);
+    const noteInput   = document.getElementById(`receiveNote_${id}`);
+    if (!placesInput || !dateInput) return;
+
+    const places = parseInt(placesInput.value, 10);
+    const weight = parseFloat(weightInput.value) || 0;
+    const date   = dateInput.value;
+    const note   = (noteInput && noteInput.value || '').trim();
+
+    if (!places || places < 1) { alert('Укажите количество прибывших мест'); return; }
+    if (!date)                 { alert('Укажите дату прибытия'); return; }
+
+    const sh = (appData.shipments || []).find(x => x.id == id);
+    if (!sh) return;
+
+    const remaining = shipmentRemainingPlaces(sh);
+    if (places > remaining) {
+        if (!confirm(`Указано ${places} мест, а в пути осталось только ${remaining}. Всё равно записать ${places}?`)) return;
+    }
+
+    sh.receipts = sh.receipts || [];
+    sh.receipts.push({
+        id: Date.now() + Math.floor(Math.random() * 1000),
+        date, places, weightKg: weight, note
+    });
+
+    // Если всё получено — архивировать автоматически
+    const totalRecvd = shipmentReceivedPlaces(sh);
+    if (totalRecvd >= (parseInt(sh.placesTotal, 10) || 0)) {
+        sh.archived = true;
+        sh.archivedAt = new Date().toISOString();
+    }
+
+    try {
+        await saveData();
+        renderShipments();
+        if (typeof renderDashboardShipments === 'function') renderDashboardShipments();
+    } catch (e) {
+        console.error(e);
+        alert('Не удалось записать приём');
+    }
+}
+
+async function deleteReceipt(shipmentId, receiptId) {
+    if (!confirm('Удалить эту запись о приёме?')) return;
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh) return;
+    sh.receipts = (sh.receipts || []).filter(r => r.id != receiptId);
+    // Если был архив, но теперь не всё получено — вернуть в активные
+    const totalRecvd = shipmentReceivedPlaces(sh);
+    if (totalRecvd < (parseInt(sh.placesTotal, 10) || 0)) {
+        sh.archived = false;
+        delete sh.archivedAt;
+    }
+    try {
+        await saveData();
+        renderShipments();
+        if (typeof renderDashboardShipments === 'function') renderDashboardShipments();
+    } catch (e) {
+        console.error(e);
+        alert('Не удалось удалить запись');
+    }
+}
+
+async function unarchiveShipment(id) {
+    const sh = (appData.shipments || []).find(x => x.id == id);
+    if (!sh) return;
+    if (!confirm('Вернуть отправку из архива в активные?')) return;
+    sh.archived = false;
+    delete sh.archivedAt;
+    try {
+        await saveData();
+        renderShipments();
+        if (typeof renderDashboardShipments === 'function') renderDashboardShipments();
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+function switchShipmentsTab(tabName) {
+    document.querySelectorAll('#shipmentsSection .tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('#shipmentsSection .section-tab').forEach(t => t.classList.remove('active'));
+    const map = { 'active-shipments': 'activeShipmentsTab', 'archived-shipments': 'archivedShipmentsTab' };
+    const tabEl = document.getElementById(map[tabName]);
+    if (tabEl) tabEl.classList.add('active');
+    const btn = document.querySelector(`#shipmentsSection .section-tab[data-section="${tabName}"]`);
+    if (btn) btn.classList.add('active');
+    renderShipments();
+}
+
+function renderShipmentCard(s) {
+    const status = shipmentStatus(s);
+    const statusInfo = shipmentStatusLabel(status);
+    const totalPlaces = parseInt(s.placesTotal, 10) || 0;
+    const recvdPlaces = shipmentReceivedPlaces(s);
+    const remPlaces   = shipmentRemainingPlaces(s);
+    const recvdWeight = shipmentReceivedWeight(s);
+    const totalWeight = parseFloat(s.weightTotal) || 0;
+    const percentage  = totalPlaces > 0 ? Math.min(100, (recvdPlaces / totalPlaces) * 100) : 0;
+
+    const statusIconHtml = status === 'in-transit' || status === 'partial'
+        ? `<span class="shipment-status-icon in-transit-truck">🚚</span>`
+        : `<span class="shipment-status-icon">✓</span>`;
+
+    const contentsHtml = s.contents ? `
+        <div class="shipment-contents">
+            <div class="label">Содержимое</div>
+            <div>${escapeHtml(s.contents)}</div>
+        </div>` : '';
+
+    const receiptsHtml = (s.receipts && s.receipts.length > 0) ? `
+        <div class="receipts-history" id="receiptsHistory_${s.id}" style="display:none;">
+            <h5>История приёмов (${s.receipts.length})</h5>
+            ${s.receipts.slice().sort((a,b) => (a.date || '').localeCompare(b.date || '')).map(r => `
+                <div class="receipt-event">
+                    <span class="date">${formatShipmentDate(r.date)}${r.note ? ` · ${escapeHtml(r.note)}` : ''}</span>
+                    <span class="qty">
+                        ${r.places} мест${r.weightKg > 0 ? ` · ${r.weightKg} кг` : ''}
+                        <button class="mini-del" onclick="deleteReceipt(${s.id}, ${r.id})" title="Удалить запись">×</button>
+                    </span>
+                </div>
+            `).join('')}
+        </div>` : '';
+
+    const receiveFormHtml = !s.archived ? `
+        <div class="receive-form" id="receiveForm_${s.id}" style="display:none;">
+            <h5>📥 Приём груза</h5>
+            <div class="receive-form-grid">
+                <div class="form-group">
+                    <label>Дата прибытия</label>
+                    <input type="date" id="receiveDate_${s.id}" value="${new Date().toISOString().slice(0,10)}">
+                </div>
+                <div class="form-group">
+                    <label>Прибыло мест (осталось: ${remPlaces})</label>
+                    <input type="number" min="1" step="1" id="receivePlaces_${s.id}" placeholder="0" value="${remPlaces}">
+                </div>
+                <div class="form-group">
+                    <label>Прибыло (кг)</label>
+                    <input type="number" min="0" step="0.01" id="receiveWeight_${s.id}" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>Комментарий (необяз.)</label>
+                    <input type="text" id="receiveNote_${s.id}" placeholder="Напр. 2 коробки повреждены">
+                </div>
+            </div>
+            <div class="receive-form-actions">
+                <button class="shipment-btn shipment-btn-receive" onclick="addReceipt(${s.id})">✓ Записать приём</button>
+                <button class="shipment-btn shipment-btn-history" onclick="toggleReceiveForm(${s.id})">Отмена</button>
+            </div>
+        </div>` : '';
+
+    const actionsHtml = s.archived ? `
+        <div class="shipment-actions">
+            ${(s.receipts && s.receipts.length > 0) ? `<button class="shipment-btn shipment-btn-history" onclick="toggleReceiptsHistory(${s.id})">📋 История приёмов</button>` : ''}
+            <button class="shipment-btn shipment-btn-edit" onclick="unarchiveShipment(${s.id})">↩️ Вернуть в активные</button>
+            <button class="shipment-btn shipment-btn-delete" onclick="deleteShipment(${s.id})">🗑 Удалить</button>
+        </div>` : `
+        <div class="shipment-actions">
+            <button class="shipment-btn shipment-btn-receive" onclick="toggleReceiveForm(${s.id})">📥 Принять груз</button>
+            ${(s.receipts && s.receipts.length > 0) ? `<button class="shipment-btn shipment-btn-history" onclick="toggleReceiptsHistory(${s.id})">📋 История (${s.receipts.length})</button>` : ''}
+            <button class="shipment-btn shipment-btn-edit" onclick="openShipmentForm(${s.id})">✎ Редактировать</button>
+            <button class="shipment-btn shipment-btn-delete" onclick="deleteShipment(${s.id})">🗑 Удалить</button>
+        </div>`;
+
+    return `
+        <div class="shipment-card status-${status}">
+            <div class="shipment-header">
+                <div>
+                    <div class="shipment-title">📦 ${escapeHtml(s.cargo || 'Без названия')}</div>
+                    <div class="shipment-date-info">
+                        Отправлено: ${formatShipmentDate(s.sendDate)}
+                        ${s.supplier ? ` · Поставщик: ${escapeHtml(s.supplier)}` : ''}
+                    </div>
+                </div>
+                <span class="shipment-status-badge ${statusInfo.cls}">
+                    ${statusIconHtml}
+                    ${statusInfo.text}
+                </span>
+            </div>
+            <div class="shipment-body">
+                <div class="shipment-info-grid">
+                    <div class="shipment-info-item">
+                        <div class="label">Мест всего</div>
+                        <div class="value">${totalPlaces}</div>
+                    </div>
+                    <div class="shipment-info-item">
+                        <div class="label">Получено</div>
+                        <div class="value received">${recvdPlaces}</div>
+                    </div>
+                    <div class="shipment-info-item">
+                        <div class="label">Ещё в пути</div>
+                        <div class="value ${remPlaces > 0 ? 'transit' : ''}">${remPlaces}</div>
+                    </div>
+                    <div class="shipment-info-item">
+                        <div class="label">Вес получено / всего</div>
+                        <div class="value">${recvdWeight ? recvdWeight.toFixed(2) : '0'} / ${totalWeight || '—'} кг</div>
+                    </div>
+                    ${s.deliveryCost > 0 ? `
+                    <div class="shipment-info-item">
+                        <div class="label">Стоимость доставки</div>
+                        <div class="value">${formatCurrency(s.deliveryCost)}</div>
+                    </div>` : ''}
+                </div>
+                <div class="shipment-progress">
+                    <div class="shipment-progress-bar">
+                        <div class="shipment-progress-fill" style="width: ${percentage}%;"></div>
+                    </div>
+                    <div class="shipment-progress-text">
+                        <span>${recvdPlaces} из ${totalPlaces} мест</span>
+                        <span>${percentage.toFixed(0)}%</span>
+                    </div>
+                </div>
+                ${contentsHtml}
+                ${receiptsHtml}
+                ${receiveFormHtml}
+                ${actionsHtml}
+            </div>
+        </div>`;
+}
+
+function renderShipments() {
+    const activeCont   = document.getElementById('activeShipmentsContainer');
+    const archivedCont = document.getElementById('archivedShipmentsContainer');
+    if (!activeCont && !archivedCont) return;
+
+    const all = appData.shipments || [];
+    // Сортировка: сначала по дате отправки (новые сверху)
+    const sortByDateDesc = (a, b) => (b.sendDate || '').localeCompare(a.sendDate || '');
+
+    const active   = all.filter(s => !s.archived).sort(sortByDateDesc);
+    const archived = all.filter(s =>  s.archived).sort(sortByDateDesc);
+
+    if (activeCont) {
+        if (active.length === 0) {
+            activeCont.innerHTML = `<div class="shipments-empty">📭 Нет активных отправок. Нажмите «Новая отправка», чтобы добавить груз.</div>`;
+        } else {
+            activeCont.innerHTML = active.map(renderShipmentCard).join('');
+        }
+    }
+    if (archivedCont) {
+        if (archived.length === 0) {
+            archivedCont.innerHTML = `<div class="shipments-empty">📭 Архив пуст. Полученные отправки будут появляться здесь.</div>`;
+        } else {
+            archivedCont.innerHTML = archived.map(renderShipmentCard).join('');
+        }
+    }
+}
+
+function renderDashboardShipments() {
+    const container = document.getElementById('dashboardShipmentsList');
+    const counter   = document.getElementById('dashboardShipmentsCount');
+    if (!container) return;
+
+    const active = (appData.shipments || []).filter(s => !s.archived);
+    if (counter) counter.textContent = `${active.length} ${pluralizeRu(active.length, ['отправка','отправки','отправок'])} в пути`;
+
+    if (active.length === 0) {
+        container.innerHTML = `<div class="dashboard-shipments-empty">📭 Сейчас нет активных отправок.</div>`;
+        return;
+    }
+
+    const sorted = active.slice().sort((a, b) => (b.sendDate || '').localeCompare(a.sendDate || ''));
+    container.innerHTML = sorted.map(s => {
+        const status = shipmentStatus(s);
+        const total = parseInt(s.placesTotal, 10) || 0;
+        const recvd = shipmentReceivedPlaces(s);
+        const rem   = shipmentRemainingPlaces(s);
+        const statusInfo = shipmentStatusLabel(status);
+        return `
+            <div class="dashboard-shipment-row ${status === 'partial' ? 'partial' : ''}" onclick="switchTab('shipments')" style="cursor:pointer;">
+                <div class="dsh-main">
+                    <span style="font-size:18px;">🚚</span>
+                    <div>
+                        <div class="dsh-cargo">${escapeHtml(s.cargo || 'Без названия')}</div>
+                        <div class="dsh-meta">
+                            Отправлено: ${formatShipmentDate(s.sendDate)}
+                            ${s.supplier ? ` · ${escapeHtml(s.supplier)}` : ''}
+                            · ${recvd}/${total} мест (${rem} ещё в пути)
+                        </div>
+                    </div>
+                </div>
+                <span class="dsh-status ${statusInfo.cls}">${statusInfo.text}</span>
+            </div>`;
+    }).join('');
+}
+
+function pluralizeRu(n, forms) {
+    // forms: ['отправка','отправки','отправок']
+    const mod10  = n % 10;
+    const mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return forms[0];
+    if ([2,3,4].includes(mod10) && ![12,13,14].includes(mod100)) return forms[1];
+    return forms[2];
+}
+
+window.openShipmentForm        = openShipmentForm;
+window.closeShipmentForm       = closeShipmentForm;
+window.saveShipment            = saveShipment;
+window.deleteShipment          = deleteShipment;
+window.toggleReceiveForm       = toggleReceiveForm;
+window.toggleReceiptsHistory   = toggleReceiptsHistory;
+window.addReceipt              = addReceipt;
+window.deleteReceipt           = deleteReceipt;
+window.unarchiveShipment       = unarchiveShipment;
+window.switchShipmentsTab      = switchShipmentsTab;
+window.renderShipments         = renderShipments;
+window.renderDashboardShipments = renderDashboardShipments;

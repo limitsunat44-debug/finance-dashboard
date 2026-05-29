@@ -2594,3 +2594,357 @@ tbody tr:hover {
 }
 .dds-history-summary.positive .value { color: #6ee7b7; }
 .dds-history-summary.negative .value { color: #fca5a5; }
+
+/* ============================================================
+   Товар в пути (Shipments)
+   ============================================================ */
+.shipment-form-container {
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+.shipment-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+.shipment-form-grid .form-group-full {
+    grid-column: 1 / -1;
+}
+
+.shipments-container {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.shipments-empty {
+    padding: 40px 20px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 14px;
+    background: #f9fafb;
+    border-radius: 10px;
+    border: 1px dashed #e2e8f0;
+}
+
+.shipment-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    background: #fff;
+    overflow: hidden;
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.shipment-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+.shipment-card.status-in-transit {
+    border-left: 5px solid #3b82f6;
+}
+.shipment-card.status-partial {
+    border-left: 5px solid #f59e0b;
+}
+.shipment-card.status-received {
+    border-left: 5px solid #10b981;
+    background: #f0fdf4;
+}
+
+.shipment-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 14px 18px;
+    background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+    border-bottom: 1px solid #f1f5f9;
+}
+.shipment-card.status-received .shipment-header {
+    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+}
+.shipment-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.shipment-status-badge.in-transit {
+    background: #dbeafe;
+    color: #1e40af;
+}
+.shipment-status-badge.partial {
+    background: #fef3c7;
+    color: #92400e;
+}
+.shipment-status-badge.received {
+    background: #d1fae5;
+    color: #065f46;
+}
+.shipment-status-icon {
+    font-size: 14px;
+}
+.shipment-status-icon.in-transit-truck {
+    animation: truckMove 2.5s ease-in-out infinite;
+    display: inline-block;
+}
+@keyframes truckMove {
+    0%, 100% { transform: translateX(0); }
+    50%      { transform: translateX(4px); }
+}
+
+.shipment-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+}
+.shipment-date-info {
+    font-size: 12px;
+    color: #64748b;
+    margin-top: 2px;
+}
+
+.shipment-body {
+    padding: 16px 18px;
+}
+.shipment-info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px 18px;
+    margin-bottom: 14px;
+}
+.shipment-info-item {
+    font-size: 13px;
+}
+.shipment-info-item .label {
+    color: #94a3b8;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 2px;
+}
+.shipment-info-item .value {
+    color: #1e293b;
+    font-weight: 600;
+    font-size: 14px;
+}
+.shipment-info-item .value.transit { color: #1d4ed8; }
+.shipment-info-item .value.received { color: #059669; }
+
+.shipment-contents {
+    padding: 10px 14px;
+    background: #f8fafc;
+    border-radius: 8px;
+    color: #475569;
+    font-size: 13px;
+    margin-bottom: 14px;
+    border-left: 3px solid #cbd5e1;
+}
+.shipment-contents .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    letter-spacing: 0.4px;
+}
+
+.shipment-progress {
+    margin: 8px 0 14px;
+}
+.shipment-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 999px;
+    overflow: hidden;
+}
+.shipment-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #6366f1);
+    transition: width 0.4s ease;
+    border-radius: 999px;
+}
+.shipment-card.status-partial .shipment-progress-fill {
+    background: linear-gradient(90deg, #f59e0b, #ef4444 95%);
+}
+.shipment-card.status-received .shipment-progress-fill {
+    background: linear-gradient(90deg, #10b981, #059669);
+}
+.shipment-progress-text {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #64748b;
+}
+
+.shipment-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 12px;
+    border-top: 1px solid #f1f5f9;
+}
+.shipment-btn {
+    border: none;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.shipment-btn-receive {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #fff;
+}
+.shipment-btn-receive:hover { transform: translateY(-1px); box-shadow: 0 3px 8px rgba(16,185,129,0.3); }
+.shipment-btn-edit {
+    background: #e0e7ff;
+    color: #4338ca;
+}
+.shipment-btn-edit:hover { background: #c7d2fe; }
+.shipment-btn-delete {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+.shipment-btn-delete:hover { background: #fecaca; }
+.shipment-btn-history {
+    background: #f1f5f9;
+    color: #334155;
+}
+.shipment-btn-history:hover { background: #e2e8f0; }
+
+/* Inline form for receiving cargo */
+.receive-form {
+    margin-top: 12px;
+    padding: 14px 16px;
+    background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%);
+    border: 1px solid #a7f3d0;
+    border-radius: 10px;
+    animation: ddsExpand 0.25s ease-out;
+}
+.receive-form h5 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #065f46;
+}
+.receive-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+}
+.receive-form .form-group label {
+    font-size: 12px;
+    color: #065f46;
+}
+.receive-form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+}
+
+/* Receipts history (events) */
+.receipts-history {
+    margin-top: 10px;
+    padding: 12px 14px;
+    background: #fafbfc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 12px;
+    animation: ddsExpand 0.25s ease-out;
+}
+.receipts-history h5 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+.receipt-event {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px dashed #e2e8f0;
+    color: #334155;
+}
+.receipt-event:last-child { border-bottom: none; }
+.receipt-event .date { color: #64748b; }
+.receipt-event .qty { font-weight: 600; }
+.receipt-event button.mini-del {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 6px;
+}
+
+/* Dashboard mini-list */
+.dashboard-shipments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+.dashboard-shipment-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border-left: 4px solid #3b82f6;
+    transition: background 0.15s ease;
+}
+.dashboard-shipment-row:hover { background: #f1f5f9; }
+.dashboard-shipment-row.partial { border-left-color: #f59e0b; background: #fffbeb; }
+.dashboard-shipment-row .dsh-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.dashboard-shipment-row .dsh-cargo {
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 14px;
+}
+.dashboard-shipment-row .dsh-meta {
+    font-size: 12px;
+    color: #64748b;
+}
+.dashboard-shipment-row .dsh-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 999px;
+}
+.dashboard-shipment-row .dsh-status.in-transit {
+    background: #dbeafe;
+    color: #1e40af;
+}
+.dashboard-shipment-row .dsh-status.partial {
+    background: #fef3c7;
+    color: #92400e;
+}
+.dashboard-shipments-empty {
+    padding: 20px;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 13px;
+    background: #f9fafb;
+    border-radius: 10px;
+    border: 1px dashed #e2e8f0;
+}

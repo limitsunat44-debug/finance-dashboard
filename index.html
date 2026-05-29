@@ -186,6 +186,7 @@
             <div class="section-tabs">
                 <button class="section-tab active" data-section="import">Импорт XLSX</button>
                 <button class="section-tab" data-section="manual">Ручной ввод</button>
+                <button class="section-tab" data-section="daily" onclick="renderDailySales()">Ежедневные продажи</button>
             </div>
 
             <!-- Import Tab -->
@@ -262,6 +263,31 @@
                             <tbody></tbody>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- Daily Sales Tab -->
+            <div id="dailyTab" class="tab-content">
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                        <h3 style="margin: 0;">📅 Ежедневные продажи и чистая прибыль</h3>
+                        <div class="form-group" style="margin: 0;">
+                            <label for="dailySalesDate" style="font-size: 13px;">Дата</label>
+                            <input type="date" id="dailySalesDate" onchange="renderDailySales()">
+                        </div>
+                    </div>
+                    <p style="color: var(--color-text-secondary); margin-top: 8px; font-size: 13px;">
+                        Формула: <b>Прибыль дня</b> = (Выручка ÷ 2) − Доля постоянных затрат за день.
+                        Себестоимость товара = 50% от выручки.
+                        Постоянные затраты берутся из раздела <i>Расходы → Постоянные затраты</i> (за месяц ÷ дней в месяце).
+                    </p>
+                </div>
+
+                <div id="dailySalesContainer" class="daily-sales-container"></div>
+
+                <div class="card" id="dailySalesTotalCard">
+                    <h3 style="margin-bottom: 12px;">📊 Итоги дня по всем салонам</h3>
+                    <div id="dailySalesTotals" class="daily-sales-totals"></div>
                 </div>
             </div>
         </section>

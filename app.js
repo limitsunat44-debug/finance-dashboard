@@ -239,6 +239,7 @@ async function loadData() {
         appData.fixedExpenses = appData.fixedExpenses || [];
         appData.fixedExpenseCategories = appData.fixedExpenseCategories || null;
         appData.fixedExpensesAutofillLog = appData.fixedExpensesAutofillLog || {};
+        appData.dailySalesEntries = appData.dailySalesEntries || [];
 
         console.log('✓ Data loaded successfully. Exchange rate:', appData.exchangeRate);
     } catch (error) {
@@ -2758,3 +2759,238 @@ window.saveEmployeeField = saveEmployeeField;
 window.handleEditableKey = handleEditableKey;
 window.selectAllText = selectAllText;
 window.startWalletEdit = startWalletEdit;
+
+// ============================================================
+// ЕЖЕДНЕВНЫЕ ПРОДАЖИ (Daily Sales)
+// Формула: Прибыль = (Выручка / 2) - (Постоянные затраты салона за месяц / дней в месяце)
+// ============================================================
+
+function getDaysInMonth(ym) {
+    // ym: 'YYYY-MM'
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m, 0).getDate();
+}
+
+function ymFromDateStr(dateStr) {
+    // dateStr: 'YYYY-MM-DD' -> 'YYYY-MM'
+    if (!dateStr || typeof dateStr !== 'string') return getCurrentYM();
+    return dateStr.slice(0, 7);
+}
+
+function getDailyFixedShare(salon, dateStr) {
+    const ym = ymFromDateStr(dateStr);
+    const monthlyFixed = sumFixedExpensesBySalon(salon, ym);
+    const days = getDaysInMonth(ym) || 30;
+    return monthlyFixed / days;
+}
+
+function findDailySalesEntry(salon, dateStr) {
+    return (appData.dailySalesEntries || []).find(e => e.salon === salon && e.date === dateStr);
+}
+
+function renderDailySales() {
+    const dateInput = document.getElementById('dailySalesDate');
+    if (!dateInput) return;
+    if (!dateInput.value) {
+        const t = new Date();
+        dateInput.value = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+    }
+    const dateStr = dateInput.value;
+    const container = document.getElementById('dailySalesContainer');
+    if (!container) return;
+
+    container.innerHTML = '';
+
+    SALONS.forEach(salon => {
+        const entry = findDailySalesEntry(salon, dateStr);
+        const revenue = entry ? parseFloat(entry.revenue) || 0 : 0;
+        const fixedShare = getDailyFixedShare(salon, dateStr);
+        const cogs = revenue / 2;
+        const profit = (revenue / 2) - fixedShare;
+
+        const profitClass = revenue === 0 ? 'neutral' : (profit >= 0 ? 'positive' : 'negative');
+        const profitSign = profit >= 0 ? '+' : '';
+        const safeId = salon.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_');
+
+        const card = document.createElement('div');
+        card.className = 'ds-salon-card';
+        card.innerHTML = `
+            <div class="ds-salon-header">
+                <span>🏪 ${escapeHtml(salon)}</span>
+            </div>
+            <div class="ds-salon-body">
+                <div class="ds-input-group">
+                    <div class="form-group">
+                        <label for="dsRevenue_${safeId}">Выручка за день (TJS)</label>
+                        <input type="number" step="0.01" min="0"
+                            id="dsRevenue_${safeId}"
+                            value="${revenue || ''}"
+                            placeholder="0.00"
+                            oninput="updateDailySalesPreview('${escapeHtml(salon)}', '${dateStr}', this.value)"
+                            onchange="saveDailySalesEntry('${escapeHtml(salon)}', '${dateStr}', this.value)">
+                    </div>
+                </div>
+                <div class="ds-breakdown" id="dsBreakdown_${safeId}">
+                    <div class="ds-row ds-row-revenue">
+                        <span>Выручка</span>
+                        <span>${formatCurrency(revenue)}</span>
+                    </div>
+                    <div class="ds-row ds-row-cogs">
+                        <span>− Себестоимость товара (50%)</span>
+                        <span>−${formatCurrency(cogs)}</span>
+                    </div>
+                    <div class="ds-row ds-row-fixed">
+                        <span>− Постоянные затраты за день</span>
+                        <span>−${formatCurrency(fixedShare)}</span>
+                    </div>
+                    <div class="ds-row-divider"></div>
+                    <div class="ds-row ds-row-profit ${profitClass}">
+                        <span>Чистая прибыль дня</span>
+                        <span>${profitSign}${formatCurrency(profit)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+
+    renderDailySalesTotals(dateStr);
+}
+
+function updateDailySalesPreview(salon, dateStr, rawValue) {
+    // Live preview without saving — updates breakdown numbers as user types
+    const revenue = Math.max(0, parseFloat(rawValue) || 0);
+    const fixedShare = getDailyFixedShare(salon, dateStr);
+    const cogs = revenue / 2;
+    const profit = (revenue / 2) - fixedShare;
+    const safeId = salon.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_');
+    const breakdown = document.getElementById(`dsBreakdown_${safeId}`);
+    if (!breakdown) return;
+
+    const profitClass = revenue === 0 ? 'neutral' : (profit >= 0 ? 'positive' : 'negative');
+    const profitSign = profit >= 0 ? '+' : '';
+    breakdown.innerHTML = `
+        <div class="ds-row ds-row-revenue">
+            <span>Выручка</span>
+            <span>${formatCurrency(revenue)}</span>
+        </div>
+        <div class="ds-row ds-row-cogs">
+            <span>− Себестоимость товара (50%)</span>
+            <span>−${formatCurrency(cogs)}</span>
+        </div>
+        <div class="ds-row ds-row-fixed">
+            <span>− Постоянные затраты за день</span>
+            <span>−${formatCurrency(fixedShare)}</span>
+        </div>
+        <div class="ds-row-divider"></div>
+        <div class="ds-row ds-row-profit ${profitClass}">
+            <span>Чистая прибыль дня</span>
+            <span>${profitSign}${formatCurrency(profit)}</span>
+        </div>
+    `;
+    // also live-update totals
+    renderDailySalesTotals(dateStr, { [salon]: revenue });
+}
+
+async function saveDailySalesEntry(salon, dateStr, rawValue) {
+    const revenue = Math.max(0, parseFloat(rawValue) || 0);
+    const fixedShare = getDailyFixedShare(salon, dateStr);
+    const cogs = revenue / 2;
+    const profit = (revenue / 2) - fixedShare;
+
+    appData.dailySalesEntries = appData.dailySalesEntries || [];
+    const existing = appData.dailySalesEntries.find(e => e.salon === salon && e.date === dateStr);
+
+    if (revenue === 0 && existing) {
+        // Remove zero entries to keep data clean
+        appData.dailySalesEntries = appData.dailySalesEntries.filter(e => !(e.salon === salon && e.date === dateStr));
+    } else if (revenue > 0) {
+        if (existing) {
+            existing.revenue = revenue;
+            existing.cogs = cogs;
+            existing.fixedShare = fixedShare;
+            existing.profit = profit;
+            existing.updatedAt = new Date().toISOString();
+        } else {
+            appData.dailySalesEntries.push({
+                id: Date.now() + Math.floor(Math.random() * 1000),
+                salon,
+                date: dateStr,
+                revenue,
+                cogs,
+                fixedShare,
+                profit,
+                createdAt: new Date().toISOString()
+            });
+        }
+    } else {
+        // revenue=0 and no existing entry: nothing to save
+        return;
+    }
+
+    try {
+        await saveData();
+        // Subtle visual confirmation
+        const safeId = salon.replace(/[^a-zA-Zа-яА-Я0-9]/g, '_');
+        const input = document.getElementById(`dsRevenue_${safeId}`);
+        if (input) {
+            const orig = input.style.borderColor;
+            input.style.borderColor = '#10b981';
+            setTimeout(() => { input.style.borderColor = orig; }, 700);
+        }
+        renderDailySalesTotals(dateStr);
+    } catch (e) {
+        console.error('Ошибка сохранения ежедневной продажи:', e);
+        if (typeof showError === 'function') showError('Не удалось сохранить запись');
+    }
+}
+
+function renderDailySalesTotals(dateStr, overrides = {}) {
+    const container = document.getElementById('dailySalesTotals');
+    if (!container) return;
+
+    let totalRevenue = 0;
+    let totalCogs = 0;
+    let totalFixed = 0;
+    let totalProfit = 0;
+
+    SALONS.forEach(salon => {
+        const entry = findDailySalesEntry(salon, dateStr);
+        const revenue = (salon in overrides)
+            ? (parseFloat(overrides[salon]) || 0)
+            : (entry ? parseFloat(entry.revenue) || 0 : 0);
+        const fixedShare = getDailyFixedShare(salon, dateStr);
+        const cogs = revenue / 2;
+        const profit = (revenue / 2) - fixedShare;
+        totalRevenue += revenue;
+        totalCogs += cogs;
+        totalFixed += fixedShare;
+        totalProfit += profit;
+    });
+
+    const profitClass = totalRevenue === 0 ? '' : (totalProfit >= 0 ? 'profit-positive' : 'profit-negative');
+    const profitSign = totalProfit >= 0 ? '+' : '';
+
+    container.innerHTML = `
+        <div class="ds-total-tile">
+            <div class="ds-total-label">Общая выручка</div>
+            <div class="ds-total-value">${formatCurrency(totalRevenue)}</div>
+        </div>
+        <div class="ds-total-tile">
+            <div class="ds-total-label">Себестоимость (50%)</div>
+            <div class="ds-total-value">−${formatCurrency(totalCogs)}</div>
+        </div>
+        <div class="ds-total-tile">
+            <div class="ds-total-label">Постоянные затраты за день</div>
+            <div class="ds-total-value">−${formatCurrency(totalFixed)}</div>
+        </div>
+        <div class="ds-total-tile ${profitClass}">
+            <div class="ds-total-label">Чистая прибыль дня</div>
+            <div class="ds-total-value">${profitSign}${formatCurrency(totalProfit)}</div>
+        </div>
+    `;
+}
+
+window.renderDailySales = renderDailySales;
+window.updateDailySalesPreview = updateDailySalesPreview;
+window.saveDailySalesEntry = saveDailySalesEntry;

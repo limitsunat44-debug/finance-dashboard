@@ -3127,3 +3127,180 @@ function renderDashboardDailySales() {
 }
 
 window.renderDashboardDailySales = renderDashboardDailySales;
+
+// ============================================================
+// Дашборд: история ежедневных продаж за последнюю неделю (аккордеон)
+// ============================================================
+
+function dateToStr(date) {
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+}
+
+function getLastNDaysStrs(n) {
+    // Возвращает список из N последних прошедших дней (без сегодня), начиная со вчера
+    const result = [];
+    const today = new Date();
+    for (let i = 1; i <= n; i++) {
+        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+        result.push(dateToStr(d));
+    }
+    return result; // от вчера (i=1) до i=N
+}
+
+function getDayNameShortRu(dateStr) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    const names = ['вс','пн','вт','ср','чт','пт','сб'];
+    return names[date.getDay()];
+}
+
+function toggleDashboardDailyHistory() {
+    const btn = document.getElementById('dashboardDailyHistoryToggle');
+    const text = document.getElementById('dashboardDailyHistoryToggleText');
+    const content = document.getElementById('dashboardDailyHistory');
+    if (!btn || !content || !text) return;
+
+    const isOpen = content.style.display !== 'none';
+    if (isOpen) {
+        content.style.display = 'none';
+        btn.classList.remove('expanded');
+        text.textContent = '📊 Показать историю за неделю';
+    } else {
+        renderDashboardDailyHistory();
+        content.style.display = 'block';
+        btn.classList.add('expanded');
+        text.textContent = '📊 Скрыть историю';
+    }
+}
+
+function renderDashboardDailyHistory() {
+    const container = document.getElementById('dashboardDailyHistory');
+    if (!container) return;
+
+    const days = getLastNDaysStrs(7); // вчера + 6 дней до него = 7 дней
+
+    let rowsHtml = '';
+    let weekTotalRevenue = 0;
+    let weekTotalProfit = 0;
+    let hasAnyData = false;
+
+    days.forEach(dateStr => {
+        let dayRevenue = 0;
+        let dayProfit = 0;
+        let dayHasData = false;
+        const salonRows = [];
+
+        SALONS.forEach(salon => {
+            const entry = findDailySalesEntry(salon, dateStr);
+            const revenue = entry ? parseFloat(entry.revenue) || 0 : 0;
+            const fixedShare = getDailyFixedShare(salon, dateStr);
+            const profit = (revenue / 2) - fixedShare;
+
+            if (revenue > 0) {
+                dayHasData = true;
+                hasAnyData = true;
+                dayRevenue += revenue;
+                dayProfit += profit;
+            }
+
+            let profitClass, profitDisplay;
+            if (revenue === 0) {
+                profitClass = 'empty';
+                profitDisplay = '—';
+            } else if (profit >= 0) {
+                profitClass = 'positive';
+                profitDisplay = `+${formatCurrency(profit)}`;
+            } else {
+                profitClass = 'negative';
+                profitDisplay = `−${formatCurrency(Math.abs(profit))}`;
+            }
+
+            salonRows.push({ salon, revenue, profit, profitClass, profitDisplay });
+        });
+
+        const dayLabel = formatDateRu(dateStr);
+        const dayName = getDayNameShortRu(dateStr);
+
+        // Строки по салонам (первая строка в дне — с датой, остальные пустые rowspan)
+        salonRows.forEach((r, idx) => {
+            const dateCell = idx === 0
+                ? `<td class="date-cell" rowspan="${salonRows.length + 1}">${dayLabel}<br><span class="day-label">${dayName}</span></td>`
+                : '';
+            rowsHtml += `
+                <tr>
+                    ${dateCell}
+                    <td class="salon-cell">${escapeHtml(r.salon)}</td>
+                    <td class="revenue-cell">${r.revenue > 0 ? formatCurrency(r.revenue) : '—'}</td>
+                    <td class="profit-cell ${r.profitClass}">${r.profitDisplay}</td>
+                </tr>`;
+        });
+
+        // Строка-итог за день
+        let dayTotalClass, dayTotalDisplay;
+        if (!dayHasData) {
+            dayTotalClass = 'empty';
+            dayTotalDisplay = '—';
+        } else if (dayProfit >= 0) {
+            dayTotalClass = 'positive';
+            dayTotalDisplay = `▲ +${formatCurrency(dayProfit)}`;
+        } else {
+            dayTotalClass = 'negative';
+            dayTotalDisplay = `▼ −${formatCurrency(Math.abs(dayProfit))}`;
+        }
+        rowsHtml += `
+            <tr class="day-total">
+                <td class="salon-cell">Итого за день</td>
+                <td class="revenue-cell">${dayHasData ? formatCurrency(dayRevenue) : '—'}</td>
+                <td class="profit-cell ${dayTotalClass}">${dayTotalDisplay}</td>
+            </tr>`;
+
+        weekTotalRevenue += dayRevenue;
+        weekTotalProfit += dayProfit;
+    });
+
+    let tableHtml;
+    if (!hasAnyData) {
+        tableHtml = `<div class="dds-history-empty">Нет данных за последнюю неделю. Добавьте выручку в подразделе Продажи → Ежедневные продажи.</div>`;
+    } else {
+        tableHtml = `
+            <div class="dds-history-table-wrap">
+                <table class="dds-history-table">
+                    <thead>
+                        <tr>
+                            <th>Дата</th>
+                            <th>Салон</th>
+                            <th style="text-align:right;">Выручка</th>
+                            <th style="text-align:right;">Прибыль</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rowsHtml}</tbody>
+                </table>
+            </div>`;
+    }
+
+    // Итог за неделю
+    let weekSummaryHtml = '';
+    if (hasAnyData) {
+        let summaryClass, summaryValue;
+        if (weekTotalProfit >= 0) {
+            summaryClass = 'positive';
+            summaryValue = `▲ +${formatCurrency(weekTotalProfit)} — в плюсе`;
+        } else {
+            summaryClass = 'negative';
+            summaryValue = `▼ −${formatCurrency(Math.abs(weekTotalProfit))} — в минусе`;
+        }
+        weekSummaryHtml = `
+            <div class="dds-history-summary ${summaryClass}">
+                <div>
+                    <div class="label">Итого за 7 дней (все салоны)</div>
+                    <div style="font-size:12px;opacity:0.75;margin-top:2px;">Общая выручка: ${formatCurrency(weekTotalRevenue)}</div>
+                </div>
+                <div class="value">${summaryValue}</div>
+            </div>`;
+    }
+
+    container.innerHTML = tableHtml + weekSummaryHtml;
+}
+
+window.toggleDashboardDailyHistory = toggleDashboardDailyHistory;
+window.renderDashboardDailyHistory = renderDashboardDailyHistory;

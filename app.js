@@ -648,6 +648,7 @@ function switchTab(tabName) {
         loadSupplierPaymentsHistory();
     } else if (tabName === 'salaries') {
         populateEmployeeSelect();
+    if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
     }
 }
 
@@ -1060,6 +1061,8 @@ async function saveEmployee() {
     const position = document.getElementById('employeePosition').value;
     const salary = parseFloat(document.getElementById('employeeSalary').value);
     const commission = parseFloat(document.getElementById('employeeCommission').value);
+    const walletEl = document.getElementById('employeeWallet');
+    const wallet = walletEl ? walletEl.value.trim() : '';
 
     if (!name || !position || isNaN(salary) || isNaN(commission) || salary < 0 || commission < 0 || commission > 100) {
         alert('Пожалуйста, заполните все поля корректно.');
@@ -1072,6 +1075,7 @@ async function saveEmployee() {
         position: position,
         salary: salary,
         commission: commission,
+        wallet: wallet,
         addedBy: currentUser,
         timestamp: new Date().toISOString()
     };
@@ -1083,25 +1087,34 @@ async function saveEmployee() {
     hideModal();
     loadEmployeesTable();
     populateEmployeeSelect();
+    if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
     alert('Сотрудник добавлен!');
 }
 
 function loadEmployeesTable() {
     const tbody = document.querySelector('#employeesTable tbody');
-    tbody.innerHTML = appData.employees.map(employee => `
+    tbody.innerHTML = appData.employees.map(employee => {
+        const walletHtml = employee.wallet
+            ? `<span class="wallet-chip" onclick="copyWalletToClipboard(this, '${escapeHtml(employee.wallet).replace(/'/g, "\\'")}')" title="Нажмите, чтобы скопировать">
+                <span class="wallet-chip-text">${escapeHtml(employee.wallet)}</span>
+                <span class="wallet-chip-icon">📋</span>
+               </span>`
+            : `<span class="wallet-empty">не указан</span>`;
+        return `
         <tr>
             <td>${employee.id.slice(-8)}</td>
-            <td>${employee.name}</td>
-            <td>${employee.position}</td>
+            <td>${escapeHtml(employee.name)}</td>
+            <td>${escapeHtml(employee.position)}</td>
             <td>${formatCurrency(employee.salary)}</td>
             <td>${employee.commission}%</td>
+            <td>${walletHtml}</td>
             <td>
                 <div class="action-buttons">
                     <button class="btn btn-danger btn-sm" onclick="deleteEmployee('${employee.id}')">Удалить</button>
                 </div>
             </td>
-        </tr>
-    `).join('');
+        </tr>`;
+    }).join('');
 }
 
 function populateEmployeeSelect() {
@@ -1132,6 +1145,7 @@ async function deleteEmployee(employeeId) {
 
     loadEmployeesTable();
     populateEmployeeSelect();
+    if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
     alert('Сотрудник удалён.');
 }
 
@@ -1886,6 +1900,7 @@ function loadAllTables() {
     loadPurchasesTable();
     loadSupplierPaymentsHistory();
     populateEmployeeSelect();
+    if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
     populateSupplierSelects();
     updateDebtSummary();
 }
@@ -2397,3 +2412,153 @@ function escapeHtml(s) {
 function escapeAttr(s) {
     return String(s == null ? '' : s).replace(/[^a-z0-9А-яЁё_-]/gi, '_');
 }
+
+// ═════════════════════════════════════════════════════════════
+// SALARY CALCULATOR — Калькулятор процента от оборота
+// ═════════════════════════════════════════════════════════════
+
+function populateCalcEmployeeSelect() {
+    const select = document.getElementById('calcEmployee');
+    if (!select) return;
+    const current = select.value;
+    const emps = (appData.employees || []);
+    select.innerHTML = '<option value="">— выберите сотрудника —</option>' +
+        emps.map(e => {
+            const pct = (e.commission != null) ? ` · ${e.commission}%` : '';
+            return `<option value="${e.id}" data-commission="${e.commission || ''}">${escapeHtml(e.name)} (${escapeHtml(e.position || '')})${pct}</option>`;
+        }).join('');
+    if (current) select.value = current;
+}
+
+function onCalcEmployeeChange() {
+    const select = document.getElementById('calcEmployee');
+    const opt = select.options[select.selectedIndex];
+    const commissionAttr = opt ? opt.getAttribute('data-commission') : '';
+    const pctInput = document.getElementById('calcPercent');
+    // Если процент не введён пользователем — подставим из карточки сотрудника
+    if (pctInput && !pctInput.value && commissionAttr) {
+        pctInput.value = commissionAttr;
+    }
+    recalcSalaryPercent();
+}
+
+function recalcSalaryPercent() {
+    const turnover = parseFloat(document.getElementById('calcTurnover').value);
+    const percent = parseFloat(document.getElementById('calcPercent').value);
+    const select = document.getElementById('calcEmployee');
+    const empId = select ? select.value : '';
+    const empObj = empId ? (appData.employees || []).find(e => e.id === empId) : null;
+    const empName = empObj ? empObj.name : '';
+
+    const box = document.getElementById('calcResultBox');
+    if (isNaN(turnover) || isNaN(percent) || turnover <= 0 || percent < 0) {
+        box.style.display = 'none';
+        return;
+    }
+    const amount = turnover * percent / 100;
+    box.style.display = 'block';
+
+    const txt = document.getElementById('calcResultText');
+    if (empName) {
+        txt.innerHTML = `${percent}% от оборота <b>${formatCurrency(turnover)}</b><br>для сотрудника <b>${escapeHtml(empName)}</b> составляет:`;
+    } else {
+        txt.innerHTML = `${percent}% от оборота <b>${formatCurrency(turnover)}</b> составляет:`;
+    }
+    document.getElementById('calcResultAmount').textContent = formatCurrency(amount);
+
+    // Сохраняем посчитанные значения для других кнопок
+    box.dataset.amount = amount;
+    box.dataset.empName = empName;
+    box.dataset.empId = empId || '';
+}
+
+async function copyCalcResult() {
+    const box = document.getElementById('calcResultBox');
+    const amount = parseFloat(box.dataset.amount || 0);
+    const empName = box.dataset.empName || '';
+    const turnover = parseFloat(document.getElementById('calcTurnover').value);
+    const percent = parseFloat(document.getElementById('calcPercent').value);
+
+    const text = empName
+        ? `Процент от продаж ${empName} составляет ${formatCurrency(amount)} (${percent}% от ${formatCurrency(turnover)})`
+        : `${percent}% от ${formatCurrency(turnover)} = ${formatCurrency(amount)}`;
+
+    try {
+        await navigator.clipboard.writeText(text);
+        if (typeof showSuccess === 'function') showSuccess('Скопировано в буфер обмена');
+        else alert('Скопировано: ' + text);
+    } catch (err) {
+        // fallback
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); alert('Скопировано'); } catch(e) { alert(text); }
+        document.body.removeChild(ta);
+    }
+}
+
+function applyCalcAsPayment() {
+    const box = document.getElementById('calcResultBox');
+    const amount = parseFloat(box.dataset.amount || 0);
+    const empId = box.dataset.empId || '';
+
+    if (!empId) { alert('Выберите сотрудника в калькуляторе'); return; }
+    if (!amount || amount <= 0) { alert('Введите корректные данные в калькуляторе'); return; }
+
+    // Переключаемся на вкладку выплат
+    if (typeof switchSectionTab === 'function') {
+        switchSectionTab('salaries', 'payments');
+    }
+
+    // Заполняем форму выплаты
+    setTimeout(() => {
+        const empSel = document.getElementById('employeeSelect');
+        const typeSel = document.getElementById('paymentType');
+        const amtInp = document.getElementById('paymentAmount');
+        const dateInp = document.getElementById('paymentDate');
+        if (empSel) empSel.value = empId;
+        if (typeSel) typeSel.value = 'commission';
+        if (amtInp) amtInp.value = amount.toFixed(2);
+        if (dateInp && !dateInp.value) {
+            const t = new Date();
+            dateInp.value = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+        }
+        if (amtInp) amtInp.focus();
+    }, 100);
+}
+
+// ═════════════════════════════════════════════════════════════
+// WALLET COPY — копирование номера кошелька одним кликом
+// ═════════════════════════════════════════════════════════════
+async function copyWalletToClipboard(chipEl, walletText) {
+    try {
+        await navigator.clipboard.writeText(walletText);
+    } catch (err) {
+        const ta = document.createElement('textarea');
+        ta.value = walletText;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch(e) {}
+        document.body.removeChild(ta);
+    }
+    // Визуальный фидбек
+    if (chipEl) {
+        const textSpan = chipEl.querySelector('.wallet-chip-text');
+        const original = textSpan ? textSpan.textContent : walletText;
+        chipEl.classList.add('copied');
+        if (textSpan) textSpan.textContent = '✓ Скопировано';
+        setTimeout(() => {
+            chipEl.classList.remove('copied');
+            if (textSpan) textSpan.textContent = original;
+        }, 1500);
+    }
+}
+
+// Экспортируем на window для inline-обработчиков
+window.recalcSalaryPercent = recalcSalaryPercent;
+window.onCalcEmployeeChange = onCalcEmployeeChange;
+window.copyCalcResult = copyCalcResult;
+window.applyCalcAsPayment = applyCalcAsPayment;
+window.copyWalletToClipboard = copyWalletToClipboard;
+window.populateCalcEmployeeSelect = populateCalcEmployeeSelect;

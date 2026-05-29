@@ -2001,3 +2001,76 @@ tbody tr:hover {
     .fx-add-row { grid-template-columns: 1fr; }
     .fx-item { grid-template-columns: 1fr; text-align: left; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SALARY CALCULATOR & WALLET COPY
+   ═══════════════════════════════════════════════════════════════ */
+
+.calc-result-box {
+    margin-top: 20px;
+    padding: 24px;
+    background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
+    border-left: 5px solid #3182ce;
+    border-radius: 10px;
+}
+
+.calc-result-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2c5282;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+}
+
+.calc-result-text {
+    font-size: 16px;
+    color: #2d3748;
+    line-height: 1.5;
+    margin-bottom: 6px;
+}
+
+.calc-result-amount {
+    font-size: 32px;
+    font-weight: 700;
+    color: #2c5282;
+}
+
+/* Wallet copy chip */
+.wallet-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: #edf2f7;
+    border: 1px solid #cbd5e0;
+    border-radius: 14px;
+    cursor: pointer;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+    color: #2d3748;
+    transition: all 0.15s ease;
+    max-width: 100%;
+}
+
+.wallet-chip:hover {
+    background: #e2e8f0;
+    border-color: #3182ce;
+}
+
+.wallet-chip.copied {
+    background: #c6f6d5;
+    border-color: #38a169;
+    color: #22543d;
+}
+
+.wallet-chip-icon {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+.wallet-empty {
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-style: italic;
+}

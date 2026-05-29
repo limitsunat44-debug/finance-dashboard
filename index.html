@@ -448,6 +448,7 @@
             <div class="section-tabs">
                 <button class="section-tab active" data-section="employees">Сотрудники</button>
                 <button class="section-tab" data-section="payments">Выплаты зарплат</button>
+                <button class="section-tab" data-section="calculator">Калькулятор</button>
             </div>
 
             <!-- Employees Tab -->
@@ -466,11 +467,47 @@
                                     <th>Должность</th>
                                     <th>Оклад (TJS)</th>
                                     <th>Процент</th>
+                                    <th>Номер кошелька</th>
                                     <th>Действия</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Calculator Tab -->
+            <div id="calculatorTab" class="tab-content">
+                <div class="card">
+                    <h3>🧮 Калькулятор процента от оборота</h3>
+                    <p style="color: var(--color-text-secondary); margin-bottom: 16px;">
+                        Введите сумму оборота, процент и выберите сотрудника — система вычислит сумму к выплате.
+                    </p>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="calcTurnover">Оборот за период (TJS)</label>
+                            <input type="number" id="calcTurnover" step="0.01" min="0" placeholder="например: 100000" oninput="recalcSalaryPercent()">
+                        </div>
+                        <div class="form-group">
+                            <label for="calcPercent">Процент (%)</label>
+                            <input type="number" id="calcPercent" step="0.01" min="0" max="100" placeholder="например: 2" oninput="recalcSalaryPercent()">
+                        </div>
+                        <div class="form-group">
+                            <label for="calcEmployee">Сотрудник</label>
+                            <select id="calcEmployee" onchange="onCalcEmployeeChange()">
+                                <option value="">— выберите сотрудника —</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="calcResultBox" class="calc-result-box" style="display: none;">
+                        <div class="calc-result-label">Результат</div>
+                        <div class="calc-result-text" id="calcResultText"></div>
+                        <div class="calc-result-amount" id="calcResultAmount"></div>
+                        <div style="margin-top: 16px; display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn btn-primary" onclick="copyCalcResult()">📋 Копировать результат</button>
+                            <button class="btn btn-secondary" onclick="applyCalcAsPayment()">→ Перенести в выплаты</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -844,6 +881,10 @@
                     <div class="form-group">
                         <label for="employeeCommission">Процент от продаж (%)</label>
                         <input type="number" id="employeeCommission" step="0.1" min="0" max="100" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="employeeWallet">Номер личного кошелька</label>
+                        <input type="text" id="employeeWallet" placeholder="например +992 или номер карты">
                     </div>
                 </form>
             </div>

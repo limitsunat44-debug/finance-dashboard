@@ -658,17 +658,25 @@ function switchTab(tabName) {
 
 function switchSectionTab(sectionName, tabName) {
     const section = document.getElementById(sectionName + 'Section');
-    
+    if (!section) return;
+
     section.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
     });
-    
+
     section.querySelectorAll('.section-tab').forEach(tab => {
         tab.classList.remove('active');
     });
-    
-    document.getElementById(tabName + 'Tab').classList.add('active');
-    section.querySelector(`[data-section="${tabName}"]`).classList.add('active');
+
+    const tabEl = document.getElementById(tabName + 'Tab');
+    if (tabEl) tabEl.classList.add('active');
+    const btnEl = section.querySelector(`[data-section="${tabName}"]`);
+    if (btnEl) btnEl.classList.add('active');
+
+    // Специфичный рендер при переключении подразделов
+    if (sectionName === 'shipments' && typeof renderShipments === 'function') {
+        renderShipments();
+    }
 }
 
 // Dashboard functions

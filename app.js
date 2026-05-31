@@ -168,11 +168,50 @@ function latestSalesYM1C() {
     return last.slice(0, 7);
 }
 
+// Список месяцев ('YYYY-MM'), за которые в 1С реально есть продажи.
+// Отсортирован по убыванию (свежие сверху) — этот же порядок используется
+// для выпадающего списка периодов в блоке выручки.
+function availableSalesYM1C() {
+    const seen = new Set();
+    sales1C.forEach(s => { if (s.date) seen.add(s.date.slice(0, 7)); });
+    return Array.from(seen).sort((a, b) => b.localeCompare(a));
+}
+
+// Заполняет выпадающий список периодов реально доступными месяцами 1С.
+// Сохраняет текущий выбор пользователя, если он остаётся доступным; иначе
+// выбирает последний месяц с данными. Возвращает выбранный период 'YYYY-MM'
+// (или '' если данных нет вовсе).
+function populateSalonRevenuePeriodSelect() {
+    const sel = document.getElementById('dashboardSalonRevenuePeriod');
+    if (!sel) return latestSalesYM1C();
+
+    const months = availableSalesYM1C();
+    if (!months.length) {
+        sel.innerHTML = '';
+        sel.disabled = true;
+        return '';
+    }
+
+    const prev = sel.value;
+    sel.disabled = false;
+    sel.innerHTML = months
+        .map(ym => `<option value="${ym}">${escapeHtml(formatMonthRu(ym))}</option>`)
+        .join('');
+
+    // По умолчанию — последний месяц с данными; сохраняем выбор пользователя,
+    // если он всё ещё доступен (напр. при автообновлении дашборда).
+    const selected = months.includes(prev) ? prev : (months.includes(latestSalesYM1C()) ? latestSalesYM1C() : months[0]);
+    sel.value = selected;
+    return selected;
+}
+
 // Объединённый блок «Выручка + чистая прибыль по салонам» на главной.
-// Период — ПОСЛЕДНИЙ МЕСЯЦ С ДАННЫМИ 1С (а не календарный текущий месяц), чтобы
-// блок не оказывался пустым в начале месяца, когда данные 1С за новый месяц ещё
-// не подгрузились. Выручка и постоянные затраты считаются за ОДИН И ТОТ ЖЕ
-// период (этот месяц), поэтому чистая прибыль = выручка − затраты консистентна.
+// Период выбирается пользователем в выпадающем списке в шапке блока (только
+// месяцы, за которые реально есть данные 1С). По умолчанию — ПОСЛЕДНИЙ МЕСЯЦ С
+// ДАННЫМИ 1С (а не календарный текущий месяц), чтобы блок не оказывался пустым в
+// начале месяца, когда данные 1С за новый месяц ещё не подгрузились. Выручка и
+// постоянные затраты считаются за ОДИН И ТОТ ЖЕ период (выбранный месяц),
+// поэтому чистая прибыль = выручка − затраты консистентна.
 //
 // Чистая прибыль салона = выручка салона (net_sales из 1С за месяц)
 //                         − постоянные затраты этого салона.
@@ -197,8 +236,15 @@ function renderDashboardSalonRevenue1C() {
         return;
     }
 
-    // Период — последний месяц, за который есть данные 1С (не календарный текущий).
-    const ym = latestSalesYM1C();
+    // Заполняем список доступных периодов и определяем выбранный месяц.
+    // По умолчанию (или при отсутствии прежнего выбора) — последний месяц с данными.
+    const ym = populateSalonRevenuePeriodSelect();
+    if (!ym) {
+        if (labelEl) labelEl.textContent = '';
+        monthEl.innerHTML = '<p style="color:var(--color-text-secondary);">Нет данных за период</p>';
+        return;
+    }
+
     const [periodYear, periodMonth] = ym.split('-').map(Number);
     const monthStart = new Date(periodYear, periodMonth - 1, 1);
     const monthEnd = new Date(periodYear, periodMonth, 0); // последний день месяца
@@ -206,6 +252,15 @@ function renderDashboardSalonRevenue1C() {
 
     // Выручка по салонам 1С за месяц.
     const revByName1C = netBySalon1C(monthStart, monthEnd);
+
+    // Защита от пустого периода: если за выбранный месяц нет продаж и нет
+    // постоянных затрат — показываем понятное сообщение, не ломая интерфейс.
+    const hasRevenue = Object.keys(revByName1C).length > 0;
+    const hasAnyFixed = SALONS.some(s => sumFixedExpensesBySalon(s, ym) > 0) || sumFixedExpensesBySalon('Общие', ym) > 0;
+    if (!hasRevenue && !hasAnyFixed) {
+        monthEl.innerHTML = '<p style="color:var(--color-text-secondary);">Нет данных за период</p>';
+        return;
+    }
 
     // Сводим выручку к каноническим именам SALONS (для сопоставления с затратами).
     // Выручку складов без постоянных затрат (Интернет магазин, Основной склад)

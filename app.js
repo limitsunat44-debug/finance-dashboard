@@ -45,6 +45,362 @@ const ADMIN_ACCOUNTS = {
 // Salons
 const SALONS = ['Ортосалон СитиМолл', 'Ортосалон Сиема', 'Ортосалон Баракат', 'Ортосалон Айни'];
 
+// ═══════════════════════════════════════════════════════════════
+// 1С ИНТЕГРАЦИЯ (Supabase, только чтение)
+// ═══════════════════════════════════════════════════════════════
+const AI_INSIGHTS_URL = 'https://1c-sync.vercel.app/api/ai-insights';
+
+// Кэш данных 1С
+let sales1C = [];          // [{ date:'YYYY-MM-DD', salon:'<имя из warehouses_1c>', net, gross, returns, receipts }]
+let warehouseMap1C = {};   // ref_key -> name (из warehouses_1c)
+let sales1CLoaded = false;
+
+// Загрузка справочника складов и ежедневных продаж из 1С
+async function loadSales1C() {
+    try {
+        const [whRes, salesRes] = await Promise.all([
+            supabaseClient.from('warehouses_1c').select('ref_key,name,type'),
+            supabaseClient.from('sales_daily_1c').select('sale_date,warehouse_ref,receipts_count,gross_sales,returns_sum,net_sales')
+        ]);
+
+        if (whRes.error) throw whRes.error;
+        if (salesRes.error) throw salesRes.error;
+
+        warehouseMap1C = {};
+        (whRes.data || []).forEach(w => {
+            // Названия салонов берём из справочника, НЕ хардкодим
+            warehouseMap1C[w.ref_key] = (w.name || '').trim();
+        });
+
+        sales1C = (salesRes.data || []).map(r => ({
+            date: r.sale_date,
+            salon: warehouseMap1C[r.warehouse_ref] || 'Неизвестный склад',
+            warehouseRef: r.warehouse_ref,
+            net: parseFloat(r.net_sales) || 0,
+            gross: parseFloat(r.gross_sales) || 0,
+            returns: parseFloat(r.returns_sum) || 0,
+            receipts: parseInt(r.receipts_count, 10) || 0
+        }));
+
+        sales1CLoaded = true;
+        console.log(`Данные продаж 1С загружены: ${sales1C.length} строк`);
+    } catch (e) {
+        console.error('Ошибка загрузки продаж 1С:', e);
+        sales1CLoaded = false;
+    }
+}
+
+// Список названий салонов из 1С (type='магазин'), по которым есть продажи.
+function getSalonNames1C() {
+    const names = [];
+    const seen = new Set();
+    sales1C.forEach(s => {
+        if (!seen.has(s.salon)) { seen.add(s.salon); names.push(s.salon); }
+    });
+    return names.sort((a, b) => a.localeCompare(b, 'ru'));
+}
+
+// Сумма net_sales из 1С за период [fromDate, toDate] (включительно), по локальным датам.
+function sumNet1C(fromDate, toDate) {
+    const from = toLocalDateStr(fromDate);
+    const to = toLocalDateStr(toDate);
+    return sales1C.reduce((sum, s) => {
+        if (s.date >= from && s.date <= to) return sum + s.net;
+        return sum;
+    }, 0);
+}
+
+// net_sales по салонам за период -> { '<salon>': net }
+function netBySalon1C(fromDate, toDate) {
+    const from = toLocalDateStr(fromDate);
+    const to = toLocalDateStr(toDate);
+    const res = {};
+    sales1C.forEach(s => {
+        if (s.date >= from && s.date <= to) {
+            res[s.salon] = (res[s.salon] || 0) + s.net;
+        }
+    });
+    return res;
+}
+
+// 'YYYY-MM-DD' из Date или строки, по локальному времени.
+function toLocalDateStr(d) {
+    const dt = (d instanceof Date) ? d : new Date(d);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+// Самая свежая дата с продажами в 1С (строка 'YYYY-MM-DD') или сегодня.
+function latestSale1CDate() {
+    let max = '';
+    sales1C.forEach(s => { if (s.date > max) max = s.date; });
+    return max || toLocalDateStr(new Date());
+}
+
+// Карточки выручки по салонам на главной (за последний день с данными и за текущий месяц).
+function renderDashboardSalonRevenue1C() {
+    const todayEl = document.getElementById('dashboardSalonRevenueToday');
+    const monthEl = document.getElementById('dashboardSalonRevenueMonth');
+    const labelEl = document.getElementById('dashboardSalonRevenueDateLabel');
+    if (!todayEl || !monthEl) return;
+
+    if (!sales1CLoaded) {
+        todayEl.innerHTML = '<p style="color:var(--color-text-secondary);">Загрузка данных 1С…</p>';
+        monthEl.innerHTML = '';
+        return;
+    }
+
+    const lastDate = latestSale1CDate();
+    if (labelEl) labelEl.textContent = `последний день: ${formatDateRu(lastDate)}`;
+
+    // За последний день с данными
+    const dayMap = netBySalon1C(lastDate, lastDate);
+    // За текущий месяц
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthMap = netBySalon1C(monthStart, now);
+
+    const salons = getSalonNames1C();
+
+    const buildGrid = (title, map) => {
+        let total = 0;
+        let cards = '';
+        salons.forEach(salon => {
+            const v = map[salon] || 0;
+            total += v;
+            cards += `
+                <div class="c1-revenue-card">
+                    <div class="c1-revenue-salon">🏪 ${escapeHtml(salon)}</div>
+                    <div class="c1-revenue-value">${formatCurrency(v)}</div>
+                </div>`;
+        });
+        cards += `
+            <div class="c1-revenue-card c1-revenue-total">
+                <div class="c1-revenue-salon">Итого</div>
+                <div class="c1-revenue-value">${formatCurrency(total)}</div>
+            </div>`;
+        return `<div class="c1-revenue-grid-title">${title}</div>${cards}`;
+    };
+
+    todayEl.innerHTML = buildGrid('За последний день', dayMap);
+    monthEl.innerHTML = buildGrid('За текущий месяц', monthMap);
+}
+
+// ───────────────────────────────────────────────────────────────
+// Карты 1С
+// ───────────────────────────────────────────────────────────────
+async function loadCards1C() {
+    const el = document.getElementById('cards1cContent');
+    if (!el) return;
+    el.innerHTML = '<div class="loading" style="display:flex;"><div class="loading-spinner"></div><p>Загрузка…</p></div>';
+
+    try {
+        // Проще брать из ИИ-эндпоинта (поле cards). Фолбэк — таблица cards_1c.
+        let byType = null;
+        let newLast7 = null;
+        try {
+            const res = await fetch(AI_INSIGHTS_URL, { cache: 'no-store' });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.cards) {
+                    byType = data.cards.by_type || {};
+                    newLast7 = data.cards.new_last_7d;
+                }
+            }
+        } catch (e) { /* перейдём к фолбэку ниже */ }
+
+        if (!byType) {
+            // Фолбэк: считаем напрямую из cards_1c
+            const { data, error } = await supabaseClient
+                .from('cards_1c')
+                .select('card_type_name,first_seen_at');
+            if (error) throw error;
+            byType = {};
+            const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            newLast7 = 0;
+            (data || []).forEach(c => {
+                const t = c.card_type_name || '(без типа)';
+                byType[t] = (byType[t] || 0) + 1;
+                if (c.first_seen_at && new Date(c.first_seen_at) >= weekAgo) newLast7++;
+            });
+        }
+
+        const accounting = byType['для учета'] || 0;
+        const discount = byType['Электронная дисконтная карта'] || 0;
+
+        el.innerHTML = `
+            <div class="metrics-cards">
+                <div class="metric-card card-1">
+                    <div class="metric-icon">🗂️</div>
+                    <div class="metric-content">
+                        <h3>Карты «для учета»</h3>
+                        <div class="metric-value">${accounting.toLocaleString('ru-RU')}</div>
+                    </div>
+                </div>
+                <div class="metric-card card-2">
+                    <div class="metric-icon">💳</div>
+                    <div class="metric-content">
+                        <h3>Электронные дисконтные карты</h3>
+                        <div class="metric-value">${discount.toLocaleString('ru-RU')}</div>
+                    </div>
+                </div>
+                <div class="metric-card card-4">
+                    <div class="metric-icon">🆕</div>
+                    <div class="metric-content">
+                        <h3>Новые за 7 дней</h3>
+                        <div class="metric-value">${(newLast7 == null ? '—' : Number(newLast7).toLocaleString('ru-RU'))}</div>
+                    </div>
+                </div>
+            </div>
+            ${renderCardsByTypeTable(byType)}`;
+    } catch (e) {
+        console.error('Ошибка загрузки карт 1С:', e);
+        el.innerHTML = '<p class="error-message" style="display:block;">Не удалось загрузить данные по картам.</p>';
+    }
+}
+
+function renderCardsByTypeTable(byType) {
+    const rows = Object.entries(byType)
+        .sort((a, b) => b[1] - a[1])
+        .map(([type, n]) => `<tr><td>${escapeHtml(type)}</td><td>${Number(n).toLocaleString('ru-RU')}</td></tr>`)
+        .join('');
+    if (!rows) return '';
+    return `
+        <h4 class="ai-block-title">Все типы карт</h4>
+        <div class="table-container">
+            <table>
+                <thead><tr><th>Тип карты</th><th>Количество</th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+}
+
+// ───────────────────────────────────────────────────────────────
+// ИИ-аналитика
+// ───────────────────────────────────────────────────────────────
+function isGuid(s) {
+    return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
+}
+
+function formatDiffPct(pct) {
+    const up = pct >= 0;
+    const arrow = up ? '▲' : '▼';
+    const sign = up ? '+' : '−';
+    const color = up ? 'var(--color-success)' : 'var(--color-error)';
+    return `<span style="color:${color};font-weight:600;">${arrow} ${sign}${Math.abs(pct).toFixed(2)}%</span>`;
+}
+
+async function loadAiInsights() {
+    const loadingEl = document.getElementById('aiInsightsLoading');
+    const contentEl = document.getElementById('aiInsightsContent');
+    const errorEl = document.getElementById('aiInsightsError');
+    const btn = document.getElementById('aiRefreshBtn');
+    if (!loadingEl || !contentEl) return;
+
+    loadingEl.style.display = 'flex';
+    contentEl.style.display = 'none';
+    if (errorEl) errorEl.style.display = 'none';
+    if (btn) btn.disabled = true;
+
+    try {
+        const res = await fetch(`${AI_INSIGHTS_URL}?ai=1`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!data || !data.ok) throw new Error('Эндпоинт вернул ошибку');
+
+        renderAiInsights(data);
+        contentEl.style.display = 'block';
+    } catch (e) {
+        console.error('Ошибка загрузки ИИ-аналитики:', e);
+        if (errorEl) {
+            errorEl.textContent = 'Не удалось загрузить ИИ-аналитику. Попробуйте обновить.';
+            errorEl.style.display = 'block';
+        }
+    } finally {
+        loadingEl.style.display = 'none';
+        if (btn) btn.disabled = false;
+    }
+}
+
+function renderAiInsights(data) {
+    // ИИ-комментарий
+    const commentEl = document.getElementById('aiComment');
+    if (commentEl) {
+        const comment = data.ai_comment;
+        commentEl.innerHTML = comment
+            ? `<div class="ai-comment-title">💬 Комментарий ИИ</div><div class="ai-comment-text">${escapeHtml(comment)}</div>`
+            : `<div class="ai-comment-title">💬 Комментарий ИИ</div><div class="ai-comment-text">ИИ-комментарий недоступен.</div>`;
+    }
+
+    // Сравнение дня
+    const dayEl = document.getElementById('aiDayCompare');
+    if (dayEl && data.day_compare) {
+        const dc = data.day_compare;
+        dayEl.innerHTML = `
+            <div class="ai-compare-title">Сравнение дня</div>
+            <div class="ai-compare-row"><span>Сегодня (${escapeHtml(dc.today.date)})</span><b>${formatCurrency(dc.today.net)}</b></div>
+            <div class="ai-compare-row"><span>Тот же день прошлого мес. (${escapeHtml(dc.same_day_prev.date)})</span><b>${formatCurrency(dc.same_day_prev.net)}</b></div>
+            <div class="ai-compare-diff">Разница: ${formatCurrency(dc.diff_net)} ${formatDiffPct(dc.diff_pct)}</div>`;
+    }
+
+    // Сравнение месяца
+    const monthEl = document.getElementById('aiMonthCompare');
+    if (monthEl && data.month_compare) {
+        const mc = data.month_compare;
+        const noPrev = (mc.diff_net === 0 && mc.current && mc.previous && mc.current.month === mc.previous.month);
+        if (noPrev) {
+            monthEl.innerHTML = `
+                <div class="ai-compare-title">Сравнение месяца</div>
+                <div class="ai-compare-row"><span>Текущий месяц (${escapeHtml(mc.current.month)})</span><b>${formatCurrency(mc.current.net)}</b></div>
+                <div class="ai-compare-diff" style="color:var(--color-text-secondary);">Недостаточно данных за прошлый месяц для сравнения.</div>`;
+        } else {
+            monthEl.innerHTML = `
+                <div class="ai-compare-title">Сравнение месяца (накопительно, до дня ${mc.upto_day})</div>
+                <div class="ai-compare-row"><span>Текущий (${escapeHtml(mc.current.month)})</span><b>${formatCurrency(mc.current.net)}</b></div>
+                <div class="ai-compare-row"><span>Прошлый (${escapeHtml(mc.previous.month)})</span><b>${formatCurrency(mc.previous.net)}</b></div>
+                <div class="ai-compare-diff">Разница: ${formatCurrency(mc.diff_net)} ${formatDiffPct(mc.diff_pct)}</div>`;
+        }
+    }
+
+    // Помесячная таблица
+    const monthsBody = document.querySelector('#aiMonthsTable tbody');
+    if (monthsBody) {
+        monthsBody.innerHTML = (data.months || []).map(m => `
+            <tr>
+                <td>${escapeHtml(m.month)}</td>
+                <td>${formatCurrency(m.net)}</td>
+                <td>${formatCurrency(m.gross)}</td>
+                <td>${formatCurrency(m.returns)}</td>
+                <td>${Number(m.receipts || 0).toLocaleString('ru-RU')}</td>
+            </tr>`).join('') || '<tr><td colspan="5">Нет данных</td></tr>';
+    }
+
+    // Остатки по складам
+    const stockBody = document.querySelector('#aiStockTable tbody');
+    if (stockBody) {
+        const byWh = (data.stock && data.stock.by_warehouse) || [];
+        const total = data.stock ? data.stock.total_qty : byWh.reduce((s, w) => s + (w.qty || 0), 0);
+        stockBody.innerHTML = byWh.map(w => `
+            <tr>
+                <td>${escapeHtml(w.warehouse || '—')}</td>
+                <td>${Number(w.qty || 0).toLocaleString('ru-RU')}</td>
+            </tr>`).join('') +
+            `<tr style="font-weight:600;"><td>Итого</td><td>${Number(total || 0).toLocaleString('ru-RU')}</td></tr>`;
+    }
+
+    // Топ-100 товаров
+    const topBody = document.querySelector('#aiTop100Table tbody');
+    if (topBody) {
+        topBody.innerHTML = (data.top100_by_qty || []).map(t => {
+            let name = escapeHtml(t.name || '');
+            if (isGuid(t.name)) name = '<span style="color:var(--color-text-secondary);">(без названия)</span>';
+            return `<tr><td>${t.rank}</td><td>${name}</td><td>${Number(t.qty || 0).toLocaleString('ru-RU')}</td></tr>`;
+        }).join('') || '<tr><td colspan="3">Нет данных</td></tr>';
+    }
+}
+
 // Countries
 const COUNTRIES = {
     'TJ': { name: 'Таджикистан', flag: '🇹🇯' },
@@ -607,6 +963,7 @@ function login(username, password) {
         document.getElementById('currentUser').textContent = currentUser;
         
         loadData().then(() => {
+            loadSales1C().then(() => updateDashboard());
             updateDashboard();
             loadAllTables();
 	
@@ -653,6 +1010,10 @@ function switchTab(tabName) {
     if (typeof populateCalcEmployeeSelect === 'function') populateCalcEmployeeSelect();
     } else if (tabName === 'shipments') {
         if (typeof renderShipments === 'function') renderShipments();
+    } else if (tabName === 'cards1c') {
+        if (typeof loadCards1C === 'function') loadCards1C();
+    } else if (tabName === 'aiInsights') {
+        if (typeof loadAiInsights === 'function') loadAiInsights();
     }
 }
 
@@ -688,32 +1049,37 @@ function updateDashboard() {
     const startOfWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
 
-	const last3DaysRevenue = appData.sales
-      .filter(sale => {
-      const saleDate = new Date(sale.date);
-      return saleDate >= startOf3DaysAgo && saleDate < endOfYesterday;
-     })
-     .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
-	
-    const todayRevenue = appData.sales
-        .filter(sale => new Date(sale.date) >= startOfToday)
-        .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
-
-    const weekRevenue = appData.sales
-        .filter(sale => new Date(sale.date) >= startOfWeek)
-        .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
-
-    const monthRevenue = appData.sales
-        .filter(sale => new Date(sale.date) >= startOfMonth)
-        .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
-
-    const totalRevenue = appData.sales.reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+    // Выручка берётся из реальных данных 1С (sales_daily_1c, net_sales).
+    // Если данные 1С ещё не загружены — временный фолбэк на продажи из Excel,
+    // чтобы карточки не были пустыми; после загрузки updateDashboard() вызовется снова.
+    let last3DaysRevenue, weekRevenue, monthRevenue, totalRevenue;
+    if (sales1CLoaded) {
+        // "за 3 дня" = три полных прошедших дня (как было: [3 дня назад; сегодня 00:00))
+        const end3 = new Date(endOfYesterday.getTime() - 24 * 60 * 60 * 1000); // вчера
+        last3DaysRevenue = sumNet1C(startOf3DaysAgo, end3);
+        weekRevenue = sumNet1C(startOfWeek, today);
+        monthRevenue = sumNet1C(startOfMonth, today);
+        totalRevenue = sales1C.reduce((sum, s) => sum + s.net, 0);
+    } else {
+        last3DaysRevenue = appData.sales
+            .filter(sale => { const d = new Date(sale.date); return d >= startOf3DaysAgo && d < endOfYesterday; })
+            .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+        weekRevenue = appData.sales
+            .filter(sale => new Date(sale.date) >= startOfWeek)
+            .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+        monthRevenue = appData.sales
+            .filter(sale => new Date(sale.date) >= startOfMonth)
+            .reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+        totalRevenue = appData.sales.reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+    }
     const netProfit = totalRevenue * 0.3;
 
     document.getElementById('todayRevenue').textContent = formatCurrency(last3DaysRevenue);
     document.getElementById('weekRevenue').textContent = formatCurrency(weekRevenue);
     document.getElementById('monthRevenue').textContent = formatCurrency(monthRevenue);
     document.getElementById('netProfit').textContent = formatCurrency(netProfit);
+
+    if (typeof renderDashboardSalonRevenue1C === 'function') renderDashboardSalonRevenue1C();
 
     rolloverFixedExpensesIfNeeded().then(() => renderDashboardFixedExpenses());
     if (typeof renderDashboardDailySales === 'function') renderDashboardDailySales();
@@ -1788,7 +2154,10 @@ function generateReport() {
         return paymentDate >= fromDateTime && paymentDate <= toDateTime;
     });
 
-    const totalRevenue = periodSales.reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
+    // Выручка из 1С (net_sales) за период; фолбэк на Excel-продажи, пока 1С не загружена.
+    const totalRevenue = sales1CLoaded
+        ? sumNet1C(fromDateTime, toDateTime)
+        : periodSales.reduce((sum, sale) => sum + parseFloat(sale.amount), 0);
     const totalExpenses = periodExpenses.reduce((sum, expense) => sum + parseFloat(expense.amount), 0);
     const totalProfit = totalRevenue * 0.3;
     const totalPurchases = periodPurchases.reduce((sum, purchase) => sum + parseFloat(purchase.amount), 0);

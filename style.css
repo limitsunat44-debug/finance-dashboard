@@ -2948,3 +2948,103 @@ tbody tr:hover {
     border-radius: 10px;
     border: 1px dashed #e2e8f0;
 }
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* 1С ИНТЕГРАЦИЯ: выручка по салонам, карты, ИИ-аналитика            */
+/* ═══════════════════════════════════════════════════════════════ */
+
+/* Выручка по салонам (главная) */
+.c1-revenue-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+.c1-revenue-grid-title {
+    grid-column: 1 / -1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 2px;
+}
+.c1-revenue-card {
+    background: var(--color-bg-1, #f5f5f5);
+    border: 1px solid var(--color-card-border, rgba(0,0,0,0.08));
+    border-radius: 12px;
+    padding: 14px 16px;
+}
+.c1-revenue-card.c1-revenue-total {
+    background: var(--color-primary);
+    color: #fff;
+}
+.c1-revenue-salon {
+    font-size: 13px;
+    color: var(--color-text-secondary);
+    margin-bottom: 6px;
+}
+.c1-revenue-total .c1-revenue-salon {
+    color: rgba(255,255,255,0.9);
+}
+.c1-revenue-value {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+.c1-revenue-total .c1-revenue-value {
+    color: #fff;
+}
+
+/* ИИ-аналитика */
+.ai-block-title {
+    margin: 26px 0 12px;
+    font-size: 16px;
+    font-weight: 600;
+}
+.ai-comment-box {
+    background: linear-gradient(135deg, #8B7CFF, #7B68EE);
+    color: #fff;
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 22px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+}
+.ai-comment-title {
+    font-size: 14px;
+    font-weight: 600;
+    opacity: 0.95;
+    margin-bottom: 8px;
+}
+.ai-comment-text {
+    font-size: 15px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+}
+.ai-compare-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+}
+.ai-compare-card {
+    background: var(--color-bg-1, #f5f5f5);
+    border: 1px solid var(--color-card-border, rgba(0,0,0,0.08));
+    border-radius: 14px;
+    padding: 18px;
+}
+.ai-compare-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    margin-bottom: 12px;
+}
+.ai-compare-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 14px;
+    padding: 6px 0;
+    border-bottom: 1px dashed var(--color-card-border, rgba(0,0,0,0.08));
+}
+.ai-compare-diff {
+    margin-top: 12px;
+    font-size: 15px;
+    font-weight: 600;
+}

@@ -55,7 +55,8 @@
             <button class="nav-tab" data-tab="suppliers">Поставщики</button>
             <button class="nav-tab" data-tab="purchases">Закупки</button>
             <button class="nav-tab" data-tab="shipments" onclick="switchTab('shipments')">🚚 Товар в пути</button>
-            
+            <button class="nav-tab" data-tab="cards1c" onclick="switchTab('cards1c')">💳 Карты 1С</button>
+            <button class="nav-tab" data-tab="aiInsights" onclick="switchTab('aiInsights')">🤖 ИИ-аналитика</button>
         </nav>
 
         <!-- Loading Indicator -->
@@ -95,6 +96,19 @@
                         <div class="metric-value" id="netProfit">0 TJS</div>
                     </div>
                 </div>
+            </div>
+
+            <!-- Выручка по салонам из 1С -->
+            <div class="card" id="dashboardSalonRevenueCard">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">🧾 Выручка по салонам (1С)</h3>
+                    <span id="dashboardSalonRevenueDateLabel" style="font-size:13px;color:var(--color-text-secondary);"></span>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
+                    Источник: 1С (<i>sales_daily_1c</i>, чистая выручка net_sales). Обновляется автоматически.
+                </p>
+                <div id="dashboardSalonRevenueToday" class="c1-revenue-grid"></div>
+                <div id="dashboardSalonRevenueMonth" class="c1-revenue-grid" style="margin-top:16px;"></div>
             </div>
 
             <!-- Fixed expenses summary by salon (current month) -->
@@ -986,6 +1000,84 @@
                         История полностью полученных отправок.
                     </p>
                     <div id="archivedShipmentsContainer" class="shipments-container"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Cards 1C Section (Карты 1С) -->
+        <section id="cards1cSection" class="section">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">💳 Карты лояльности (1С)</h3>
+                    <button class="btn btn-secondary" onclick="loadCards1C()">🔄 Обновить</button>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 18px 0;">
+                    Источник: 1С (поле <i>cards</i> из ИИ-эндпоинта). Подсчёт по типам карт и новые за 7 дней.
+                </p>
+                <div id="cards1cContent">
+                    <div class="loading" style="display:flex;">
+                        <div class="loading-spinner"></div>
+                        <p>Загрузка…</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- AI Insights Section (ИИ-аналитика) -->
+        <section id="aiInsightsSection" class="section">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">🤖 ИИ-аналитика продаж и остатков</h3>
+                    <button id="aiRefreshBtn" class="btn btn-primary" onclick="loadAiInsights()">🔄 Обновить</button>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 18px 0;">
+                    Источник: 1С + ИИ-комментарий (OpenAI). Загрузка может занять несколько секунд.
+                </p>
+
+                <div id="aiInsightsLoading" class="loading" style="display:none;">
+                    <div class="loading-spinner"></div>
+                    <p>Считаем аналитику и генерируем ИИ-комментарий…</p>
+                </div>
+
+                <div id="aiInsightsError" class="error-message" style="display:none;"></div>
+
+                <div id="aiInsightsContent" style="display:none;">
+                    <div id="aiComment" class="ai-comment-box"></div>
+
+                    <div class="ai-compare-grid">
+                        <div id="aiDayCompare" class="ai-compare-card"></div>
+                        <div id="aiMonthCompare" class="ai-compare-card"></div>
+                    </div>
+
+                    <h4 class="ai-block-title">📅 Помесячная динамика</h4>
+                    <div class="table-container">
+                        <table id="aiMonthsTable">
+                            <thead>
+                                <tr><th>Месяц</th><th>Чистая выручка</th><th>Валовая</th><th>Возвраты</th><th>Чеки</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <h4 class="ai-block-title">📦 Остатки по складам</h4>
+                    <div class="table-container">
+                        <table id="aiStockTable">
+                            <thead>
+                                <tr><th>Склад</th><th>Количество</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <h4 class="ai-block-title">🏆 Топ-100 товаров по остаткам</h4>
+                    <div class="table-container" style="max-height:520px;overflow-y:auto;">
+                        <table id="aiTop100Table">
+                            <thead>
+                                <tr><th>#</th><th>Товар</th><th>Количество</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </section>

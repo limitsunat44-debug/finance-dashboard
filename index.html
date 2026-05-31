@@ -102,7 +102,11 @@
             <div class="card" id="dashboardSalonRevenueCard">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
                     <h3 style="margin:0;">💵 Выручка и чистая прибыль по салонам (1С)</h3>
-                    <span id="dashboardSalonRevenueDateLabel" style="font-size:13px;color:var(--color-text-secondary);"></span>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <label for="dashboardSalonRevenuePeriod" style="font-size:13px;color:var(--color-text-secondary);">Период:</label>
+                        <select id="dashboardSalonRevenuePeriod" class="form-control" style="width:auto;min-width:140px;" onchange="renderDashboardSalonRevenue1C()"></select>
+                        <span id="dashboardSalonRevenueDateLabel" style="font-size:13px;color:var(--color-text-secondary);"></span>
+                    </div>
                 </div>
                 <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
                     Выручка из 1С (<i>sales_daily_1c</i>, net_sales) минус постоянные затраты салона

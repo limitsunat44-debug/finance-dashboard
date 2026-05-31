@@ -3086,3 +3086,73 @@ tbody tr:hover {
     font-size: 15px;
     font-weight: 600;
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ЗАРПЛАТА ОТ ПРОДАЖ (2%) — подраздел вкладки «Зарплаты»
+   ═══════════════════════════════════════════════════════════════ */
+
+.sales-salary-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.ss-summary-card {
+    flex: 1 1 160px;
+    min-width: 150px;
+    padding: 14px 16px;
+    background: var(--color-bg-1);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+}
+
+.ss-summary-card.ss-summary-remaining {
+    background: var(--color-bg-2);
+}
+
+.ss-summary-label {
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    margin-bottom: 6px;
+}
+
+.ss-summary-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+
+.sales-salary-table th,
+.sales-salary-table td {
+    vertical-align: middle;
+}
+
+.ss-status {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ss-status-paid {
+    background: var(--color-bg-3);
+    color: var(--color-success, #16a34a);
+}
+
+.ss-status-pending {
+    background: var(--color-bg-2);
+    color: var(--color-warning, #b45309);
+}
+
+.ss-match,
+.ss-nomatch {
+    cursor: help;
+    opacity: 0.8;
+}
+
+@media (max-width: 720px) {
+    .sales-salary-summary { flex-direction: column; }
+}

@@ -1295,6 +1295,7 @@ function login(username, password) {
         
         loadData().then(() => {
             loadSales1C().then(() => updateDashboard());
+            loadEmployeeSales1C();
             updateDashboard();
             loadAllTables();
 	
@@ -1368,6 +1369,9 @@ function switchSectionTab(sectionName, tabName) {
     // Специфичный рендер при переключении подразделов
     if (sectionName === 'shipments' && typeof renderShipments === 'function') {
         renderShipments();
+    }
+    if (sectionName === 'salaries' && tabName === 'salesSalary' && typeof loadSalesSalarySection === 'function') {
+        loadSalesSalarySection();
     }
 }
 
@@ -4502,3 +4506,484 @@ window.unarchiveShipment       = unarchiveShipment;
 window.switchShipmentsTab      = switchShipmentsTab;
 window.renderShipments         = renderShipments;
 window.renderDashboardShipments = renderDashboardShipments;
+
+
+// ═════════════════════════════════════════════════════════════
+// ЗАРПЛАТА ОТ ПРОДАЖ (2%) — подраздел вкладки «Зарплаты»
+// ═════════════════════════════════════════════════════════════
+// Считает зарплату продавцов как процент от выручки за выбранный период.
+// Источник продаж — таблица Supabase employee_sales_1c (продажи по сотрудникам
+// из 1С по дням, gross_sales — выручка БЕЗ возвратов). Процент по умолчанию 2%,
+// либо commission_rate из справочника employees, если сотрудник сопоставлен по
+// имени. Кнопка «Выплатить» фиксирует выплату в salary_payouts, добавляет
+// затрату в expenses (категория «Зарплата») и в appData.fixedExpenses (чтобы
+// выплата отразилась в чистой прибыли на главной), и блокирует повторную выплату
+// за тот же период.
+
+const SALES_SALARY_DEFAULT_RATE = 2.0;
+
+// Кэш данных подраздела.
+let employeeSales1C = [];        // [{ sellerRef, sellerName, date, gross, returns, receipts }]
+let employeeSales1CLoaded = false;
+let employeesDirectory = [];     // из таблицы employees: [{ id, name, commission_rate, is_active }]
+let salaryPayoutsCache = [];     // из таблицы salary_payouts (для защиты от двойной выплаты)
+let salaryExpenseCategoryId = null; // id категории «Зарплата» в expense_categories
+let salesSalaryRange = null;     // { from:'YYYY-MM-DD', to:'YYYY-MM-DD' }
+let salesSalaryLoading = false;
+let employeeSales1CInflight = null; // промис текущей загрузки (защита от двойного запроса)
+
+// Загрузка продаж по сотрудникам, справочника сотрудников и журнала выплат.
+// Реентрантна: при параллельных вызовах (предзагрузка после логина + ленивый
+// рендер подраздела) запрос к Supabase выполняется один раз.
+function loadEmployeeSales1C() {
+    if (employeeSales1CInflight) return employeeSales1CInflight;
+    employeeSales1CInflight = (async () => {
+    try {
+        const [salesRes, empRes, payoutRes] = await Promise.all([
+            supabaseClient.from('employee_sales_1c')
+                .select('seller_ref,seller_name,sale_date,gross_sales,returns_sum,receipts_count'),
+            supabaseClient.from('employees').select('id,name,commission_rate,is_active'),
+            supabaseClient.from('salary_payouts')
+                .select('id,seller_ref,employee_name,period_from,period_to,gross_sales,commission_rate,amount,created_at')
+        ]);
+
+        if (salesRes.error) throw salesRes.error;
+        employeeSales1C = (salesRes.data || []).map(r => ({
+            sellerRef: r.seller_ref,
+            sellerName: (r.seller_name || '').trim(),
+            date: r.sale_date,
+            gross: parseFloat(r.gross_sales) || 0,
+            returns: parseFloat(r.returns_sum) || 0,
+            receipts: parseInt(r.receipts_count, 10) || 0
+        }));
+        employeeSales1CLoaded = true;
+
+        // Справочник сотрудников и журнал выплат — не критичны: при ошибке просто
+        // работаем без сопоставления процента / без истории выплат.
+        employeesDirectory = (empRes && !empRes.error) ? (empRes.data || []) : [];
+        salaryPayoutsCache = (payoutRes && !payoutRes.error) ? (payoutRes.data || []) : [];
+
+        console.log(`employee_sales_1c загружено: ${employeeSales1C.length} строк, продавцов: ${new Set(employeeSales1C.map(s => s.sellerRef)).size}`);
+    } catch (e) {
+        console.error('Ошибка загрузки employee_sales_1c:', e);
+        employeeSales1CLoaded = false;
+    } finally {
+        employeeSales1CInflight = null;
+    }
+    })();
+    return employeeSales1CInflight;
+}
+
+// Доступные месяцы ('YYYY-MM', свежие сверху) по данным employee_sales_1c.
+function availableEmployeeSalesYM() {
+    const seen = new Set();
+    employeeSales1C.forEach(s => { if (s.date) seen.add(s.date.slice(0, 7)); });
+    return Array.from(seen).sort((a, b) => b.localeCompare(a));
+}
+
+function earliestEmployeeSaleDate() {
+    let min = '';
+    employeeSales1C.forEach(s => { if (s.date && (!min || s.date < min)) min = s.date; });
+    return min;
+}
+
+function latestEmployeeSaleDate() {
+    let max = '';
+    employeeSales1C.forEach(s => { if (s.date && s.date > max) max = s.date; });
+    return max;
+}
+
+function latestEmployeeSalesYM() {
+    const months = availableEmployeeSalesYM();
+    return months.length ? months[0] : getCurrentYM();
+}
+
+// Сопоставление имени продавца из 1С (короткое, напр. «Гавхар») с записью в
+// справочнике employees (полное, напр. «Шерова Гавхар»). Сопоставляем по
+// вхождению короткого имени как ОТДЕЛЬНОГО СЛОВА в полное (без учёта регистра).
+// Возвращает запись employees или null.
+function matchEmployeeBySellerName(sellerName) {
+    const short = String(sellerName || '').trim().toLowerCase();
+    if (!short) return null;
+    return employeesDirectory.find(emp => {
+        const full = String(emp.name || '').toLowerCase();
+        if (!full) return false;
+        // Короткое имя как отдельное слово в полном имени.
+        const words = full.split(/\s+/);
+        return words.includes(short) || full === short;
+    }) || null;
+}
+
+// Процент для сотрудника: commission_rate из справочника, если сопоставлен и
+// значение задано (включая 0% для не-продавцов), иначе 2% по умолчанию.
+function rateForEmployee(matchedEmp) {
+    if (!matchedEmp || matchedEmp.commission_rate == null || matchedEmp.commission_rate === '') {
+        return SALES_SALARY_DEFAULT_RATE;
+    }
+    const r = parseFloat(matchedEmp.commission_rate);
+    return isNaN(r) ? SALES_SALARY_DEFAULT_RATE : r;
+}
+
+// Агрегирует продажи по сотрудникам за диапазон [from..to] включительно.
+// Возвращает [{ sellerRef, sellerName, gross, matchedEmp, rate, amount }] —
+// только те, у кого выручка > 0, отсортировано по выручке по убыванию.
+function aggregateEmployeeSales(from, to) {
+    const byRef = {};
+    employeeSales1C.forEach(s => {
+        if (s.date < from || s.date > to) return;
+        const key = s.sellerRef || s.sellerName;
+        if (!byRef[key]) {
+            byRef[key] = { sellerRef: s.sellerRef, sellerName: s.sellerName, gross: 0 };
+        }
+        byRef[key].gross += s.gross;
+        // Имя берём непустое (на случай рассинхрона строк).
+        if (!byRef[key].sellerName && s.sellerName) byRef[key].sellerName = s.sellerName;
+    });
+
+    return Object.values(byRef)
+        .filter(e => e.gross > 0)
+        .map(e => {
+            const matchedEmp = matchEmployeeBySellerName(e.sellerName);
+            const rate = rateForEmployee(matchedEmp);
+            const amount = e.gross * rate / 100;
+            return { ...e, matchedEmp, rate, amount };
+        })
+        .sort((a, b) => b.gross - a.gross);
+}
+
+// Ищет существующую выплату за тот же период (seller_ref + period_from + period_to).
+function findExistingPayout(sellerRef, from, to) {
+    return salaryPayoutsCache.find(p =>
+        p.seller_ref === sellerRef && p.period_from === from && p.period_to === to
+    ) || null;
+}
+
+// Заполняет месячный пресет реально доступными периодами employee_sales_1c.
+function populateSalesSalaryPeriodSelect() {
+    const sel = document.getElementById('salesSalaryPeriod');
+    if (!sel) return;
+    const months = availableEmployeeSalesYM();
+    if (!months.length) {
+        sel.innerHTML = '';
+        sel.disabled = true;
+        return;
+    }
+    sel.disabled = false;
+    sel.innerHTML = months
+        .map(ym => `<option value="${ym}">${escapeHtml(formatMonthRu(ym))}</option>`)
+        .join('');
+}
+
+// Гарантирует, что salesSalaryRange задан и не выходит за пределы данных.
+// По умолчанию — последний месяц с данными.
+function ensureSalesSalaryRange() {
+    const minDate = earliestEmployeeSaleDate();
+    const maxDate = latestEmployeeSaleDate();
+    if (!minDate) { salesSalaryRange = null; return; }
+
+    if (!salesSalaryRange) {
+        const { start, end } = monthBounds(latestEmployeeSalesYM());
+        salesSalaryRange = {
+            from: start < minDate ? minDate : start,
+            to: end > maxDate ? maxDate : end
+        };
+        return;
+    }
+    let { from, to } = salesSalaryRange;
+    if (from < minDate) from = minDate;
+    if (to > maxDate) to = maxDate;
+    if (from > to) from = to;
+    salesSalaryRange = { from, to };
+}
+
+// Синхронизирует поля дат и месячный пресет с текущим диапазоном.
+function syncSalesSalaryControls() {
+    const fromEl = document.getElementById('salesSalaryFrom');
+    const toEl = document.getElementById('salesSalaryTo');
+    const sel = document.getElementById('salesSalaryPeriod');
+    const minDate = earliestEmployeeSaleDate();
+    const maxDate = latestEmployeeSaleDate();
+
+    if (fromEl) {
+        fromEl.min = minDate || '';
+        fromEl.max = maxDate || '';
+        fromEl.value = salesSalaryRange ? salesSalaryRange.from : '';
+    }
+    if (toEl) {
+        toEl.min = minDate || '';
+        toEl.max = maxDate || '';
+        toEl.value = salesSalaryRange ? salesSalaryRange.to : '';
+    }
+    if (sel && salesSalaryRange) {
+        const ym = salesSalaryRange.from.slice(0, 7);
+        const { start, end } = monthBounds(ym);
+        if (salesSalaryRange.from === start && salesSalaryRange.to === end) sel.value = ym;
+    }
+}
+
+function onSalesSalaryMonthPreset() {
+    const sel = document.getElementById('salesSalaryPeriod');
+    if (!sel || !sel.value) return;
+    const { start, end } = monthBounds(sel.value);
+    const minDate = earliestEmployeeSaleDate();
+    const maxDate = latestEmployeeSaleDate();
+    salesSalaryRange = {
+        from: minDate && start < minDate ? minDate : start,
+        to: maxDate && end > maxDate ? maxDate : end
+    };
+    renderSalesSalary();
+}
+
+function onSalesSalaryDateRangeChange() {
+    const fromEl = document.getElementById('salesSalaryFrom');
+    const toEl = document.getElementById('salesSalaryTo');
+    if (!fromEl || !toEl) return;
+    let from = fromEl.value;
+    let to = toEl.value;
+    if (!from || !to) return;
+    if (to < from) { const t = from; from = to; to = t; }
+    salesSalaryRange = { from, to };
+    renderSalesSalary();
+}
+
+// Точка входа: грузит данные (один раз) и рендерит подраздел.
+async function loadSalesSalarySection() {
+    if (salesSalaryLoading) return;
+    if (!employeeSales1CLoaded) {
+        salesSalaryLoading = true;
+        renderSalesSalary(); // покажет «Загрузка…»
+        await loadEmployeeSales1C();
+        salesSalaryLoading = false;
+    }
+    renderSalesSalary();
+}
+
+// Рендер таблицы сотрудников, итогов и кнопок выплаты за выбранный период.
+function renderSalesSalary() {
+    const tbody = document.querySelector('#salesSalaryTable tbody');
+    const tableEl = document.getElementById('salesSalaryTable');
+    const emptyEl = document.getElementById('salesSalaryEmpty');
+    const summaryEl = document.getElementById('salesSalarySummary');
+    const labelEl = document.getElementById('salesSalaryDateLabel');
+    if (!tbody) return;
+
+    const setEmpty = (msg) => {
+        if (tableEl) tableEl.style.display = 'none';
+        if (summaryEl) summaryEl.innerHTML = '';
+        if (emptyEl) { emptyEl.style.display = 'block'; emptyEl.textContent = msg; }
+    };
+
+    if (!employeeSales1CLoaded) {
+        setEmpty(salesSalaryLoading
+            ? 'Загрузка данных о продажах сотрудников…'
+            : 'Не удалось загрузить данные о продажах сотрудников.');
+        return;
+    }
+
+    populateSalesSalaryPeriodSelect();
+    ensureSalesSalaryRange();
+    syncSalesSalaryControls();
+
+    if (!salesSalaryRange) {
+        if (labelEl) labelEl.textContent = '';
+        setEmpty('Нет данных о продажах сотрудников.');
+        return;
+    }
+
+    const { from, to } = salesSalaryRange;
+    if (labelEl) labelEl.textContent = `за ${formatDateRu(from)} — ${formatDateRu(to)}`;
+
+    const rows = aggregateEmployeeSales(from, to);
+    if (!rows.length) {
+        setEmpty('Нет продаж сотрудников за выбранный период.');
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (tableEl) tableEl.style.display = '';
+
+    let totalGross = 0, totalSalary = 0, totalPaid = 0;
+
+    tbody.innerHTML = rows.map(r => {
+        totalGross += r.gross;
+        totalSalary += r.amount;
+
+        const existing = findExistingPayout(r.sellerRef, from, to);
+        let statusCell, actionCell;
+        if (existing) {
+            totalPaid += parseFloat(existing.amount) || 0;
+            const paidDate = existing.created_at ? formatDate(existing.created_at) : '';
+            statusCell = `<span class="ss-status ss-status-paid">✅ Выплачено${paidDate ? ' (' + escapeHtml(paidDate) + ')' : ''}</span>`;
+            actionCell = `<button class="btn btn-secondary btn-sm" disabled title="Уже выплачено за этот период">Выплачено</button>`;
+        } else {
+            statusCell = `<span class="ss-status ss-status-pending">К выплате</span>`;
+            actionCell = `<button class="btn btn-primary btn-sm" onclick="payoutSalesSalary('${escapeHtml(r.sellerRef || '')}')">Выплатить</button>`;
+        }
+
+        const matchHint = r.matchedEmp
+            ? ` <span class="ss-match" title="Сопоставлен: ${escapeHtml(r.matchedEmp.name)}">🔗</span>`
+            : ` <span class="ss-nomatch" title="Не сопоставлен — применён процент по умолчанию">—</span>`;
+
+        return `
+            <tr>
+                <td>${escapeHtml(r.sellerName || '—')}${matchHint}</td>
+                <td>${formatCurrency(r.gross)}</td>
+                <td>${r.rate}%</td>
+                <td><b>${formatCurrency(r.amount)}</b></td>
+                <td>${statusCell}</td>
+                <td>${actionCell}</td>
+            </tr>`;
+    }).join('');
+
+    const remaining = totalSalary - totalPaid;
+    if (summaryEl) {
+        summaryEl.innerHTML = `
+            <div class="ss-summary-card"><div class="ss-summary-label">Суммарная выручка</div><div class="ss-summary-value">${formatCurrency(totalGross)}</div></div>
+            <div class="ss-summary-card"><div class="ss-summary-label">Зарплата (2%) всего</div><div class="ss-summary-value">${formatCurrency(totalSalary)}</div></div>
+            <div class="ss-summary-card"><div class="ss-summary-label">Уже выплачено</div><div class="ss-summary-value">${formatCurrency(totalPaid)}</div></div>
+            <div class="ss-summary-card ss-summary-remaining"><div class="ss-summary-label">Осталось выплатить</div><div class="ss-summary-value">${formatCurrency(remaining)}</div></div>`;
+    }
+}
+
+// Находит/создаёт категорию «Зарплата» в expense_categories, кэширует id.
+// Возвращает id или null (если создание невозможно — выплата всё равно пройдёт,
+// в name затраты будет указано «Зарплата»).
+async function ensureSalaryExpenseCategory() {
+    if (salaryExpenseCategoryId != null) return salaryExpenseCategoryId;
+    try {
+        const { data, error } = await supabaseClient
+            .from('expense_categories').select('id,name').eq('name', 'Зарплата').limit(1);
+        if (!error && data && data.length) {
+            salaryExpenseCategoryId = data[0].id;
+            return salaryExpenseCategoryId;
+        }
+        // Создаём категорию.
+        const ins = await supabaseClient
+            .from('expense_categories').insert([{ name: 'Зарплата' }]).select('id').limit(1);
+        if (!ins.error && ins.data && ins.data.length) {
+            salaryExpenseCategoryId = ins.data[0].id;
+            return salaryExpenseCategoryId;
+        }
+    } catch (e) {
+        console.warn('Не удалось получить/создать категорию «Зарплата»:', e);
+    }
+    return null;
+}
+
+// Выплата зарплаты конкретному сотруднику за текущий выбранный период.
+async function payoutSalesSalary(sellerRef) {
+    if (!salesSalaryRange) return;
+    const { from, to } = salesSalaryRange;
+
+    const rows = aggregateEmployeeSales(from, to);
+    const row = rows.find(r => (r.sellerRef || '') === sellerRef);
+    if (!row) { alert('Сотрудник не найден за выбранный период.'); return; }
+
+    // Повторная защита от двойной выплаты (на случай гонки).
+    if (findExistingPayout(sellerRef, from, to)) {
+        alert('Этому сотруднику уже выплачена зарплата за выбранный период.');
+        renderSalesSalary();
+        return;
+    }
+
+    const periodLabel = (from === to) ? formatDateRu(from) : `${formatDateRu(from)} — ${formatDateRu(to)}`;
+    const ok = confirm(
+        `Выплатить зарплату?\n\n` +
+        `Сотрудник: ${row.sellerName}\n` +
+        `Выручка за период: ${formatCurrency(row.gross)}\n` +
+        `Процент: ${row.rate}%\n` +
+        `К выплате: ${formatCurrency(row.amount)}\n` +
+        `Период: ${periodLabel}`
+    );
+    if (!ok) return;
+
+    const paidBy = currentUser || 'dashboard';
+    const employeeId = row.matchedEmp ? row.matchedEmp.id : null;
+    const categoryId = await ensureSalaryExpenseCategory();
+
+    // 1) Затрата в expenses (категория «Зарплата»), expense_date = последний день периода.
+    const expenseId = generateId('exp');
+    const expenseName = `Зарплата: ${row.sellerName} (${row.rate}% за ${periodLabel})`;
+    const expenseRow = {
+        id: expenseId,
+        category_id: categoryId,
+        name: expenseName,
+        amount: row.amount,
+        expense_date: to,
+        added_by: paidBy
+    };
+    try {
+        const expRes = await supabaseClient.from('expenses').insert([expenseRow]);
+        if (expRes.error) throw expRes.error;
+    } catch (e) {
+        console.error('Ошибка записи в expenses:', e);
+        alert('Не удалось записать затрату. Выплата отменена.\n' + (e.message || e));
+        return;
+    }
+
+    // 2) Журнал выплаты в salary_payouts (со ссылкой на expense_id).
+    const payoutId = generateId('payout');
+    const payoutRow = {
+        id: payoutId,
+        seller_ref: sellerRef || null,
+        employee_id: employeeId,
+        employee_name: row.sellerName,
+        period_from: from,
+        period_to: to,
+        gross_sales: row.gross,
+        commission_rate: row.rate,
+        amount: row.amount,
+        expense_id: expenseId,
+        paid_by: paidBy
+    };
+    try {
+        const payRes = await supabaseClient.from('salary_payouts').insert([payoutRow]);
+        if (payRes.error) throw payRes.error;
+    } catch (e) {
+        console.error('Ошибка записи в salary_payouts:', e);
+        // Откатываем затрату, чтобы не было «осиротевшей» записи.
+        try { await supabaseClient.from('expenses').delete().eq('id', expenseId); } catch (_) {}
+        alert('Не удалось записать выплату в журнал. Затрата отменена.\n' + (e.message || e));
+        return;
+    }
+
+    // 3) Отражаем затрату в чистой прибыли на главной (appData.fixedExpenses).
+    //    Главная страница считает прибыль = выручка − appData.fixedExpenses.
+    try {
+        appData.fixedExpenses = appData.fixedExpenses || [];
+        appData.fixedExpenses.push({
+            id: 'fx_' + payoutId,
+            salon: 'Общие',
+            categoryKey: 'salary',
+            categoryName: 'Зарплаты',
+            name: expenseName,
+            amount: row.amount,
+            date: to,
+            employeeId: employeeId,
+            payoutId: payoutId,
+            createdBy: paidBy,
+            createdAt: new Date().toISOString()
+        });
+        addToAuditLog('Выплачено', 'Зарплата от продаж', `${row.sellerName} — ${row.rate}% за ${periodLabel} — ${formatCurrency(row.amount)}`);
+        await saveData();
+    } catch (e) {
+        console.error('Не удалось сохранить затрату в appData:', e);
+        // Запись в Supabase уже сделана — не критично для журнала, но сообщим.
+    }
+
+    // Обновляем локальный кэш журнала и перерисовываем.
+    salaryPayoutsCache.push({
+        id: payoutId, seller_ref: sellerRef || null, employee_name: row.sellerName,
+        period_from: from, period_to: to, gross_sales: row.gross,
+        commission_rate: row.rate, amount: row.amount, created_at: new Date().toISOString()
+    });
+
+    if (typeof showSuccess === 'function') showSuccess('Зарплата выплачена и учтена в затратах');
+    renderSalesSalary();
+    if (typeof renderDashboardFixedExpenses === 'function') renderDashboardFixedExpenses();
+    if (typeof updateDashboard === 'function') updateDashboard();
+}
+
+window.onSalesSalaryMonthPreset = onSalesSalaryMonthPreset;
+window.onSalesSalaryDateRangeChange = onSalesSalaryDateRangeChange;
+window.payoutSalesSalary = payoutSalesSalary;
+window.loadSalesSalarySection = loadSalesSalarySection;

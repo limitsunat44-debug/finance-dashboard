@@ -528,6 +528,7 @@
             <div class="section-tabs">
                 <button class="section-tab active" data-section="employees">Сотрудники</button>
                 <button class="section-tab" data-section="payments">Выплаты зарплат</button>
+                <button class="section-tab" data-section="salesSalary">Зарплата от продаж (2%)</button>
                 <button class="section-tab" data-section="calculator">Калькулятор</button>
             </div>
 
@@ -589,6 +590,49 @@
                             <button class="btn btn-secondary" onclick="applyCalcAsPayment()">→ Перенести в выплаты</button>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Зарплата от продаж (2%) Tab -->
+            <div id="salesSalaryTab" class="tab-content">
+                <div class="card" id="salesSalaryCard">
+                    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                        <h3 style="margin:0;">💼 Зарплата от продаж (2%)</h3>
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                            <label for="salesSalaryPeriod" style="font-size:13px;color:var(--color-text-secondary);">Месяц:</label>
+                            <select id="salesSalaryPeriod" class="form-control" style="width:auto;min-width:140px;" onchange="onSalesSalaryMonthPreset()"></select>
+                            <label for="salesSalaryFrom" style="font-size:13px;color:var(--color-text-secondary);">с</label>
+                            <input type="date" id="salesSalaryFrom" class="form-control" style="width:auto;" onchange="onSalesSalaryDateRangeChange()">
+                            <label for="salesSalaryTo" style="font-size:13px;color:var(--color-text-secondary);">по</label>
+                            <input type="date" id="salesSalaryTo" class="form-control" style="width:auto;" onchange="onSalesSalaryDateRangeChange()">
+                            <span id="salesSalaryDateLabel" style="font-size:13px;color:var(--color-text-secondary);"></span>
+                        </div>
+                    </div>
+                    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
+                        Зарплата считается как 2% от выручки сотрудника за выбранный период (выручка из 1С,
+                        <i>employee_sales_1c</i>, без учёта возвратов). Если сотрудник сопоставлен с записью в
+                        справочнике сотрудников — используется его индивидуальный процент. Кнопка «Выплатить»
+                        фиксирует выплату в журнале и добавляет её в затраты (категория «Зарплата»), поэтому
+                        выплата отражается в чистой прибыли на главной странице. Повторная выплата за тот же
+                        период блокируется.
+                    </p>
+                    <div id="salesSalarySummary" class="sales-salary-summary"></div>
+                    <div class="table-container">
+                        <table id="salesSalaryTable" class="sales-salary-table">
+                            <thead>
+                                <tr>
+                                    <th>Сотрудник</th>
+                                    <th>Выручка за период</th>
+                                    <th>Процент</th>
+                                    <th>К выплате</th>
+                                    <th>Статус</th>
+                                    <th>Действие</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div id="salesSalaryEmpty" style="display:none;color:var(--color-text-secondary);padding:14px 0;"></div>
                 </div>
             </div>
 

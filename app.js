@@ -159,10 +159,20 @@ function matchSalonToFixed(salon1CName) {
     return SALONS.find(s => normalizeSalonName(s) === norm) || null;
 }
 
+// Возвращает год-месяц ('YYYY-MM') последнего месяца, за который в 1С есть
+// продажи. Если данных нет — текущий месяц. Берём именно последний месяц с
+// данными, а не календарный «текущий»: данные 1С приходят с задержкой, и в
+// начале месяца за новый месяц их ещё нет (напр. 1 июня данные только за май).
+function latestSalesYM1C() {
+    const last = latestSale1CDate(); // 'YYYY-MM-DD', самая свежая дата с продажами
+    return last.slice(0, 7);
+}
+
 // Объединённый блок «Выручка + чистая прибыль по салонам» на главной.
-// Период — ТЕКУЩИЙ МЕСЯЦ (тот же, что у grid «За текущий месяц» и за который
-// хранятся постоянные затраты в appData.fixedExpenses), чтобы выручка и затраты
-// считались за один и тот же интервал и расчёт был консистентным.
+// Период — ПОСЛЕДНИЙ МЕСЯЦ С ДАННЫМИ 1С (а не календарный текущий месяц), чтобы
+// блок не оказывался пустым в начале месяца, когда данные 1С за новый месяц ещё
+// не подгрузились. Выручка и постоянные затраты считаются за ОДИН И ТОТ ЖЕ
+// период (этот месяц), поэтому чистая прибыль = выручка − затраты консистентна.
 //
 // Чистая прибыль салона = выручка салона (net_sales из 1С за месяц)
 //                         − постоянные затраты этого салона.
@@ -187,14 +197,15 @@ function renderDashboardSalonRevenue1C() {
         return;
     }
 
-    // Период — текущий месяц.
-    const now = new Date();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    if (labelEl) labelEl.textContent = `за текущий месяц (${formatDateRu(toLocalDateStr(monthStart))} — ${formatDateRu(toLocalDateStr(now))})`;
+    // Период — последний месяц, за который есть данные 1С (не календарный текущий).
+    const ym = latestSalesYM1C();
+    const [periodYear, periodMonth] = ym.split('-').map(Number);
+    const monthStart = new Date(periodYear, periodMonth - 1, 1);
+    const monthEnd = new Date(periodYear, periodMonth, 0); // последний день месяца
+    if (labelEl) labelEl.textContent = `за ${formatMonthRu(ym)} (${formatDateRu(toLocalDateStr(monthStart))} — ${formatDateRu(toLocalDateStr(monthEnd))})`;
 
     // Выручка по салонам 1С за месяц.
-    const revByName1C = netBySalon1C(monthStart, now);
+    const revByName1C = netBySalon1C(monthStart, monthEnd);
 
     // Сводим выручку к каноническим именам SALONS (для сопоставления с затратами).
     // Выручку складов без постоянных затрат (Интернет магазин, Основной склад)
@@ -228,7 +239,7 @@ function renderDashboardSalonRevenue1C() {
     // Карточки по салонам.
     let totalRevenue = 0;
     let totalFixed = 0;
-    let cards = '<div class="c1-revenue-grid-title">Выручка − постоянные затраты = чистая прибыль (за текущий месяц)</div>';
+    let cards = `<div class="c1-revenue-grid-title">Выручка − постоянные затраты = чистая прибыль (${formatMonthRu(ym)})</div>`;
 
     SALONS.forEach(salon => {
         const revenue = revenueBySalon[salon] || 0;
@@ -3529,6 +3540,14 @@ function formatDateRu(dateStr) {
     const [y, m, d] = dateStr.split('-').map(Number);
     const months = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
     return `${d} ${months[m-1]} ${y}`;
+}
+
+// 'YYYY-MM' -> 'месяц YYYY' в именительном падеже (напр. 'май 2026').
+function formatMonthRu(ym) {
+    if (!ym) return '';
+    const [y, m] = ym.split('-').map(Number);
+    const months = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+    return `${months[m-1]} ${y}`;
 }
 
 function renderDashboardDailySales() {

@@ -139,53 +139,147 @@ function latestSale1CDate() {
     return max || toLocalDateStr(new Date());
 }
 
-// Карточки выручки по салонам на главной (за последний день с данными и за текущий месяц).
+// Нормализация названия салона для сопоставления имён из 1С (warehouses_1c)
+// с названиями из постоянных затрат (SALONS). В 1С названия отличаются:
+// кавычки, дефисы, буква «ё» вместо «е» и т.п. (напр. Ортосалон "Сити-Молл"
+// против Ортосалон СитиМолл). Сводим к единому виду: нижний регистр, без
+// кавычек/пробелов/дефисов/точек, «ё»→«е».
+function normalizeSalonName(name) {
+    return String(name || '')
+        .toLowerCase()
+        .replace(/ё/g, 'е')
+        .replace(/[«»"'`\-\s.,]/g, '');
+}
+
+// Сопоставляем имя салона из 1С с одним из названий SALONS (постоянные затраты).
+// Возвращает каноническое имя из SALONS либо null, если совпадения нет
+// (напр. «Интернет магазин», «Основной склад» — для них постоянных затрат нет).
+function matchSalonToFixed(salon1CName) {
+    const norm = normalizeSalonName(salon1CName);
+    return SALONS.find(s => normalizeSalonName(s) === norm) || null;
+}
+
+// Объединённый блок «Выручка + чистая прибыль по салонам» на главной.
+// Период — ТЕКУЩИЙ МЕСЯЦ (тот же, что у grid «За текущий месяц» и за который
+// хранятся постоянные затраты в appData.fixedExpenses), чтобы выручка и затраты
+// считались за один и тот же интервал и расчёт был консистентным.
+//
+// Чистая прибыль салона = выручка салона (net_sales из 1С за месяц)
+//                         − постоянные затраты этого салона.
+// Постоянные затраты салона = собственные затраты салона
+//                         + доля общих затрат («Общие»).
+//
+// Как распределяем общие затраты: в данных постоянные затраты привязаны к
+// конкретному салону (поле salon), а бюджет без привязки лежит в «Общие».
+// «Общие» распределяем ПРОПОРЦИОНАЛЬНО выручке салонов за месяц — салон с
+// большей выручкой берёт на себя большую долю общих расходов (это честнее,
+// чем поровну, т.к. крупный салон создаёт большую часть оборота). Если суммарная
+// выручка за месяц нулевая — распределяем «Общие» поровну между салонами.
 function renderDashboardSalonRevenue1C() {
-    const todayEl = document.getElementById('dashboardSalonRevenueToday');
     const monthEl = document.getElementById('dashboardSalonRevenueMonth');
+    const todayEl = document.getElementById('dashboardSalonRevenueToday');
     const labelEl = document.getElementById('dashboardSalonRevenueDateLabel');
-    if (!todayEl || !monthEl) return;
+    if (!monthEl) return;
+    if (todayEl) todayEl.innerHTML = ''; // блок «за последний день» больше не используется
 
     if (!sales1CLoaded) {
-        todayEl.innerHTML = '<p style="color:var(--color-text-secondary);">Загрузка данных 1С…</p>';
-        monthEl.innerHTML = '';
+        monthEl.innerHTML = '<p style="color:var(--color-text-secondary);">Загрузка данных 1С…</p>';
         return;
     }
 
-    const lastDate = latestSale1CDate();
-    if (labelEl) labelEl.textContent = `последний день: ${formatDateRu(lastDate)}`;
-
-    // За последний день с данными
-    const dayMap = netBySalon1C(lastDate, lastDate);
-    // За текущий месяц
+    // Период — текущий месяц.
     const now = new Date();
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthMap = netBySalon1C(monthStart, now);
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (labelEl) labelEl.textContent = `за текущий месяц (${formatDateRu(toLocalDateStr(monthStart))} — ${formatDateRu(toLocalDateStr(now))})`;
 
-    const salons = getSalonNames1C();
+    // Выручка по салонам 1С за месяц.
+    const revByName1C = netBySalon1C(monthStart, now);
 
-    const buildGrid = (title, map) => {
-        let total = 0;
-        let cards = '';
-        salons.forEach(salon => {
-            const v = map[salon] || 0;
-            total += v;
-            cards += `
-                <div class="c1-revenue-card">
-                    <div class="c1-revenue-salon">🏪 ${escapeHtml(salon)}</div>
-                    <div class="c1-revenue-value">${formatCurrency(v)}</div>
-                </div>`;
-        });
+    // Сводим выручку к каноническим именам SALONS (для сопоставления с затратами).
+    // Выручку складов без постоянных затрат (Интернет магазин, Основной склад)
+    // оставляем отдельно — она войдёт в общий итог, но без вычета затрат.
+    const revenueBySalon = {};
+    SALONS.forEach(s => { revenueBySalon[s] = 0; });
+    let revenueUnmatched = 0;
+    Object.keys(revByName1C).forEach(name1c => {
+        const canon = matchSalonToFixed(name1c);
+        if (canon) revenueBySalon[canon] += revByName1C[name1c];
+        else revenueUnmatched += revByName1C[name1c];
+    });
+
+    // Постоянные затраты: собственные по салонам + общий «котёл» из «Общие».
+    const ownFixedBySalon = {};
+    SALONS.forEach(s => { ownFixedBySalon[s] = sumFixedExpensesBySalon(s, ym); });
+    const sharedFixed = sumFixedExpensesBySalon('Общие', ym);
+
+    const totalMatchedRevenue = SALONS.reduce((sum, s) => sum + revenueBySalon[s], 0);
+
+    // Доля общих затрат на салон: пропорционально выручке, иначе поровну.
+    const sharedShare = {};
+    SALONS.forEach(s => {
+        if (totalMatchedRevenue > 0) {
+            sharedShare[s] = sharedFixed * (revenueBySalon[s] / totalMatchedRevenue);
+        } else {
+            sharedShare[s] = sharedFixed / SALONS.length;
+        }
+    });
+
+    // Карточки по салонам.
+    let totalRevenue = 0;
+    let totalFixed = 0;
+    let cards = '<div class="c1-revenue-grid-title">Выручка − постоянные затраты = чистая прибыль (за текущий месяц)</div>';
+
+    SALONS.forEach(salon => {
+        const revenue = revenueBySalon[salon] || 0;
+        const fixed = (ownFixedBySalon[salon] || 0) + (sharedShare[salon] || 0);
+        const profit = revenue - fixed;
+        totalRevenue += revenue;
+        totalFixed += fixed;
+
+        const profitClass = profit >= 0 ? 'c1-profit-positive' : 'c1-profit-negative';
+        const profitSign = profit >= 0 ? '+' : '−';
         cards += `
-            <div class="c1-revenue-card c1-revenue-total">
-                <div class="c1-revenue-salon">Итого</div>
-                <div class="c1-revenue-value">${formatCurrency(total)}</div>
+            <div class="c1-revenue-card">
+                <div class="c1-revenue-salon">🏪 ${escapeHtml(salon)}</div>
+                <div class="c1-revenue-value">${formatCurrency(revenue)}</div>
+                <div class="c1-profit-breakdown">
+                    <div class="c1-profit-row">
+                        <span>− Постоянные затраты</span>
+                        <span>−${formatCurrency(fixed)}</span>
+                    </div>
+                    <div class="c1-profit-row c1-profit-result ${profitClass}">
+                        <span>Чистая прибыль</span>
+                        <span>${profitSign}${formatCurrency(Math.abs(profit))}</span>
+                    </div>
+                </div>
             </div>`;
-        return `<div class="c1-revenue-grid-title">${title}</div>${cards}`;
-    };
+    });
 
-    todayEl.innerHTML = buildGrid('За последний день', dayMap);
-    monthEl.innerHTML = buildGrid('За текущий месяц', monthMap);
+    // Выручка прочих складов 1С без привязки к затратам (если есть) — для полноты итога.
+    totalRevenue += revenueUnmatched;
+
+    // Итоговая карточка: суммарная выручка − все постоянные затраты.
+    const grandProfit = totalRevenue - totalFixed;
+    const grandClass = grandProfit >= 0 ? 'c1-profit-positive' : 'c1-profit-negative';
+    const grandSign = grandProfit >= 0 ? '+' : '−';
+    cards += `
+        <div class="c1-revenue-card c1-revenue-total">
+            <div class="c1-revenue-salon">Итого по всем салонам</div>
+            <div class="c1-revenue-value">${formatCurrency(totalRevenue)}</div>
+            <div class="c1-profit-breakdown">
+                <div class="c1-profit-row">
+                    <span>− Постоянные затраты</span>
+                    <span>−${formatCurrency(totalFixed)}</span>
+                </div>
+                <div class="c1-profit-row c1-profit-result ${grandClass}">
+                    <span>Чистая прибыль</span>
+                    <span>${grandSign}${formatCurrency(Math.abs(grandProfit))}</span>
+                </div>
+            </div>
+        </div>`;
+
+    monthEl.innerHTML = cards;
 }
 
 // ───────────────────────────────────────────────────────────────

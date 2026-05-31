@@ -98,23 +98,19 @@
                 </div>
             </div>
 
-            <!-- Выручка по салонам из 1С -->
+            <!-- Выручка и чистая прибыль по салонам из 1С -->
             <div class="card" id="dashboardSalonRevenueCard">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
-                    <h3 style="margin:0;">🧾 Выручка по салонам (1С)</h3>
+                    <h3 style="margin:0;">💵 Выручка и чистая прибыль по салонам (1С)</h3>
                     <span id="dashboardSalonRevenueDateLabel" style="font-size:13px;color:var(--color-text-secondary);"></span>
                 </div>
                 <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
-                    Источник: 1С (<i>sales_daily_1c</i>, чистая выручка net_sales). Обновляется автоматически.
+                    Выручка из 1С (<i>sales_daily_1c</i>, net_sales) минус постоянные затраты салона
+                    (раздел <i>Расходы → Постоянные затраты</i>). Чистая прибыль = выручка − постоянные затраты.
+                    Общие затраты распределяются по салонам пропорционально выручке. Обновляется автоматически.
                 </p>
-                <div id="dashboardSalonRevenueToday" class="c1-revenue-grid"></div>
-                <div id="dashboardSalonRevenueMonth" class="c1-revenue-grid" style="margin-top:16px;"></div>
-            </div>
-
-            <!-- Fixed expenses summary by salon (current month) -->
-            <div class="card" id="dashboardFixedExpensesCard">
-                <h3 style="margin-bottom: 16px;">📌 Постоянные затраты за текущий месяц</h3>
-                <div id="dashboardFixedExpenses" class="fixed-expenses-summary"></div>
+                <div id="dashboardSalonRevenueToday" style="display:none;"></div>
+                <div id="dashboardSalonRevenueMonth" class="c1-revenue-grid"></div>
             </div>
 
             <!-- Daily Sales summary for yesterday -->

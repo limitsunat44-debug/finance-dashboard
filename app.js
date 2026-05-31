@@ -125,6 +125,9 @@ function netBySalon1C(fromDate, toDate) {
 
 // 'YYYY-MM-DD' из Date или строки, по локальному времени.
 function toLocalDateStr(d) {
+    // Уже готовая строка 'YYYY-MM-DD' (напр. из <input type="date">) — возвращаем
+    // как есть, чтобы не зависеть от таймзоны при парсинге new Date('YYYY-MM-DD').
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
     const dt = (d instanceof Date) ? d : new Date(d);
     const y = dt.getFullYear();
     const m = String(dt.getMonth() + 1).padStart(2, '0');
@@ -177,53 +180,211 @@ function availableSalesYM1C() {
     return Array.from(seen).sort((a, b) => b.localeCompare(a));
 }
 
-// Заполняет выпадающий список периодов реально доступными месяцами 1С.
-// Сохраняет текущий выбор пользователя, если он остаётся доступным; иначе
-// выбирает последний месяц с данными. Возвращает выбранный период 'YYYY-MM'
-// (или '' если данных нет вовсе).
+// Самая ранняя дата с продажами в 1С (строка 'YYYY-MM-DD') или ''.
+function earliestSale1CDate() {
+    let min = '';
+    sales1C.forEach(s => { if (s.date && (!min || s.date < min)) min = s.date; });
+    return min;
+}
+
+// Первый и последний день месяца 'YYYY-MM' как строки 'YYYY-MM-DD'.
+function monthBounds(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    const start = toLocalDateStr(new Date(y, m - 1, 1));
+    const end = toLocalDateStr(new Date(y, m, 0)); // день 0 след. месяца = последний день текущего
+    return { start, end };
+}
+
+// Количество дней в диапазоне [from..to] включительно (по строкам 'YYYY-MM-DD').
+function daysInRangeInclusive(from, to) {
+    const a = new Date(from + 'T00:00:00');
+    const b = new Date(to + 'T00:00:00');
+    if (isNaN(a) || isNaN(b) || b < a) return 0;
+    return Math.round((b - a) / 86400000) + 1;
+}
+
+// Пересечение диапазона [from..to] с месяцем ym: возвращает кол-во дней
+// диапазона, попадающих в этот месяц, и общее число дней месяца. Нужно для
+// pro-rata распределения помесячных постоянных затрат на произвольный диапазон.
+function monthOverlapDays(ym, from, to) {
+    const { start: mStart, end: mEnd } = monthBounds(ym);
+    const lo = from > mStart ? from : mStart;
+    const hi = to < mEnd ? to : mEnd;
+    if (hi < lo) return { overlap: 0, monthDays: daysInRangeInclusive(mStart, mEnd) };
+    return { overlap: daysInRangeInclusive(lo, hi), monthDays: daysInRangeInclusive(mStart, mEnd) };
+}
+
+// Список месяцев 'YYYY-MM', пересекающихся с диапазоном [from..to] включительно.
+function monthsInRange(from, to) {
+    const months = [];
+    let [y, m] = from.split('-').map(Number);
+    const [ey, em] = to.split('-').map(Number);
+    while (y < ey || (y === ey && m <= em)) {
+        months.push(`${y}-${String(m).padStart(2, '0')}`);
+        m++;
+        if (m > 12) { m = 1; y++; }
+    }
+    return months;
+}
+
+// Pro-rata постоянных затрат салона за произвольный диапазон [from..to].
+// Постоянные затраты в данных заданы ПОМЕСЯЧНО (привязаны к датам внутри месяца),
+// поэтому для диапазона, не равного целому месяцу, берём долю затрат каждого
+// месяца пропорционально количеству дней диапазона, попавших в этот месяц:
+//   доля_месяца = затраты_месяца × (дней_диапазона_в_месяце / дней_в_месяце).
+// Если диапазон охватывает несколько месяцев — суммируем пропорциональные доли
+// по каждому из них. Для целого месяца коэффициент = 1 (полные затраты).
+function proratedFixedExpensesBySalon(salon, from, to) {
+    const months = monthsInRange(from, to);
+    return months.reduce((sum, ym) => {
+        const monthly = sumFixedExpensesBySalon(salon, ym);
+        if (!monthly) return sum;
+        const { overlap, monthDays } = monthOverlapDays(ym, from, to);
+        if (!monthDays) return sum;
+        return sum + monthly * (overlap / monthDays);
+    }, 0);
+}
+
+// Выбранный пользователем диапазон дат для блока выручки по салонам.
+// Источник истины — два поля <input type="date"> ('с' и 'по'). Месячный select
+// работает как быстрый пресет: при выборе месяца поля дат заполняются его первым
+// и последним днём. null означает «ещё не инициализировано» — тогда при первом
+// рендере подставляем последний месяц с данными (см. ensureSalonRevenueRange).
+let salonRevenueRange = null; // { from:'YYYY-MM-DD', to:'YYYY-MM-DD' }
+
+// Заполняет выпадающий список месяцев реально доступными периодами 1С.
+// Список используется как быстрый пресет диапазона дат. Возвращает массив
+// доступных месяцев ('YYYY-MM', свежие сверху) или [] если данных нет.
 function populateSalonRevenuePeriodSelect() {
     const sel = document.getElementById('dashboardSalonRevenuePeriod');
-    if (!sel) return latestSalesYM1C();
-
     const months = availableSalesYM1C();
+    if (!sel) return months;
+
     if (!months.length) {
         sel.innerHTML = '';
         sel.disabled = true;
-        return '';
+        return months;
     }
 
-    const prev = sel.value;
     sel.disabled = false;
     sel.innerHTML = months
         .map(ym => `<option value="${ym}">${escapeHtml(formatMonthRu(ym))}</option>`)
         .join('');
+    return months;
+}
 
-    // По умолчанию — последний месяц с данными; сохраняем выбор пользователя,
-    // если он всё ещё доступен (напр. при автообновлении дашборда).
-    const selected = months.includes(prev) ? prev : (months.includes(latestSalesYM1C()) ? latestSalesYM1C() : months[0]);
-    sel.value = selected;
-    return selected;
+// Гарантирует, что salonRevenueRange задан и не выходит за пределы доступных
+// данных. По умолчанию (первая загрузка) — последний месяц с данными 1С: поля
+// дат заполняются его первым и последним днём, блок непустой. Также подрезает
+// уже выбранный диапазон к [minDate..maxDate], чтобы нельзя было уйти в пустоту.
+function ensureSalonRevenueRange() {
+    const minDate = earliestSale1CDate();
+    const maxDate = latestSale1CDate();
+    if (!minDate) { salonRevenueRange = null; return; }
+
+    if (!salonRevenueRange) {
+        // По умолчанию — последний месяц с данными.
+        const { start, end } = monthBounds(latestSalesYM1C());
+        salonRevenueRange = {
+            from: start < minDate ? minDate : start,
+            to: end > maxDate ? maxDate : end
+        };
+        return;
+    }
+
+    // Подрезаем границы к доступному диапазону данных.
+    let { from, to } = salonRevenueRange;
+    if (from < minDate) from = minDate;
+    if (to > maxDate) to = maxDate;
+    if (from > to) from = to;
+    salonRevenueRange = { from, to };
+}
+
+// Синхронизирует поля <input type="date"> с текущим состоянием диапазона и
+// ограничивает их атрибутами min/max доступным диапазоном данных. Месячный
+// select при этом выставляется на месяц начала диапазона, если диапазон ровно
+// совпадает с целым месяцем (для наглядности пресета); иначе выбор месяца
+// оставляем как есть.
+function syncSalonRevenueControls() {
+    const fromEl = document.getElementById('dashboardSalonRevenueFrom');
+    const toEl = document.getElementById('dashboardSalonRevenueTo');
+    const sel = document.getElementById('dashboardSalonRevenuePeriod');
+    const minDate = earliestSale1CDate();
+    const maxDate = latestSale1CDate();
+
+    if (fromEl) {
+        fromEl.min = minDate || '';
+        fromEl.max = maxDate || '';
+        fromEl.value = salonRevenueRange ? salonRevenueRange.from : '';
+    }
+    if (toEl) {
+        toEl.min = minDate || '';
+        toEl.max = maxDate || '';
+        toEl.value = salonRevenueRange ? salonRevenueRange.to : '';
+    }
+    if (sel && salonRevenueRange) {
+        const ym = salonRevenueRange.from.slice(0, 7);
+        const { start, end } = monthBounds(ym);
+        if (salonRevenueRange.from === start && salonRevenueRange.to === end) {
+            sel.value = ym;
+        }
+    }
+}
+
+// Обработчик месячного пресета: выбор месяца заполняет поля дат его первым и
+// последним днём (с подрезкой к доступному диапазону данных) и перерисовывает блок.
+function onSalonRevenueMonthPreset() {
+    const sel = document.getElementById('dashboardSalonRevenuePeriod');
+    if (!sel || !sel.value) return;
+    const { start, end } = monthBounds(sel.value);
+    const minDate = earliestSale1CDate();
+    const maxDate = latestSale1CDate();
+    salonRevenueRange = {
+        from: minDate && start < minDate ? minDate : start,
+        to: maxDate && end > maxDate ? maxDate : end
+    };
+    renderDashboardSalonRevenue1C();
+}
+
+// Обработчик ручного изменения полей дат. Нормализует диапазон (если 'по' раньше
+// 'с' — меняем местами), подрезает к доступному диапазону данных и перерисовывает.
+function onSalonRevenueDateRangeChange() {
+    const fromEl = document.getElementById('dashboardSalonRevenueFrom');
+    const toEl = document.getElementById('dashboardSalonRevenueTo');
+    if (!fromEl || !toEl) return;
+    let from = fromEl.value;
+    let to = toEl.value;
+    if (!from || !to) return; // ждём, пока заданы оба поля
+    if (to < from) { const t = from; from = to; to = t; }
+    salonRevenueRange = { from, to };
+    renderDashboardSalonRevenue1C();
 }
 
 // Объединённый блок «Выручка + чистая прибыль по салонам» на главной.
-// Период выбирается пользователем в выпадающем списке в шапке блока (только
-// месяцы, за которые реально есть данные 1С). По умолчанию — ПОСЛЕДНИЙ МЕСЯЦ С
-// ДАННЫМИ 1С (а не календарный текущий месяц), чтобы блок не оказывался пустым в
-// начале месяца, когда данные 1С за новый месяц ещё не подгрузились. Выручка и
-// постоянные затраты считаются за ОДИН И ТОТ ЖЕ период (выбранный месяц),
-// поэтому чистая прибыль = выручка − затраты консистентна.
+// Период выбирается пользователем в шапке блока: можно выбрать целый месяц
+// (быстрый пресет, заполняет поля дат) ИЛИ задать произвольный диапазон дней в
+// полях «с»/«по». Так как 1С хранит продажи по дням (sale_date), это даёт
+// дневную гранулярность. По умолчанию — ПОСЛЕДНИЙ МЕСЯЦ С ДАННЫМИ 1С (а не
+// календарный текущий), чтобы блок не оказывался пустым в начале месяца, когда
+// данные за новый месяц ещё не подгрузились. Выручка и постоянные затраты
+// считаются за ОДИН И ТОТ ЖЕ диапазон, поэтому чистая прибыль = выручка − затраты
+// консистентна.
 //
-// Чистая прибыль салона = выручка салона (net_sales из 1С за месяц)
-//                         − постоянные затраты этого салона.
+// Чистая прибыль салона = выручка салона (net_sales из 1С за диапазон)
+//                         − постоянные затраты этого салона за диапазон.
 // Постоянные затраты салона = собственные затраты салона
 //                         + доля общих затрат («Общие»).
 //
+// Pro-rata по дням: постоянные затраты заданы помесячно, поэтому для диапазона,
+// не равного целому месяцу, берём их долю пропорционально количеству дней
+// диапазона относительно месяца (см. proratedFixedExpensesBySalon). Для диапазона
+// через несколько месяцев — суммируем пропорциональные доли по каждому месяцу.
+//
 // Как распределяем общие затраты: в данных постоянные затраты привязаны к
 // конкретному салону (поле salon), а бюджет без привязки лежит в «Общие».
-// «Общие» распределяем ПРОПОРЦИОНАЛЬНО выручке салонов за месяц — салон с
-// большей выручкой берёт на себя большую долю общих расходов (это честнее,
-// чем поровну, т.к. крупный салон создаёт большую часть оборота). Если суммарная
-// выручка за месяц нулевая — распределяем «Общие» поровну между салонами.
+// «Общие» (взятые pro-rata за диапазон) распределяем ПРОПОРЦИОНАЛЬНО выручке
+// салонов за диапазон — салон с большей выручкой берёт большую долю общих
+// расходов (честнее, чем поровну). Если суммарная выручка нулевая — поровну.
 function renderDashboardSalonRevenue1C() {
     const monthEl = document.getElementById('dashboardSalonRevenueMonth');
     const todayEl = document.getElementById('dashboardSalonRevenueToday');
@@ -236,27 +397,29 @@ function renderDashboardSalonRevenue1C() {
         return;
     }
 
-    // Заполняем список доступных периодов и определяем выбранный месяц.
-    // По умолчанию (или при отсутствии прежнего выбора) — последний месяц с данными.
-    const ym = populateSalonRevenuePeriodSelect();
-    if (!ym) {
+    // Заполняем месячный пресет, определяем/подрезаем диапазон дат и синхронизируем поля.
+    populateSalonRevenuePeriodSelect();
+    ensureSalonRevenueRange();
+    syncSalonRevenueControls();
+
+    if (!salonRevenueRange) {
         if (labelEl) labelEl.textContent = '';
         monthEl.innerHTML = '<p style="color:var(--color-text-secondary);">Нет данных за период</p>';
         return;
     }
 
-    const [periodYear, periodMonth] = ym.split('-').map(Number);
-    const monthStart = new Date(periodYear, periodMonth - 1, 1);
-    const monthEnd = new Date(periodYear, periodMonth, 0); // последний день месяца
-    if (labelEl) labelEl.textContent = `за ${formatMonthRu(ym)} (${formatDateRu(toLocalDateStr(monthStart))} — ${formatDateRu(toLocalDateStr(monthEnd))})`;
+    const { from, to } = salonRevenueRange;
+    // Подпись периода отражает выбранный диапазон дат (на русском).
+    if (labelEl) labelEl.textContent = `за ${formatDateRu(from)} — ${formatDateRu(to)}`;
 
-    // Выручка по салонам 1С за месяц.
-    const revByName1C = netBySalon1C(monthStart, monthEnd);
+    // Выручка по салонам 1С за диапазон [from..to] включительно.
+    const revByName1C = netBySalon1C(from, to);
 
-    // Защита от пустого периода: если за выбранный месяц нет продаж и нет
-    // постоянных затрат — показываем понятное сообщение, не ломая интерфейс.
+    // Защита от пустого диапазона: если нет ни продаж, ни постоянных затрат за
+    // период — показываем понятное сообщение, не ломая интерфейс.
     const hasRevenue = Object.keys(revByName1C).length > 0;
-    const hasAnyFixed = SALONS.some(s => sumFixedExpensesBySalon(s, ym) > 0) || sumFixedExpensesBySalon('Общие', ym) > 0;
+    const hasAnyFixed = SALONS.some(s => proratedFixedExpensesBySalon(s, from, to) > 0)
+        || proratedFixedExpensesBySalon('Общие', from, to) > 0;
     if (!hasRevenue && !hasAnyFixed) {
         monthEl.innerHTML = '<p style="color:var(--color-text-secondary);">Нет данных за период</p>';
         return;
@@ -274,10 +437,11 @@ function renderDashboardSalonRevenue1C() {
         else revenueUnmatched += revByName1C[name1c];
     });
 
-    // Постоянные затраты: собственные по салонам + общий «котёл» из «Общие».
+    // Постоянные затраты за диапазон (pro-rata по дням): собственные по салонам
+    // + общий «котёл» из «Общие».
     const ownFixedBySalon = {};
-    SALONS.forEach(s => { ownFixedBySalon[s] = sumFixedExpensesBySalon(s, ym); });
-    const sharedFixed = sumFixedExpensesBySalon('Общие', ym);
+    SALONS.forEach(s => { ownFixedBySalon[s] = proratedFixedExpensesBySalon(s, from, to); });
+    const sharedFixed = proratedFixedExpensesBySalon('Общие', from, to);
 
     const totalMatchedRevenue = SALONS.reduce((sum, s) => sum + revenueBySalon[s], 0);
 
@@ -291,10 +455,17 @@ function renderDashboardSalonRevenue1C() {
         }
     });
 
+    // Заголовок грида: для целого месяца показываем его название, иначе диапазон дат.
+    const fromYM = from.slice(0, 7);
+    const { start: mStart, end: mEnd } = monthBounds(fromYM);
+    const periodTitle = (from === mStart && to === mEnd)
+        ? formatMonthRu(fromYM)
+        : `${formatDateRu(from)} — ${formatDateRu(to)}`;
+
     // Карточки по салонам.
     let totalRevenue = 0;
     let totalFixed = 0;
-    let cards = `<div class="c1-revenue-grid-title">Выручка − постоянные затраты = чистая прибыль (${formatMonthRu(ym)})</div>`;
+    let cards = `<div class="c1-revenue-grid-title">Выручка − постоянные затраты = чистая прибыль (${escapeHtml(periodTitle)})</div>`;
 
     SALONS.forEach(salon => {
         const revenue = revenueBySalon[salon] || 0;

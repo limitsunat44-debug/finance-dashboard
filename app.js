@@ -5161,6 +5161,25 @@ function initProductFilters() {
         });
         search.dataset.init = '1';
     }
+
+    // Фильтры подраздела «Перемещения»: «Откуда» (без Интернет магазина),
+    // «Куда» (без Интернет магазина и Основного склада). Склады — из реальных warehouses по c1_code.
+    const fromSel = document.getElementById('prodTransferFrom');
+    if (fromSel && !fromSel.dataset.init) {
+        const opts = productsState.warehouses.filter(w => w.c1_code !== WH_INTERNET_CODE);
+        fromSel.innerHTML = '<option value="">Все</option>' +
+            opts.map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name || w.c1_code)}</option>`).join('');
+        fromSel.dataset.init = '1';
+        fromSel.addEventListener('change', renderProductTransfers);
+    }
+    const toSel = document.getElementById('prodTransferTo');
+    if (toSel && !toSel.dataset.init) {
+        const opts = productsState.warehouses.filter(w => w.c1_code !== WH_INTERNET_CODE && w.c1_code !== WH_MAIN_CODE);
+        toSel.innerHTML = '<option value="">Все</option>' +
+            opts.map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name || w.c1_code)}</option>`).join('');
+        toSel.dataset.init = '1';
+        toSel.addEventListener('change', renderProductTransfers);
+    }
 }
 
 // ── Остатки: строка = товар, разворот в матрицу размер × магазин ──
@@ -5299,28 +5318,38 @@ function renderStockGroupRow(g, filters) {
 }
 
 // ── Рекомендации перемещений ─────────────────────────────────────
+// Коды складов с особой ролью в «Перемещениях»
+const WH_INTERNET_CODE = 'OM-000001';   // Интернет магазин — полностью исключён из перемещений
+const WH_MAIN_CODE = 'OM-000005';       // Основной склад — приоритетный донор, но не получатель
+
+function whCode(id) {
+    const w = productsState.whById[id];
+    return w ? (w.c1_code || '') : '';
+}
+function isInternetWarehouse(id) { return whCode(id) === WH_INTERNET_CODE; }
+function isMainWarehouse(id) { return whCode(id) === WH_MAIN_CODE; }
+
 function renderProductTransfers() {
     const tbody = document.querySelector('#prodTransfersTable tbody');
     if (!tbody) return;
 
-    // Группируем по (product_id | size_label) → варианты по складам
+    const fromFilter = (document.getElementById('prodTransferFrom') || {}).value || '';
+    const toFilter = (document.getElementById('prodTransferTo') || {}).value || '';
+
+    // Группируем по (product_id | size_label) → варианты по складам.
+    // Интернет магазин (OM-000001) исключаем полностью: ни как донора, ни как получателя.
     const byKey = new Map();
     for (const v of productsState.variants) {
+        if (isInternetWarehouse(v.warehouse_id)) continue;
         const key = v.product_id + '||' + (v.size_label || '—');
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key).push(v);
     }
 
-    // Основной склад — приоритетный донор (по c1_code, подстраховка по name)
-    const isMainWarehouse = (id) => {
-        const w = productsState.whById[id];
-        if (!w) return false;
-        return w.c1_code === 'OM-000005' || w.name === 'Основной склад';
-    };
-
     const recs = [];
     for (const [, vars] of byKey) {
-        const deficits = vars.filter(v => v.stock <= LOW_STOCK_THRESHOLD);
+        // Получатели: дефицит, но НЕ Основной склад и НЕ Интернет магазин (исключён выше)
+        const deficits = vars.filter(v => v.stock <= LOW_STOCK_THRESHOLD && !isMainWarehouse(v.warehouse_id));
         const surplus = vars.filter(v => v.stock >= TRANSFER_SURPLUS_MIN)
             .sort((a, b) => b.stock - a.stock);
         if (deficits.length === 0 || surplus.length === 0) continue;
@@ -5332,6 +5361,9 @@ function renderProductTransfers() {
                 ? mainSurplus
                 : surplus.find(s => s.warehouse_id !== d.warehouse_id && !isMainWarehouse(s.warehouse_id));
             if (!src) continue;
+            // Фильтры «Откуда»/«Куда» по конкретному складу (по умолчанию — все)
+            if (fromFilter && src.warehouse_id !== fromFilter) continue;
+            if (toFilter && d.warehouse_id !== toFilter) continue;
             const p = productsState.prodById[d.product_id];
             // переместить столько, чтобы донор сохранил минимум 2, а у получателя стало хотя бы 2
             const moveQty = Math.max(1, Math.min(src.stock - 2, 2 - d.stock + 1));

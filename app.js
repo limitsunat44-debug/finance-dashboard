@@ -25,6 +25,15 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // Инициализация Supabase клиента
 const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ───────────────────────────────────────────────────────────────
+// ВТОРОЙ Supabase-клиент — база ОРТОБОТ (товарные остатки), только чтение.
+// Отдельный проект, не пересекается с finance-dashboard клиентом выше.
+// anon-ключ публичный, доступ защищён RLS-политиками на стороне базы.
+// ───────────────────────────────────────────────────────────────
+const ORTOBOT_SUPABASE_URL = 'https://qgucitzmrpwgsmtygtfs.supabase.co';
+const ORTOBOT_SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFndWNpdHptcnB3Z3NtdHlndGZzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAwNjg2OTYsImV4cCI6MjA5NTY0NDY5Nn0.DJ9aLEB9ZTaMCp-nOJz3rpJBsd75r8e-KnnMS59eAAg';
+const ortobotClient = supabase.createClient(ORTOBOT_SUPABASE_URL, ORTOBOT_SUPABASE_KEY);
+
 // Sync management variables
 let saveQueue = [];
 let isSaving = false;
@@ -1346,6 +1355,8 @@ function switchTab(tabName) {
         if (typeof loadCards1C === 'function') loadCards1C();
     } else if (tabName === 'aiInsights') {
         if (typeof loadAiInsights === 'function') loadAiInsights();
+    } else if (tabName === 'products') {
+        if (typeof loadProducts === 'function') loadProducts();
     }
 }
 
@@ -2670,9 +2681,16 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.querySelectorAll('.section-tab').forEach(tab => {
+        if (tab.dataset.prodtab) return; // подразделы «Товары» обрабатываются отдельно
         tab.addEventListener('click', function() {
             const section = this.closest('.section').id.replace('Section', '');
             switchSectionTab(section, this.dataset.section);
+        });
+    });
+
+    document.querySelectorAll('#productsSubTabs .section-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            switchProductTab(this.dataset.prodtab);
         });
     });
 
@@ -4987,3 +5005,496 @@ window.onSalesSalaryMonthPreset = onSalesSalaryMonthPreset;
 window.onSalesSalaryDateRangeChange = onSalesSalaryDateRangeChange;
 window.payoutSalesSalary = payoutSalesSalary;
 window.loadSalesSalarySection = loadSalesSalarySection;
+
+// ═══════════════════════════════════════════════════════════════
+// ТОВАРЫ — остатки, перемещения, оборачиваемость (база ОРТОБОТ)
+// ═══════════════════════════════════════════════════════════════
+
+const LOW_STOCK_THRESHOLD = 1;       // <=1 — заканчивается
+const TRANSFER_SURPLUS_MIN = 3;      // >=3 — есть излишек, можно переместить
+const STOCK_PAGE_SIZE = 50;          // товаров на странице в таблице остатков
+
+let productsState = {
+    loaded: false,
+    loading: false,
+    warehouses: [],          // [{id, c1_ref, c1_code, name}]
+    whById: {},              // id -> warehouse
+    products: [],            // [{id, c1_ref, name_ru, category, price, currency}]
+    prodById: {},            // id -> product
+    prodByC1: {},            // c1_ref -> product
+    variants: [],            // [{product_id, warehouse_id, c1_char_ref, size_label, stock, ...}]
+    velocity: [],            // product_sales_velocity rows
+    stockPage: 0
+};
+
+async function fetchAllRows(table, columns) {
+    // Постраничная выгрузка (Supabase лимит 1000 на запрос).
+    const pageSize = 1000;
+    let from = 0;
+    const out = [];
+    while (true) {
+        const { data, error } = await ortobotClient
+            .from(table)
+            .select(columns)
+            .range(from, from + pageSize - 1);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        out.push(...data);
+        if (data.length < pageSize) break;
+        from += pageSize;
+    }
+    return out;
+}
+
+async function loadProducts(forceReload) {
+    const loadingEl = document.getElementById('productsLoading');
+    const bodyEl = document.getElementById('productsBody');
+    const errorEl = document.getElementById('productsError');
+    if (!loadingEl || !bodyEl) return;
+
+    if (productsState.loaded && !forceReload) {
+        bodyEl.style.display = 'block';
+        loadingEl.style.display = 'none';
+        return;
+    }
+    if (productsState.loading) return;
+    productsState.loading = true;
+
+    errorEl.style.display = 'none';
+    bodyEl.style.display = 'none';
+    loadingEl.style.display = 'flex';
+
+    try {
+        const [warehouses, products, variants, velocity] = await Promise.all([
+            fetchAllRows('warehouses', 'id,c1_ref,c1_code,name,is_active'),
+            fetchAllRows('products', 'id,c1_ref,sku,name_ru,category,price,currency,is_active'),
+            fetchAllRows('product_variants', 'id,product_id,warehouse_id,c1_char_ref,size_label,stock,price,currency'),
+            fetchAllRows('product_sales_velocity', 'period_from,period_to,warehouse_c1_ref,product_c1_ref,char_c1_ref,qty_sold,amount')
+        ]);
+
+        productsState.warehouses = (warehouses || [])
+            .filter(w => w.is_active !== false)
+            .sort((a, b) => String(a.c1_code || '').localeCompare(String(b.c1_code || '')));
+        productsState.whById = {};
+        productsState.warehouses.forEach(w => { productsState.whById[w.id] = w; });
+
+        productsState.products = products || [];
+        productsState.prodById = {};
+        productsState.prodByC1 = {};
+        productsState.products.forEach(p => {
+            productsState.prodById[p.id] = p;
+            if (p.c1_ref) productsState.prodByC1[p.c1_ref] = p;
+        });
+
+        productsState.variants = (variants || []).map(v => ({
+            ...v,
+            stock: Number(v.stock) || 0
+        }));
+        productsState.velocity = velocity || [];
+
+        productsState.loaded = true;
+        productsState.stockPage = 0;
+
+        initProductFilters();
+        renderProductStock();
+        renderProductTransfers();
+        renderProductTurnover();
+        renderProductStale();
+        renderProductFast();
+
+        loadingEl.style.display = 'none';
+        bodyEl.style.display = 'block';
+    } catch (e) {
+        console.error('Ошибка загрузки товаров (ОРТОБОТ):', e);
+        loadingEl.style.display = 'none';
+        errorEl.textContent = 'Не удалось загрузить данные о товарах. ' + (e && e.message ? e.message : '');
+        errorEl.style.display = 'block';
+    } finally {
+        productsState.loading = false;
+    }
+}
+
+function whName(id) {
+    const w = productsState.whById[id];
+    return w ? (w.name || w.c1_code || '—') : '—';
+}
+
+function fmtNum(n) {
+    const v = Number(n) || 0;
+    return v.toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+}
+
+function fmtPrice(p, currency) {
+    if (p == null || p === '') return '—';
+    return Number(p).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' ' + (currency || 'TJS');
+}
+
+function stockClass(stock) {
+    if (stock <= 0) return 'prod-stock-zero';
+    if (stock <= LOW_STOCK_THRESHOLD) return 'prod-stock-low';
+    return '';
+}
+
+// ── Фильтры ────────────────────────────────────────────────────
+function initProductFilters() {
+    const whSel = document.getElementById('prodFilterWarehouse');
+    const catSel = document.getElementById('prodFilterCategory');
+    if (whSel && !whSel.dataset.init) {
+        whSel.innerHTML = '<option value="">Все магазины</option>' +
+            productsState.warehouses.map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name || w.c1_code)}</option>`).join('');
+        whSel.dataset.init = '1';
+        whSel.addEventListener('change', () => { productsState.stockPage = 0; renderProductStock(); });
+    }
+    if (catSel && !catSel.dataset.init) {
+        const cats = Array.from(new Set(productsState.products.map(p => (p.category || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'ru'));
+        catSel.innerHTML = '<option value="">Все категории</option>' +
+            cats.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+        catSel.dataset.init = '1';
+        catSel.addEventListener('change', () => { productsState.stockPage = 0; renderProductStock(); });
+    }
+    const search = document.getElementById('prodFilterSearch');
+    if (search && !search.dataset.init) {
+        let t = null;
+        search.addEventListener('input', () => {
+            clearTimeout(t);
+            t = setTimeout(() => { productsState.stockPage = 0; renderProductStock(); }, 250);
+        });
+        search.dataset.init = '1';
+    }
+}
+
+// ── Остатки: строка = товар, разворот в матрицу размер × магазин ──
+function getStockFilters() {
+    return {
+        warehouseId: (document.getElementById('prodFilterWarehouse') || {}).value || '',
+        category: (document.getElementById('prodFilterCategory') || {}).value || '',
+        search: ((document.getElementById('prodFilterSearch') || {}).value || '').trim().toLowerCase()
+    };
+}
+
+function buildStockGroups(filters) {
+    // Группируем варианты по товару; учитываем фильтр магазина для отображаемых ячеек.
+    const byProduct = new Map(); // product_id -> { product, variants: [] }
+    for (const v of productsState.variants) {
+        if (filters.warehouseId && v.warehouse_id !== filters.warehouseId) continue;
+        const p = productsState.prodById[v.product_id];
+        if (!p) continue;
+        if (filters.category && (p.category || '').trim() !== filters.category) continue;
+        if (filters.search && !(p.name_ru || '').toLowerCase().includes(filters.search)) continue;
+        if (!byProduct.has(v.product_id)) byProduct.set(v.product_id, { product: p, variants: [] });
+        byProduct.get(v.product_id).variants.push(v);
+    }
+    const groups = Array.from(byProduct.values());
+    groups.sort((a, b) => (a.product.name_ru || '').localeCompare(b.product.name_ru || '', 'ru'));
+    return groups;
+}
+
+function renderProductStock() {
+    const listEl = document.getElementById('prodStockList');
+    const summaryEl = document.getElementById('prodStockSummary');
+    const pagerEl = document.getElementById('prodStockPager');
+    if (!listEl) return;
+
+    const filters = getStockFilters();
+    const groups = buildStockGroups(filters);
+
+    // Сводка
+    let totalStock = 0, zeroCnt = 0, lowCnt = 0, variantCnt = 0;
+    groups.forEach(g => g.variants.forEach(v => {
+        totalStock += v.stock; variantCnt++;
+        if (v.stock <= 0) zeroCnt++; else if (v.stock <= LOW_STOCK_THRESHOLD) lowCnt++;
+    }));
+    if (summaryEl) {
+        summaryEl.innerHTML =
+            `<span>Товаров: <b>${fmtNum(groups.length)}</b></span>` +
+            `<span>Вариантов: <b>${fmtNum(variantCnt)}</b></span>` +
+            `<span>Общий остаток: <b>${fmtNum(totalStock)}</b> шт</span>` +
+            `<span class="prod-stock-zero">Закончилось: <b>${fmtNum(zeroCnt)}</b></span>` +
+            `<span class="prod-stock-low">Заканчивается: <b>${fmtNum(lowCnt)}</b></span>`;
+    }
+
+    // Пагинация
+    const totalPages = Math.max(1, Math.ceil(groups.length / STOCK_PAGE_SIZE));
+    if (productsState.stockPage >= totalPages) productsState.stockPage = 0;
+    const start = productsState.stockPage * STOCK_PAGE_SIZE;
+    const pageGroups = groups.slice(start, start + STOCK_PAGE_SIZE);
+
+    if (pageGroups.length === 0) {
+        listEl.innerHTML = '<p style="padding:16px;color:var(--color-text-secondary);">Ничего не найдено по заданным фильтрам.</p>';
+        if (pagerEl) pagerEl.innerHTML = '';
+        return;
+    }
+
+    listEl.innerHTML = pageGroups.map(g => renderStockGroupRow(g, filters)).join('');
+
+    // Развороты
+    listEl.querySelectorAll('.prod-row-head').forEach(head => {
+        head.addEventListener('click', () => {
+            const card = head.closest('.prod-row');
+            card.classList.toggle('open');
+        });
+    });
+
+    if (pagerEl) {
+        pagerEl.innerHTML = totalPages > 1
+            ? `<button class="btn btn-secondary" ${productsState.stockPage === 0 ? 'disabled' : ''} onclick="prodStockPrev()">← Назад</button>` +
+              `<span>Стр. ${productsState.stockPage + 1} из ${totalPages}</span>` +
+              `<button class="btn btn-secondary" ${productsState.stockPage >= totalPages - 1 ? 'disabled' : ''} onclick="prodStockNext()">Вперёд →</button>`
+            : '';
+    }
+}
+
+function prodStockPrev() { if (productsState.stockPage > 0) { productsState.stockPage--; renderProductStock(); } }
+function prodStockNext() { productsState.stockPage++; renderProductStock(); }
+
+function renderStockGroupRow(g, filters) {
+    const p = g.product;
+    const totalStock = g.variants.reduce((s, v) => s + v.stock, 0);
+
+    // Размеры (столбцы) и магазины (строки) для матрицы
+    const sizes = Array.from(new Set(g.variants.map(v => v.size_label || '—')))
+        .sort((a, b) => String(a).localeCompare(String(b), 'ru', { numeric: true }));
+    // Магазины: либо отфильтрованный один, либо все, где есть варианты этого товара
+    let whIds;
+    if (filters.warehouseId) {
+        whIds = [filters.warehouseId];
+    } else {
+        whIds = Array.from(new Set(g.variants.map(v => v.warehouse_id)));
+        whIds.sort((a, b) => String((productsState.whById[a] || {}).c1_code || '').localeCompare(String((productsState.whById[b] || {}).c1_code || '')));
+    }
+
+    // map (whId|size) -> stock
+    const cell = {};
+    g.variants.forEach(v => { cell[v.warehouse_id + '|' + (v.size_label || '—')] = v.stock; });
+
+    const headRow = '<tr><th>Магазин \\ размер</th>' + sizes.map(s => `<th>${escapeHtml(s)}</th>`).join('') + '</tr>';
+    const bodyRows = whIds.map(wid => {
+        const tds = sizes.map(s => {
+            const has = Object.prototype.hasOwnProperty.call(cell, wid + '|' + s);
+            if (!has) return '<td class="prod-cell-empty">·</td>';
+            const st = cell[wid + '|' + s];
+            return `<td class="prod-cell ${stockClass(st)}">${fmtNum(st)}</td>`;
+        }).join('');
+        return `<tr><td class="prod-cell-wh">${escapeHtml(whName(wid))}</td>${tds}</tr>`;
+    }).join('');
+
+    return `
+        <div class="prod-row">
+            <div class="prod-row-head">
+                <span class="prod-row-toggle">▶</span>
+                <span class="prod-row-name">${escapeHtml(p.name_ru || '(без названия)')}</span>
+                <span class="prod-row-cat">${escapeHtml(p.category || '')}</span>
+                <span class="prod-row-price">${fmtPrice(p.price, p.currency)}</span>
+                <span class="prod-row-total">остаток: <b>${fmtNum(totalStock)}</b></span>
+            </div>
+            <div class="prod-row-detail">
+                <div class="table-container">
+                    <table class="prod-matrix">
+                        <thead>${headRow}</thead>
+                        <tbody>${bodyRows}</tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+}
+
+// ── Рекомендации перемещений ─────────────────────────────────────
+function renderProductTransfers() {
+    const tbody = document.querySelector('#prodTransfersTable tbody');
+    if (!tbody) return;
+
+    // Группируем по (product_id | size_label) → варианты по складам
+    const byKey = new Map();
+    for (const v of productsState.variants) {
+        const key = v.product_id + '||' + (v.size_label || '—');
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(v);
+    }
+
+    const recs = [];
+    for (const [, vars] of byKey) {
+        const deficits = vars.filter(v => v.stock <= LOW_STOCK_THRESHOLD);
+        const surplus = vars.filter(v => v.stock >= TRANSFER_SURPLUS_MIN)
+            .sort((a, b) => b.stock - a.stock);
+        if (deficits.length === 0 || surplus.length === 0) continue;
+        for (const d of deficits) {
+            // источник — не тот же склад, с максимальным остатком
+            const src = surplus.find(s => s.warehouse_id !== d.warehouse_id);
+            if (!src) continue;
+            const p = productsState.prodById[d.product_id];
+            // переместить столько, чтобы донор сохранил минимум 2, а у получателя стало хотя бы 2
+            const moveQty = Math.max(1, Math.min(src.stock - 2, 2 - d.stock + 1));
+            recs.push({
+                name: p ? p.name_ru : '(?)',
+                size: d.size_label || '—',
+                from: whName(src.warehouse_id),
+                fromStock: src.stock,
+                to: whName(d.warehouse_id),
+                toStock: d.stock,
+                qty: moveQty > 0 ? moveQty : 1
+            });
+        }
+    }
+    recs.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+    if (recs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-text-secondary);">Рекомендаций по перемещению нет.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = recs.map(r => `
+        <tr>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${escapeHtml(r.size)}</td>
+            <td>${escapeHtml(r.from)}</td>
+            <td>${fmtNum(r.fromStock)}</td>
+            <td>${escapeHtml(r.to)}</td>
+            <td class="${stockClass(r.toStock)}">${fmtNum(r.toStock)}</td>
+            <td><b>${fmtNum(r.qty)}</b> шт</td>
+        </tr>`).join('');
+}
+
+// ── Оборачиваемость: связка velocity ↔ variant ───────────────────
+function buildVelocityRows() {
+    // Индекс вариантов по (product_id|warehouse_id|c1_char_ref) для стыковки остатка
+    const variantIdx = new Map();
+    for (const v of productsState.variants) {
+        variantIdx.set(v.product_id + '|' + v.warehouse_id + '|' + (v.c1_char_ref || ''), v);
+    }
+    const whByC1 = {};
+    productsState.warehouses.forEach(w => { if (w.c1_ref) whByC1[w.c1_ref] = w; });
+
+    const rows = [];
+    for (const r of productsState.velocity) {
+        const p = productsState.prodByC1[r.product_c1_ref];
+        const wh = whByC1[r.warehouse_c1_ref];
+        if (!p || !wh) continue;
+        const variant = variantIdx.get(p.id + '|' + wh.id + '|' + (r.char_c1_ref || ''));
+        const days = Math.max(1, daysBetween(r.period_from, r.period_to));
+        const qty = Number(r.qty_sold) || 0;
+        const velocity = qty / days;             // шт/день
+        const stock = variant ? variant.stock : 0;
+        const daysToZero = velocity > 0 ? stock / velocity : null;
+        rows.push({
+            name: p.name_ru || '(?)',
+            size: variant ? (variant.size_label || '—') : '—',
+            warehouse: wh.name || wh.c1_code,
+            qtySold: qty,
+            velocity,
+            stock,
+            daysToZero
+        });
+    }
+    return rows;
+}
+
+function daysBetween(from, to) {
+    const a = new Date(from), b = new Date(to);
+    if (isNaN(a) || isNaN(b)) return 30;
+    return Math.round((b - a) / (24 * 60 * 60 * 1000));
+}
+
+function renderProductTurnover() {
+    const tbody = document.querySelector('#prodTurnoverTable tbody');
+    if (!tbody) return;
+    const rows = buildVelocityRows()
+        .filter(r => r.qtySold > 0)
+        .sort((a, b) => b.velocity - a.velocity)
+        .slice(0, 500);
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-text-secondary);">Нет данных об оборачиваемости.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${escapeHtml(r.size)}</td>
+            <td>${escapeHtml(r.warehouse)}</td>
+            <td>${fmtNum(r.qtySold)}</td>
+            <td>${r.velocity.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
+            <td class="${stockClass(r.stock)}">${fmtNum(r.stock)}</td>
+            <td>${r.daysToZero == null ? '<span style="color:var(--color-text-secondary);">не продаётся</span>' : Math.round(r.daysToZero) + ' дн.'}</td>
+        </tr>`).join('');
+}
+
+// ── Залежавшийся товар (есть остаток, продаж нет) ────────────────
+function renderProductStale() {
+    const tbody = document.querySelector('#prodStaleTable tbody');
+    if (!tbody) return;
+
+    // Карта проданного количества по (product_c1_ref|warehouse_c1_ref|char_c1_ref)
+    const soldMap = new Map();
+    for (const r of productsState.velocity) {
+        const key = r.product_c1_ref + '|' + r.warehouse_c1_ref + '|' + (r.char_c1_ref || '');
+        soldMap.set(key, (soldMap.get(key) || 0) + (Number(r.qty_sold) || 0));
+    }
+    const whByC1Id = {};
+    productsState.warehouses.forEach(w => { whByC1Id[w.id] = w.c1_ref; });
+
+    const rows = [];
+    for (const v of productsState.variants) {
+        if (v.stock <= 0) continue;
+        const p = productsState.prodById[v.product_id];
+        if (!p || !p.c1_ref) continue;
+        const whC1 = whByC1Id[v.warehouse_id];
+        const sold = soldMap.get(p.c1_ref + '|' + whC1 + '|' + (v.c1_char_ref || '')) || 0;
+        if (sold <= 0) {
+            rows.push({ name: p.name_ru || '(?)', size: v.size_label || '—', warehouse: whName(v.warehouse_id), stock: v.stock, sold });
+        }
+    }
+    rows.sort((a, b) => b.stock - a.stock);
+    const limited = rows.slice(0, 500);
+
+    if (limited.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-text-secondary);">Залежавшихся позиций не найдено.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = limited.map(r => `
+        <tr>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${escapeHtml(r.size)}</td>
+            <td>${escapeHtml(r.warehouse)}</td>
+            <td>${fmtNum(r.stock)}</td>
+            <td>${fmtNum(r.sold)}</td>
+            <td><span class="prod-badge prod-badge-discount">сделать скидку</span></td>
+        </tr>`).join('');
+}
+
+// ── Быстро продающийся / дозакуп ─────────────────────────────────
+function renderProductFast() {
+    const tbody = document.querySelector('#prodFastTable tbody');
+    if (!tbody) return;
+    const FAST_DAYS_TO_ZERO = 14;   // мало дней до нуля
+    const FAST_VELOCITY_MIN = 0.2;  // продаётся ощутимо
+
+    const rows = buildVelocityRows()
+        .filter(r => r.velocity >= FAST_VELOCITY_MIN && r.daysToZero != null && r.daysToZero <= FAST_DAYS_TO_ZERO && r.stock > 0)
+        .sort((a, b) => a.daysToZero - b.daysToZero)
+        .slice(0, 500);
+
+    if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--color-text-secondary);">Позиций для дозакупа не найдено.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = rows.map(r => `
+        <tr>
+            <td>${escapeHtml(r.name)}</td>
+            <td>${escapeHtml(r.size)}</td>
+            <td>${escapeHtml(r.warehouse)}</td>
+            <td>${r.velocity.toLocaleString('ru-RU', { maximumFractionDigits: 2 })}</td>
+            <td class="${stockClass(r.stock)}">${fmtNum(r.stock)}</td>
+            <td>${Math.round(r.daysToZero)} дн.</td>
+            <td><span class="prod-badge prod-badge-restock">дозакупить</span></td>
+        </tr>`).join('');
+}
+
+// ── Переключение подразделов «Товары» ────────────────────────────
+function switchProductTab(name) {
+    document.querySelectorAll('#productsSubTabs .section-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.prodtab === name);
+    });
+    document.querySelectorAll('#productsBody .prod-tab-content').forEach(c => c.classList.remove('active'));
+    const map = { stock: 'prodStockTab', transfers: 'prodTransfersTab', turnover: 'prodTurnoverTab', stale: 'prodStaleTab', fast: 'prodFastTab' };
+    const el = document.getElementById(map[name]);
+    if (el) el.classList.add('active');
+}

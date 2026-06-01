@@ -57,6 +57,7 @@
             <button class="nav-tab" data-tab="shipments" onclick="switchTab('shipments')">🚚 Товар в пути</button>
             <button class="nav-tab" data-tab="cards1c" onclick="switchTab('cards1c')">💳 Карты 1С</button>
             <button class="nav-tab" data-tab="aiInsights" onclick="switchTab('aiInsights')">🤖 ИИ-аналитика</button>
+            <button class="nav-tab" data-tab="products" onclick="switchTab('products')">📦 Товары</button>
         </nav>
 
         <!-- Loading Indicator -->
@@ -1127,6 +1128,122 @@
                             </thead>
                             <tbody></tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Products Section (Товары) -->
+        <section id="productsSection" class="section">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">📦 Товары — остатки, перемещения, оборачиваемость</h3>
+                    <button class="btn btn-secondary" onclick="loadProducts(true)">🔄 Обновить</button>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
+                    Источник: база ОРТОБОТ (Supabase). Остатки по 6 складам в разрезе товар × размер.
+                    Подсветка: <span class="prod-stock-zero">красным</span> — закончился (0),
+                    <span class="prod-stock-low">оранжевым</span> — заканчивается (≤1).
+                </p>
+
+                <div class="section-tabs" id="productsSubTabs">
+                    <button class="section-tab active" data-prodtab="stock">Остатки</button>
+                    <button class="section-tab" data-prodtab="transfers">Перемещения</button>
+                    <button class="section-tab" data-prodtab="turnover">Оборачиваемость</button>
+                    <button class="section-tab" data-prodtab="stale">Залежавшийся</button>
+                    <button class="section-tab" data-prodtab="fast">Дозакуп</button>
+                </div>
+
+                <div id="productsLoading" class="loading" style="display:flex;">
+                    <div class="loading-spinner"></div>
+                    <p>Загрузка данных из ОРТОБОТ…</p>
+                </div>
+                <div id="productsError" class="error-message" style="display:none;"></div>
+
+                <div id="productsBody" style="display:none;">
+                    <!-- Остатки -->
+                    <div id="prodStockTab" class="prod-tab-content active">
+                        <div class="prod-filters">
+                            <div class="prod-filter-group">
+                                <label for="prodFilterWarehouse">Магазин</label>
+                                <select id="prodFilterWarehouse" class="form-control" style="min-width:180px;"></select>
+                            </div>
+                            <div class="prod-filter-group">
+                                <label for="prodFilterCategory">Категория</label>
+                                <select id="prodFilterCategory" class="form-control" style="min-width:180px;"></select>
+                            </div>
+                            <div class="prod-filter-group" style="flex:1;min-width:200px;">
+                                <label for="prodFilterSearch">Поиск по названию</label>
+                                <input type="text" id="prodFilterSearch" class="form-control" placeholder="например: стельки">
+                            </div>
+                        </div>
+                        <div id="prodStockSummary" class="prod-summary"></div>
+                        <div id="prodStockList" class="prod-stock-list"></div>
+                        <div id="prodStockPager" class="prod-pager"></div>
+                    </div>
+
+                    <!-- Перемещения -->
+                    <div id="prodTransfersTab" class="prod-tab-content">
+                        <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                            Рекомендации: где товар+размер в дефиците (0 или ≤1), а в другом магазине того же
+                            товара+размера ≥3 шт — предложить переместить. Только подсказки, без записи в 1С.
+                        </p>
+                        <div class="table-container">
+                            <table id="prodTransfersTable">
+                                <thead>
+                                    <tr><th>Товар</th><th>Размер</th><th>Откуда</th><th>Остаток</th><th>Куда</th><th>Дефицит</th><th>Переместить</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Оборачиваемость -->
+                    <div id="prodTurnoverTab" class="prod-tab-content">
+                        <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                            Скорость = продано шт ÷ дни периода. Дней до нуля = текущий остаток ÷ скорость.
+                            Сортировка по скорости продаж (быстрее — выше).
+                        </p>
+                        <div class="table-container" style="max-height:620px;overflow-y:auto;">
+                            <table id="prodTurnoverTable">
+                                <thead>
+                                    <tr><th>Товар</th><th>Размер</th><th>Магазин</th><th>Продано</th><th>Скорость, шт/дн</th><th>Остаток</th><th>Дней до нуля</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Залежавшийся -->
+                    <div id="prodStaleTab" class="prod-tab-content">
+                        <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                            Есть остаток, но продаж за период практически нет → рекомендация
+                            <span class="prod-badge prod-badge-discount">сделать скидку</span>.
+                        </p>
+                        <div class="table-container" style="max-height:620px;overflow-y:auto;">
+                            <table id="prodStaleTable">
+                                <thead>
+                                    <tr><th>Товар</th><th>Размер</th><th>Магазин</th><th>Остаток</th><th>Продано за период</th><th>Рекомендация</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Дозакуп -->
+                    <div id="prodFastTab" class="prod-tab-content">
+                        <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                            Высокая скорость продаж и мало дней до нуля → рекомендация
+                            <span class="prod-badge prod-badge-restock">дозакупить</span>.
+                        </p>
+                        <div class="table-container" style="max-height:620px;overflow-y:auto;">
+                            <table id="prodFastTable">
+                                <thead>
+                                    <tr><th>Товар</th><th>Размер</th><th>Магазин</th><th>Скорость, шт/дн</th><th>Остаток</th><th>Дней до нуля</th><th>Рекомендация</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>

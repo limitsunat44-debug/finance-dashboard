@@ -5311,15 +5311,26 @@ function renderProductTransfers() {
         byKey.get(key).push(v);
     }
 
+    // Основной склад — приоритетный донор (по c1_code, подстраховка по name)
+    const isMainWarehouse = (id) => {
+        const w = productsState.whById[id];
+        if (!w) return false;
+        return w.c1_code === 'OM-000005' || w.name === 'Основной склад';
+    };
+
     const recs = [];
     for (const [, vars] of byKey) {
         const deficits = vars.filter(v => v.stock <= LOW_STOCK_THRESHOLD);
         const surplus = vars.filter(v => v.stock >= TRANSFER_SURPLUS_MIN)
             .sort((a, b) => b.stock - a.stock);
         if (deficits.length === 0 || surplus.length === 0) continue;
+        // Излишек на Основном складе (если есть и достаточен)
+        const mainSurplus = surplus.find(s => isMainWarehouse(s.warehouse_id));
         for (const d of deficits) {
-            // источник — не тот же склад, с максимальным остатком
-            const src = surplus.find(s => s.warehouse_id !== d.warehouse_id);
+            // приоритет за Основным складом; иначе — магазин с максимальным остатком (не тот же склад)
+            let src = (mainSurplus && mainSurplus.warehouse_id !== d.warehouse_id)
+                ? mainSurplus
+                : surplus.find(s => s.warehouse_id !== d.warehouse_id && !isMainWarehouse(s.warehouse_id));
             if (!src) continue;
             const p = productsState.prodById[d.product_id];
             // переместить столько, чтобы донор сохранил минимум 2, а у получателя стало хотя бы 2

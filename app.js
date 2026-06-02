@@ -5011,7 +5011,8 @@ window.loadSalesSalarySection = loadSalesSalarySection;
 // ═══════════════════════════════════════════════════════════════
 
 const LOW_STOCK_THRESHOLD = 1;       // <=1 — заканчивается
-const TRANSFER_SURPLUS_MIN = 3;      // >=3 — есть излишек, можно переместить
+const TRANSFER_SURPLUS_MIN = 3;      // >=3 — есть излишек, можно переместить (обычные склады)
+const TRANSFER_SURPLUS_MIN_MAIN = 1; // Основной склад может отдавать даже при 1 шт
 const STOCK_PAGE_SIZE = 50;          // товаров на странице в таблице остатков
 
 let productsState = {
@@ -5328,6 +5329,8 @@ function whCode(id) {
 }
 function isInternetWarehouse(id) { return whCode(id) === WH_INTERNET_CODE; }
 function isMainWarehouse(id) { return whCode(id) === WH_MAIN_CODE; }
+// Порог излишка донора: Основной склад отдаёт при >=1, остальные — при >=3
+function transferSurplusMin(id) { return isMainWarehouse(id) ? TRANSFER_SURPLUS_MIN_MAIN : TRANSFER_SURPLUS_MIN; }
 
 function renderProductTransfers() {
     const tbody = document.querySelector('#prodTransfersTable tbody');
@@ -5350,7 +5353,7 @@ function renderProductTransfers() {
     for (const [, vars] of byKey) {
         // Получатели: дефицит, но НЕ Основной склад и НЕ Интернет магазин (исключён выше)
         const deficits = vars.filter(v => v.stock <= LOW_STOCK_THRESHOLD && !isMainWarehouse(v.warehouse_id));
-        const surplus = vars.filter(v => v.stock >= TRANSFER_SURPLUS_MIN)
+        const surplus = vars.filter(v => v.stock >= transferSurplusMin(v.warehouse_id))
             .sort((a, b) => b.stock - a.stock);
         if (deficits.length === 0 || surplus.length === 0) continue;
         // Излишек на Основном складе (если есть и достаточен)

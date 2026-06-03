@@ -45,11 +45,21 @@ const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000]; // Экспоненциальная задержка
 
 // Admin accounts
+// allowedTabs: '*' или отсутствие поля = полный доступ ко всем вкладкам.
+// Иначе — массив id вкладок (data-tab), доступных пользователю.
 const ADMIN_ACCOUNTS = {
-    'Sunnat': { password: 'Sunna0909', displayName: 'Sunnat' },
-    'Iskandar': { password: '1111', displayName: 'Iskandar' },
-    'Shahida': { password: 's2364170', displayName: 'Shahida' }
+    'Sunnat': { password: 'Sunna0909', displayName: 'Sunnat', allowedTabs: '*' },
+    'Iskandar': { password: '1111', displayName: 'Iskandar', allowedTabs: '*' },
+    'Shahida': { password: 's2364170', displayName: 'Shahida', allowedTabs: '*' },
+    'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments'] }
 };
+
+// Права доступа текущего пользователя: '*' (полный) или массив id вкладок.
+let currentAllowedTabs = '*';
+
+function isTabAllowed(tabName) {
+    return currentAllowedTabs === '*' || currentAllowedTabs.includes(tabName);
+}
 
 // Salons
 const SALONS = ['Ортосалон СитиМолл', 'Ортосалон Сиема', 'Ортосалон Баракат', 'Ортосалон Айни'];
@@ -1298,10 +1308,13 @@ function login(username, password) {
     const account = ADMIN_ACCOUNTS[username];
     if (account && account.password === password) {
         currentUser = account.displayName;
+        currentAllowedTabs = account.allowedTabs || '*';
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('mainApp').style.display = 'block';
         document.getElementById('currentUser').textContent = currentUser;
-        
+
+        applyTabAccess();
+
         loadData().then(() => {
             loadSales1C().then(() => updateDashboard());
             loadEmployeeSales1C();
@@ -1321,13 +1334,43 @@ function login(username, password) {
 
 function logout() {
     currentUser = null;
+    currentAllowedTabs = '*';
+    resetTabAccess();
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('mainApp').style.display = 'none';
     document.getElementById('loginForm').reset();
 }
 
 // Navigation functions
+
+// Скрыть кнопки недоступных вкладок и открыть первую доступную.
+// Для админов (allowedTabs === '*') показываем всё и не меняем активную вкладку.
+function applyTabAccess() {
+    const tabs = document.querySelectorAll('.nav-tab');
+    if (currentAllowedTabs === '*') {
+        tabs.forEach(tab => { tab.style.display = ''; });
+        return;
+    }
+    let firstAllowed = null;
+    tabs.forEach(tab => {
+        if (isTabAllowed(tab.dataset.tab)) {
+            tab.style.display = '';
+            if (!firstAllowed) firstAllowed = tab.dataset.tab;
+        } else {
+            tab.style.display = 'none';
+        }
+    });
+    if (firstAllowed) switchTab(firstAllowed);
+}
+
+// Вернуть все кнопки навигации в видимое состояние (после logout).
+function resetTabAccess() {
+    document.querySelectorAll('.nav-tab').forEach(tab => { tab.style.display = ''; });
+}
+
 function switchTab(tabName) {
+    if (!isTabAllowed(tabName)) return;
+
     document.querySelectorAll('.section').forEach(section => {
         section.classList.remove('active');
     });

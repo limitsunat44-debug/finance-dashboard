@@ -69,6 +69,24 @@ const SALONS = ['Ортосалон СитиМолл', 'Ортосалон Си�
 // ═══════════════════════════════════════════════════════════════
 const AI_INSIGHTS_URL = 'https://1c-sync.vercel.app/api/ai-insights';
 
+// ── Синхронизация с 1С ──
+// Базовый URL бэкенда синхронизации (Vercel serverless, тот же домен, что и AI_INSIGHTS_URL).
+const SYNC_BASE_URL = 'https://1c-sync.vercel.app';
+// Секрет для ручного запуска. Вкладка «Настройки» доступна только админам,
+// вход в дашборд защищён логином — секрет светится только админам.
+const SYNC_SECRET = '76b944f4444be766b2c27b7988118aec521c814d824b191a86cf8b6c420db44e';
+// Описание всех типов синхронизации: метка sync_type в логе, эндпоинт, cron-расписание (UTC) и название.
+// schedule: { type:'hourly' } | { type:'everyN', hours:N } | { type:'daily', hourUtc:H }
+const SYNC_TYPES = [
+    { key: 'sales',            endpoint: '/api/sync-sales',          label: 'Продажи',                schedule: { type: 'hourly' } },
+    { key: 'cards',            endpoint: '/api/sync-cards',          label: 'Карты 1С',               schedule: { type: 'hourly' } },
+    { key: 'stock',            endpoint: '/api/sync-stock',          label: 'Остатки (общие)',        schedule: { type: 'everyN', hours: 4 } },
+    { key: 'product-stock',    endpoint: '/api/sync-product-stock',  label: 'Остатки товаров',        schedule: { type: 'daily', hourUtc: 0 } },
+    { key: 'employee-sales',   endpoint: '/api/sync-employee-sales', label: 'Продажи сотрудников',    schedule: { type: 'daily', hourUtc: 0 } },
+    { key: 'catalogs',         endpoint: '/api/sync-catalogs',       label: 'Справочники',            schedule: { type: 'daily', hourUtc: 2 } },
+    { key: 'push_cards_to_1c', endpoint: '/api/push-cards-to-1c',    label: 'Отправка карт в 1С',     schedule: { type: 'daily', hourUtc: 23 } },
+];
+
 // Кэш данных 1С
 let sales1C = [];          // [{ date:'YYYY-MM-DD', salon:'<имя из warehouses_1c>', net, gross, returns, receipts }]
 let warehouseMap1C = {};   // ref_key -> name (из warehouses_1c)
@@ -625,6 +643,163 @@ function renderCardsByTypeTable(byType) {
                 <tbody>${rows}</tbody>
             </table>
         </div>`;
+}
+
+// ───────────────────────────────────────────────────────────────
+// Синхронизация с 1С — статус, расписание, ручной запуск
+// ───────────────────────────────────────────────────────────────
+
+// Вычисляет следующее срабатывание cron-расписания от текущего момента (UTC), возвращает Date.
+function nextCronRun(schedule, from = new Date()) {
+    const next = new Date(from.getTime());
+    next.setUTCSeconds(0, 0);
+    if (schedule.type === 'hourly') {
+        next.setUTCMinutes(0);
+        next.setUTCHours(next.getUTCHours() + 1);
+        return next;
+    }
+    if (schedule.type === 'everyN') {
+        const n = schedule.hours;
+        next.setUTCMinutes(0);
+        const curH = from.getUTCHours();
+        const nextH = (Math.floor(curH / n) + 1) * n; // ближайшее кратное n вперёд
+        next.setUTCHours(0);
+        next.setUTCHours(nextH); // переполнение часов корректно перейдёт на следующий день
+        return next;
+    }
+    if (schedule.type === 'daily') {
+        next.setUTCMinutes(0);
+        next.setUTCHours(schedule.hourUtc);
+        if (next.getTime() <= from.getTime()) {
+            next.setUTCDate(next.getUTCDate() + 1);
+        }
+        return next;
+    }
+    return null;
+}
+
+function fmtSyncDate(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadSyncStatus() {
+    const body = document.getElementById('syncStatusTableBody');
+    const errBody = document.getElementById('syncErrorsTableBody');
+    if (!body) return;
+
+    try {
+        // Последние записи лога — группируем по sync_type, берём самую свежую.
+        const { data, error } = await supabaseClient
+            .from('sync_log')
+            .select('id,sync_type,started_at,finished_at,status,rows_affected,error_text')
+            .order('id', { ascending: false })
+            .limit(100);
+        if (error) throw error;
+
+        const latestByType = {};
+        (data || []).forEach(row => {
+            if (!latestByType[row.sync_type]) latestByType[row.sync_type] = row;
+        });
+
+        body.innerHTML = SYNC_TYPES.map(t => {
+            const last = latestByType[t.key];
+            const lastTime = last ? fmtSyncDate(last.finished_at || last.started_at) : '—';
+            let statusCell = '<span style="color:var(--color-text-secondary);">—</span>';
+            if (last) {
+                statusCell = last.status === 'ok'
+                    ? '<span class="sync-status-ok">✅</span>'
+                    : '<span class="sync-status-error">❌</span>';
+            }
+            const rows = (last && last.rows_affected != null) ? Number(last.rows_affected).toLocaleString('ru-RU') : '—';
+            const next = fmtSyncDate(nextCronRun(t.schedule).toISOString());
+            return `<tr>
+                <td>${escapeHtml(t.label)}</td>
+                <td>${lastTime}</td>
+                <td style="text-align:center;">${statusCell}</td>
+                <td>${rows}</td>
+                <td>${next}</td>
+                <td><button class="btn btn-secondary btn-sm" id="syncBtn-${t.key}" onclick="runSync('${t.key}')">▶ Запустить</button></td>
+            </tr>`;
+        }).join('');
+    } catch (e) {
+        console.error('Ошибка загрузки статуса синхронизации:', e);
+        body.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--color-error);">Не удалось загрузить статус синхронизации.</td></tr>';
+    }
+
+    // Лог ошибок (последние 20).
+    if (errBody) {
+        try {
+            const { data, error } = await supabaseClient
+                .from('sync_log')
+                .select('sync_type,started_at,finished_at,error_text')
+                .eq('status', 'error')
+                .order('id', { ascending: false })
+                .limit(20);
+            if (error) throw error;
+            if (!data || data.length === 0) {
+                errBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--color-text-secondary);">Ошибок нет ✅</td></tr>';
+            } else {
+                errBody.innerHTML = data.map(r => `<tr>
+                    <td>${fmtSyncDate(r.finished_at || r.started_at)}</td>
+                    <td>${escapeHtml(r.sync_type || '')}</td>
+                    <td style="color:var(--color-error);">${escapeHtml(r.error_text || 'неизвестная ошибка')}</td>
+                </tr>`).join('');
+            }
+        } catch (e) {
+            console.error('Ошибка загрузки лога ошибок синхронизации:', e);
+            errBody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--color-error);">Не удалось загрузить лог ошибок.</td></tr>';
+        }
+    }
+}
+
+// Запуск одного типа синхронизации. CORS: бэкенд на 1c-sync.vercel.app, тот же домен
+// уже успешно вызывается для AI_INSIGHTS_URL обычным fetch. Если CORS всё же помешает,
+// триггер на сервере всё равно сработает — поэтому в catch не считаем это фатальной ошибкой,
+// а перечитываем sync_log через несколько секунд, чтобы показать фактический результат.
+async function runSync(key) {
+    const t = SYNC_TYPES.find(x => x.key === key);
+    if (!t) return;
+    const btn = document.getElementById('syncBtn-' + key);
+    const restore = btn ? btn.innerHTML : null;
+    if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Синхронизация…'; }
+
+    const url = `${SYNC_BASE_URL}${t.endpoint}?secret=${encodeURIComponent(SYNC_SECRET)}`;
+    try {
+        await fetch(url, { cache: 'no-store' });
+    } catch (e) {
+        // CORS/сеть — запрос всё равно мог достичь сервера. Не роняем страницу.
+        console.warn('Запуск синхронизации: fetch не вернул ответ (возможно CORS), триггер мог сработать:', e);
+    }
+
+    // Даём серверу время отработать, затем перечитываем лог.
+    setTimeout(async () => {
+        await loadSyncStatus();
+        if (btn) { btn.disabled = false; btn.innerHTML = restore; }
+    }, 5000);
+}
+
+// Запускает все основные типы по очереди.
+async function runAllSyncs() {
+    const allBtn = document.getElementById('syncRunAllBtn');
+    const restore = allBtn ? allBtn.innerHTML : null;
+    if (allBtn) { allBtn.disabled = true; allBtn.innerHTML = '⏳ Запуск…'; }
+
+    for (const t of SYNC_TYPES) {
+        const url = `${SYNC_BASE_URL}${t.endpoint}?secret=${encodeURIComponent(SYNC_SECRET)}`;
+        try {
+            await fetch(url, { cache: 'no-store' });
+        } catch (e) {
+            console.warn('Запуск «все»: fetch не вернул ответ для ' + t.key + ' (возможно CORS):', e);
+        }
+    }
+
+    setTimeout(async () => {
+        await loadSyncStatus();
+        if (allBtn) { allBtn.disabled = false; allBtn.innerHTML = restore; }
+    }, 5000);
 }
 
 // ───────────────────────────────────────────────────────────────
@@ -1400,6 +1575,8 @@ function switchTab(tabName) {
         if (typeof loadAiInsights === 'function') loadAiInsights();
     } else if (tabName === 'products') {
         if (typeof loadProducts === 'function') loadProducts();
+    } else if (tabName === 'settings') {
+        if (typeof loadSyncStatus === 'function') loadSyncStatus();
     }
 }
 

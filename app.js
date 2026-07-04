@@ -5569,34 +5569,51 @@ function renderProductTransfers() {
         byKey.get(key).push(v);
     }
 
+    // Список активных магазинов-получателей: все склады, кроме Основного и Интернет магазина.
+    // Основной склад — только донор; Интернет магазин полностью исключён.
+    const receiverWarehouses = productsState.warehouses.filter(
+        w => !isMainWarehouse(w.id) && !isInternetWarehouse(w.id)
+    );
+
     const recs = [];
     for (const [, vars] of byKey) {
-        // Получатели: дефицит, но НЕ Основной склад и НЕ Интернет магазин (исключён выше)
-        const deficits = vars.filter(v => v.stock <= LOW_STOCK_THRESHOLD && !isMainWarehouse(v.warehouse_id));
+        // Доноры: склады с излишком (Основной отдаёт при >=1, остальные при >=3)
         const surplus = vars.filter(v => v.stock >= transferSurplusMin(v.warehouse_id))
             .sort((a, b) => b.stock - a.stock);
-        if (deficits.length === 0 || surplus.length === 0) continue;
-        // Излишек на Основном складе (если есть и достаточен)
+        if (surplus.length === 0) continue;
+
+        const product_id = vars[0].product_id;
+        const size_label = vars[0].size_label;
+        // Остаток по каждому складу для этой (товар|размер): реальная строка или 0, если строки нет
+        const stockByWh = {};
+        for (const v of vars) stockByWh[v.warehouse_id] = v.stock;
+
+        // Излишек на Основном складе (приоритетный донор)
         const mainSurplus = surplus.find(s => isMainWarehouse(s.warehouse_id));
-        for (const d of deficits) {
-            // приоритет за Основным складом; иначе — магазин с максимальным остатком (не тот же склад)
-            let src = (mainSurplus && mainSurplus.warehouse_id !== d.warehouse_id)
+
+        // Получатели: ВСЕ активные магазины, где товара нет совсем (нет строки) или мало (<= порога).
+        for (const shop of receiverWarehouses) {
+            const shopStock = stockByWh[shop.id] != null ? stockByWh[shop.id] : 0; // нет строки = 0
+            if (shopStock > LOW_STOCK_THRESHOLD) continue; // товара достаточно — пропускаем
+
+            // Донор: приоритет Основному складу; иначе магазин с максимальным остатком (не сам получатель)
+            let src = (mainSurplus && mainSurplus.warehouse_id !== shop.id)
                 ? mainSurplus
-                : surplus.find(s => s.warehouse_id !== d.warehouse_id && !isMainWarehouse(s.warehouse_id));
+                : surplus.find(s => s.warehouse_id !== shop.id && !isMainWarehouse(s.warehouse_id));
             if (!src) continue;
             // Фильтры «Откуда»/«Куда» по конкретному складу (по умолчанию — все)
             if (fromFilter && src.warehouse_id !== fromFilter) continue;
-            if (toFilter && d.warehouse_id !== toFilter) continue;
-            const p = productsState.prodById[d.product_id];
+            if (toFilter && shop.id !== toFilter) continue;
+            const p = productsState.prodById[product_id];
             // переместить столько, чтобы донор сохранил минимум 2, а у получателя стало хотя бы 2
-            const moveQty = Math.max(1, Math.min(src.stock - 2, 2 - d.stock + 1));
+            const moveQty = Math.max(1, Math.min(src.stock - 2, 2 - shopStock + 1));
             recs.push({
                 name: p ? p.name_ru : '(?)',
-                size: d.size_label || '—',
+                size: size_label || '—',
                 from: whName(src.warehouse_id),
                 fromStock: src.stock,
-                to: whName(d.warehouse_id),
-                toStock: d.stock,
+                to: whName(shop.id),
+                toStock: shopStock,
                 qty: moveQty > 0 ? moveQty : 1
             });
         }

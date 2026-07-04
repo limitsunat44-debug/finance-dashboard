@@ -4541,59 +4541,11 @@ function renderShipmentCard(s) {
         ? `<span class="shipment-status-icon in-transit-truck">🚚</span>`
         : `<span class="shipment-status-icon">✓</span>`;
 
-    // Состав груза: новый формат (массив items с артикулами/размерами/фото/ценами)
-    // с обратной совместимостью со старым текстовым полем contents.
-    const shipItems = Array.isArray(s.items) ? s.items : [];
-    let contentsHtml = '';
-    if (shipItems.length > 0) {
-        const itemsHtml = shipItems.map(it => {
-            const name     = escapeHtml(it.name || it.title || it.article || 'Без названия');
-            const category = it.category ? `<span class="ship-item-cat">${escapeHtml(it.category)}</span>` : '';
-            const photoHtml = it.photo
-                ? `<img class="ship-item-photo" src="${it.photo}" alt="" loading="lazy">`
-                : `<div class="ship-item-photo ship-item-photo--empty">📦</div>`;
-            const sizes = Array.isArray(it.sizes) ? it.sizes : [];
-            const totalQty = sizes.reduce((sum, sz) => sum + (parseInt(sz.qty, 10) || 0), 0);
-            const sizesHtml = sizes.length > 0
-                ? `<div class="ship-item-sizes">${sizes.map(sz =>
-                      `<span class="ship-size-chip">${escapeHtml(String(sz.size ?? '—'))}: <b>${parseInt(sz.qty, 10) || 0}</b></span>`
-                  ).join('')}</div>`
-                : '';
-            const priceParts = [];
-            if (it.priceArrival) priceParts.push(`приход ${formatCurrency(it.priceArrival)}`);
-            if (it.priceFirst)   priceParts.push(`1-я ${formatCurrency(it.priceFirst)}`);
-            if (it.priceSecond)  priceParts.push(`2-я ${formatCurrency(it.priceSecond)}`);
-            const priceHtml = priceParts.length
-                ? `<div class="ship-item-prices">${priceParts.map(p => escapeHtml(p)).join(' · ')}</div>`
-                : '';
-            return `
-                <div class="ship-item">
-                    ${photoHtml}
-                    <div class="ship-item-body">
-                        <div class="ship-item-name">${name} ${category}</div>
-                        ${sizesHtml}
-                        <div class="ship-item-meta">
-                            ${totalQty > 0 ? `<span class="ship-item-total">Всего: ${totalQty} шт</span>` : ''}
-                            ${priceHtml}
-                        </div>
-                    </div>
-                </div>`;
-        }).join('');
-        const grandTotal = shipItems.reduce((sum, it) =>
-            sum + (Array.isArray(it.sizes) ? it.sizes.reduce((a, sz) => a + (parseInt(sz.qty, 10) || 0), 0) : 0), 0);
-        contentsHtml = `
-        <div class="shipment-contents">
-            <div class="label">Состав груза (${shipItems.length} поз.${grandTotal > 0 ? `, ${grandTotal} шт` : ''})</div>
-            <div class="ship-items-list">${itemsHtml}</div>
-            ${s.contents ? `<div class="ship-contents-note">${escapeHtml(s.contents)}</div>` : ''}
-        </div>`;
-    } else if (s.contents) {
-        contentsHtml = `
+    const contentsHtml = s.contents ? `
         <div class="shipment-contents">
             <div class="label">Содержимое</div>
             <div>${escapeHtml(s.contents)}</div>
-        </div>`;
-    }
+        </div>` : '';
 
     const receiptsHtml = (s.receipts && s.receipts.length > 0) ? `
         <div class="receipts-history" id="receiptsHistory_${s.id}" style="display:none;">
@@ -4636,14 +4588,19 @@ function renderShipmentCard(s) {
             </div>
         </div>` : '';
 
+    const itemsCount = (s.items && s.items.length) ? s.items.length : 0;
+    const itemsBtn = `<button class="shipment-btn shipment-btn-items" onclick="toggleShipmentItems(${s.id})">📋 Состав${itemsCount ? ` (${itemsCount})` : ''}</button>`;
+
     const actionsHtml = s.archived ? `
         <div class="shipment-actions">
+            ${itemsBtn}
             ${(s.receipts && s.receipts.length > 0) ? `<button class="shipment-btn shipment-btn-history" onclick="toggleReceiptsHistory(${s.id})">📋 История приёмов</button>` : ''}
             <button class="shipment-btn shipment-btn-edit" onclick="unarchiveShipment(${s.id})">↩️ Вернуть в активные</button>
             <button class="shipment-btn shipment-btn-delete" onclick="deleteShipment(${s.id})">🗑 Удалить</button>
         </div>` : `
         <div class="shipment-actions">
             <button class="shipment-btn shipment-btn-receive" onclick="toggleReceiveForm(${s.id})">📥 Принять груз</button>
+            ${itemsBtn}
             ${(s.receipts && s.receipts.length > 0) ? `<button class="shipment-btn shipment-btn-history" onclick="toggleReceiptsHistory(${s.id})">📋 История (${s.receipts.length})</button>` : ''}
             <button class="shipment-btn shipment-btn-edit" onclick="openShipmentForm(${s.id})">✎ Редактировать</button>
             <button class="shipment-btn shipment-btn-delete" onclick="deleteShipment(${s.id})">🗑 Удалить</button>
@@ -4701,9 +4658,518 @@ function renderShipmentCard(s) {
                 ${receiptsHtml}
                 ${receiveFormHtml}
                 ${actionsHtml}
+                <div class="shipment-items" id="shipmentItems_${s.id}" style="display:none;"></div>
             </div>
         </div>`;
 }
+
+// ═════════════════════════════════════════════════════════════
+// СОСТАВ ОТПРАВКИ (товары внутри отправки)  [добавлено]
+// ─────────────────────────────────────────────────────────────
+//   Модель: shipment.items = [{
+//     id, name, category, size,
+//     qty,             // количество пар
+//     photo,           // base64 data-URL (сжатое фото-превью) | ''
+//     priceArrival,    // цена прихода (себестоимость)
+//     priceFirst,      // первая цена
+//     priceSecond,     // вторая цена
+//     createdAt
+//   }]
+//   Категории/размеры берутся из раздела «Товары» (ОРТОБОТ):
+//   products.category и product_variants.size_label.
+// ═════════════════════════════════════════════════════════════
+
+// Фиксированный список категорий обуви (как в разделе «Товары»).
+const SHIPMENT_CATEGORIES = [
+    'Мужская обувь',
+    'Женская обувь',
+    'Обувь для мальчиков',
+    'Обувь для девочек',
+    'Товар'
+];
+
+// Кэш чистых размеров по категории: { 'Мужская обувь': ['36','37',...] }
+let shipmentSizesByCategory = null;
+let shipmentSizesLoading = false;
+let shipmentProductNames = null; // [{name, category}] для подсказок номенклатуры
+
+// Нормализует «грязный» size_label из 1С в короткую метку размера.
+// Примеры: "размер:42.5" -> "42.5", "Размер 38" -> "38",
+//          "цвет:черный размер:40" -> "40", "размер:стандарт" -> "стандарт"
+function normalizeSizeLabel(raw) {
+    if (!raw) return '';
+    let s = String(raw).trim();
+    // вырезаем "цвет:... " префикс
+    s = s.replace(/цвет:[^\s]+\s*/gi, '');
+    // если есть "размер" — берём то, что после него
+    const m = s.match(/размер[ы]?\s*[:\-]?\s*(.+)$/i);
+    if (m && m[1]) s = m[1];
+    s = s.replace(/\s+/g, ' ').trim();
+    // приводим запятую к точке в числах: 38,5 -> 38.5
+    s = s.replace(/(\d),(\d)/g, '$1.$2');
+    return s;
+}
+
+// Загружает и кэширует чистые размеры по категориям из ОРТОБОТ.
+async function loadShipmentSizeOptions() {
+    if (shipmentSizesByCategory || shipmentSizesLoading) return;
+    shipmentSizesLoading = true;
+    try {
+        // products: id, name_ru, category
+        const products = await fetchAllRows('products', 'id,name_ru,category,is_active');
+        // product_variants: product_id, size_label
+        const variants = await fetchAllRows('product_variants', 'product_id,size_label');
+
+        const prodCat = {};
+        const namesSet = [];
+        const seenNames = new Set();
+        (products || []).forEach(p => {
+            prodCat[p.id] = (p.category || '').trim();
+            const nm = (p.name_ru || '').trim();
+            if (nm && !seenNames.has(nm.toLowerCase())) {
+                seenNames.add(nm.toLowerCase());
+                namesSet.push({ name: nm, category: (p.category || '').trim() });
+            }
+        });
+        shipmentProductNames = namesSet.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+        const byCat = {};
+        SHIPMENT_CATEGORIES.forEach(c => { byCat[c] = new Set(); });
+        (variants || []).forEach(v => {
+            const cat = prodCat[v.product_id];
+            if (!cat || !(cat in byCat)) return;
+            const norm = normalizeSizeLabel(v.size_label);
+            if (norm) byCat[cat].add(norm);
+        });
+
+        // Сортировка: числовые размеры по возрастанию, затем буквенные/прочие.
+        const sortSizes = arr => arr.sort((a, b) => {
+            const na = parseFloat(String(a).replace(',', '.'));
+            const nb = parseFloat(String(b).replace(',', '.'));
+            const aNum = !isNaN(na), bNum = !isNaN(nb);
+            if (aNum && bNum) return na - nb;
+            if (aNum) return -1;
+            if (bNum) return 1;
+            return String(a).localeCompare(String(b), 'ru');
+        });
+
+        shipmentSizesByCategory = {};
+        Object.keys(byCat).forEach(c => {
+            shipmentSizesByCategory[c] = sortSizes(Array.from(byCat[c]));
+        });
+    } catch (e) {
+        console.warn('Не удалось загрузить размеры для отправок:', e);
+        shipmentSizesByCategory = {};
+        SHIPMENT_CATEGORIES.forEach(c => { shipmentSizesByCategory[c] = []; });
+    } finally {
+        shipmentSizesLoading = false;
+    }
+}
+
+// Сжимает выбранное фото в небольшое JPEG-превью (data-URL).
+// maxSize — максимальная сторона в px; quality — качество JPEG (0..1).
+function compressImageFile(file, maxSize = 420, quality = 0.6) {
+    return new Promise((resolve, reject) => {
+        if (!file || !file.type || !file.type.startsWith('image/')) {
+            reject(new Error('Это не изображение'));
+            return;
+        }
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Ошибка чтения файла'));
+        reader.onload = e => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('Ошибка загрузки изображения'));
+            img.onload = () => {
+                let { width, height } = img;
+                if (width > height && width > maxSize) {
+                    height = Math.round(height * maxSize / width);
+                    width = maxSize;
+                } else if (height >= width && height > maxSize) {
+                    width = Math.round(width * maxSize / height);
+                    height = maxSize;
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                // белый фон (на случай PNG с прозрачностью)
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, width, height);
+                ctx.drawImage(img, 0, 0, width, height);
+                try {
+                    resolve(canvas.toDataURL('image/jpeg', quality));
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+// HTML списка <option> размеров для категории.
+function shipmentSizeOptionsHtml(category, selected) {
+    const sizes = (shipmentSizesByCategory && shipmentSizesByCategory[category]) || [];
+    let html = '<option value="">— размер —</option>';
+    sizes.forEach(sz => {
+        const sel = (selected != null && String(selected) === String(sz)) ? ' selected' : '';
+        html += `<option value="${escapeHtml(sz)}"${sel}>${escapeHtml(sz)}</option>`;
+    });
+    // если у товара сохранён нестандартный размер — показать его тоже
+    if (selected && !sizes.some(s => String(s) === String(selected))) {
+        html += `<option value="${escapeHtml(selected)}" selected>${escapeHtml(selected)}</option>`;
+    }
+    return html;
+}
+
+function shipmentCategoryOptionsHtml(selected) {
+    let html = '<option value="">— категория —</option>';
+    SHIPMENT_CATEGORIES.forEach(c => {
+        const sel = (selected === c) ? ' selected' : '';
+        html += `<option value="${escapeHtml(c)}"${sel}>${escapeHtml(c)}</option>`;
+    });
+    return html;
+}
+
+// Открыть/закрыть блок состава отправки.
+async function toggleShipmentItems(shipmentId) {
+    const block = document.getElementById(`shipmentItems_${shipmentId}`);
+    if (!block) return;
+    const willOpen = block.style.display === 'none' || !block.style.display;
+    if (willOpen) {
+        // подгружаем справочник размеров при первом раскрытии
+        if (!shipmentSizesByCategory) {
+            block.innerHTML = `<div class="ship-items-loading">Загрузка справочника товаров…</div>`;
+            block.style.display = 'block';
+            await loadShipmentSizeOptions();
+        }
+        renderShipmentItems(shipmentId);
+        block.style.display = 'block';
+    } else {
+        block.style.display = 'none';
+    }
+}
+
+// Отрисовка состава конкретной отправки.
+function renderShipmentItems(shipmentId) {
+    const block = document.getElementById(`shipmentItems_${shipmentId}`);
+    if (!block) return;
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh) return;
+    sh.items = sh.items || [];
+
+    const list = sh.items.map(it => renderShipmentItemRow(shipmentId, it)).join('');
+    const datalistId = `shipItemNames_${shipmentId}`;
+    const namesDatalist = shipmentProductNames && shipmentProductNames.length
+        ? `<datalist id="${datalistId}">${shipmentProductNames.slice(0, 1500).map(n => `<option value="${escapeHtml(n.name)}">`).join('')}</datalist>`
+        : '';
+
+    // Итого: сколько пар всего должны получить по отправке.
+    const totalQty = sh.items.reduce((sum, it) => sum + itemTotalQty(it), 0);
+    const totalPositions = sh.items.length;
+    const totalsHtml = totalPositions > 0 ? `
+        <div class="ship-items-total">
+            <span>Позиций: <b>${totalPositions}</b></span>
+            <span>Всего к получению: <b>${totalQty}</b> ${pluralizeRu(totalQty, ['пара','пары','пар'])}</span>
+        </div>` : '';
+
+    block.innerHTML = `
+        ${namesDatalist}
+        <div class="ship-items-head">
+            <h5 style="margin:0;">📋 Состав отправки (${sh.items.length})</h5>
+            <button class="shipment-btn shipment-btn-receive" onclick="addShipmentItem(${shipmentId})">➕ Добавить товар</button>
+        </div>
+        <div class="ship-items-list">
+            ${list || '<div class="ship-items-empty">Товары ещё не добавлены.</div>'}
+        </div>
+        ${totalsHtml}`;
+}
+
+// Обновляет только строку итогов (без перерисовки списка — чтобы не терять фокус).
+function updateShipmentItemsTotal(shipmentId) {
+    const block = document.getElementById(`shipmentItems_${shipmentId}`);
+    if (!block) return;
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const totalQty = sh.items.reduce((sum, it) => sum + itemTotalQty(it), 0);
+    const totalPositions = sh.items.length;
+    let totalEl = block.querySelector('.ship-items-total');
+    if (totalPositions === 0) { if (totalEl) totalEl.remove(); return; }
+    const html = `
+            <span>Позиций: <b>${totalPositions}</b></span>
+            <span>Всего к получению: <b>${totalQty}</b> ${pluralizeRu(totalQty, ['пара','пары','пар'])}</span>`;
+    if (totalEl) {
+        totalEl.innerHTML = html;
+    } else {
+        totalEl = document.createElement('div');
+        totalEl.className = 'ship-items-total';
+        totalEl.innerHTML = html;
+        block.appendChild(totalEl);
+    }
+    // обновляем счётчик пар на кнопке «Состав» в карточке отправки
+    const btn = document.querySelector(`.shipment-card .shipment-btn-items[onclick*="toggleShipmentItems(${shipmentId})"]`);
+    if (btn) btn.innerHTML = `📋 Состав (${totalPositions})`;
+}
+
+// Приводит товар к новой модели (sizes: [{id,size,qty}]).
+// Старые товары имели одиночные поля size/qty — переносим их в массив.
+function normalizeShipmentItem(it) {
+    if (!Array.isArray(it.sizes)) {
+        const arr = [];
+        if (it.size || (it.qty !== '' && it.qty != null)) {
+            arr.push({ id: 'sz' + Date.now() + Math.floor(Math.random()*1000), size: it.size || '', qty: (it.qty === '' || it.qty == null) ? '' : it.qty });
+        }
+        it.sizes = arr;
+    }
+    delete it.size; delete it.qty;
+    return it;
+}
+
+// Сумма пар по всем размерам товара.
+function itemTotalQty(it) {
+    if (!Array.isArray(it.sizes)) return 0;
+    return it.sizes.reduce((s, r) => s + (parseInt(r.qty, 10) || 0), 0);
+}
+
+// Строка одного размера внутри товара.
+function renderItemSizeRow(shipmentId, it, row) {
+    return `
+        <div class="ship-size-row" id="shipSizeRow_${shipmentId}_${it.id}_${row.id}">
+            <select class="ship-size-select" id="shipSizeSel_${shipmentId}_${it.id}_${row.id}"
+                    onchange="updateItemSize(${shipmentId}, '${it.id}', '${row.id}', 'size', this.value)">
+                ${shipmentSizeOptionsHtml(it.category || '', row.size || '')}
+            </select>
+            <input type="number" min="0" step="1" class="ship-size-qty"
+                   value="${row.qty != null && row.qty !== '' ? row.qty : ''}" placeholder="кол-во"
+                   oninput="updateItemSize(${shipmentId}, '${it.id}', '${row.id}', 'qty', this.value)">
+            <button class="ship-size-del" onclick="deleteItemSize(${shipmentId}, '${it.id}', '${row.id}')" title="Удалить размер">×</button>
+        </div>`;
+}
+
+// Карточка одного товара в составе отправки.
+function renderShipmentItemRow(shipmentId, it) {
+    normalizeShipmentItem(it);
+    const photoHtml = it.photo
+        ? `<img src="${it.photo}" class="ship-item-photo" alt="фото" onclick="viewShipmentPhoto('${shipmentId}','${it.id}')" title="Открыть фото">`
+        : `<div class="ship-item-photo ship-item-photo-empty">нет фото</div>`;
+
+    const sizeRows = it.sizes.map(r => renderItemSizeRow(shipmentId, it, r)).join('');
+    const itemQty = itemTotalQty(it);
+
+    return `
+    <div class="ship-item-card" id="shipItem_${shipmentId}_${it.id}">
+        <div class="ship-item-photo-wrap">
+            ${photoHtml}
+            <label class="ship-item-photo-btn">
+                📷 Фото
+                <input type="file" accept="image/*" style="display:none;"
+                       onchange="onShipmentItemPhoto(${shipmentId}, '${it.id}', this)">
+            </label>
+        </div>
+        <div class="ship-item-fields">
+            <div class="ship-item-field ship-item-field-name">
+                <label>Номенклатура</label>
+                <input type="text" list="shipItemNames_${shipmentId}" value="${escapeHtml(it.name || '')}"
+                       placeholder="Название товара"
+                       onchange="updateShipmentItem(${shipmentId}, '${it.id}', 'name', this.value)">
+            </div>
+            <div class="ship-item-field">
+                <label>Категория</label>
+                <select onchange="updateShipmentItem(${shipmentId}, '${it.id}', 'category', this.value)">
+                    ${shipmentCategoryOptionsHtml(it.category || '')}
+                </select>
+            </div>
+            <div class="ship-item-field">
+                <label>Цена прихода</label>
+                <input type="number" min="0" step="0.01" value="${it.priceArrival != null ? it.priceArrival : ''}"
+                       placeholder="0.00"
+                       onchange="updateShipmentItem(${shipmentId}, '${it.id}', 'priceArrival', this.value)">
+            </div>
+            <div class="ship-item-field">
+                <label>Первая цена</label>
+                <input type="number" min="0" step="0.01" value="${it.priceFirst != null ? it.priceFirst : ''}"
+                       placeholder="0.00"
+                       onchange="updateShipmentItem(${shipmentId}, '${it.id}', 'priceFirst', this.value)">
+            </div>
+            <div class="ship-item-field">
+                <label>Вторая цена</label>
+                <input type="number" min="0" step="0.01" value="${it.priceSecond != null ? it.priceSecond : ''}"
+                       placeholder="0.00"
+                       onchange="updateShipmentItem(${shipmentId}, '${it.id}', 'priceSecond', this.value)">
+            </div>
+            <div class="ship-item-field ship-item-field-sizes">
+                <label>Размеры и количество</label>
+                <div class="ship-sizes-list" id="shipSizes_${shipmentId}_${it.id}">
+                    ${sizeRows || '<div class="ship-sizes-empty">Размеры не добавлены</div>'}
+                </div>
+                <div class="ship-sizes-foot">
+                    <button class="ship-addsize-btn" onclick="addItemSize(${shipmentId}, '${it.id}')">➕ Добавить размер</button>
+                    <span class="ship-item-qty-total" id="shipItemQty_${shipmentId}_${it.id}">Итого: <b>${itemQty}</b> ${pluralizeRu(itemQty, ['пара','пары','пар'])}</span>
+                </div>
+            </div>
+        </div>
+        <button class="ship-item-del" onclick="deleteShipmentItem(${shipmentId}, '${it.id}')" title="Удалить товар">×</button>
+    </div>`;
+}
+
+async function addShipmentItem(shipmentId) {
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh) return;
+    sh.items = sh.items || [];
+    sh.items.push({
+        id: 'it' + Date.now() + Math.floor(Math.random() * 1000),
+        name: '', category: '',
+        photo: '', priceArrival: '', priceFirst: '', priceSecond: '',
+        sizes: [{ id: 'sz' + Date.now() + Math.floor(Math.random()*1000), size: '', qty: '' }],
+        createdAt: new Date().toISOString()
+    });
+    renderShipmentItems(shipmentId);
+    try { await saveData(); } catch (e) { console.error(e); }
+}
+
+async function updateShipmentItem(shipmentId, itemId, field, value) {
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const it = sh.items.find(x => x.id === itemId);
+    if (!it) return;
+
+    if (field === 'priceArrival' || field === 'priceFirst' || field === 'priceSecond') {
+        it[field] = value === '' ? '' : (parseFloat(value) || 0);
+    } else {
+        it[field] = value;
+    }
+
+    // При смене категории — обновляем списки размеров во всех строках размеров товара
+    if (field === 'category') {
+        normalizeShipmentItem(it);
+        const available = (shipmentSizesByCategory && shipmentSizesByCategory[value]) || [];
+        it.sizes.forEach(row => {
+            if (row.size && !available.some(s => String(s) === String(row.size))) row.size = '';
+            const sel = document.getElementById(`shipSizeSel_${shipmentId}_${itemId}_${row.id}`);
+            if (sel) sel.innerHTML = shipmentSizeOptionsHtml(value, row.size || '');
+        });
+    }
+    try { await saveData(); } catch (e) { console.error(e); }
+}
+
+// ——— Размеры внутри товара ———
+async function addItemSize(shipmentId, itemId) {
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const it = sh.items.find(x => x.id === itemId);
+    if (!it) return;
+    normalizeShipmentItem(it);
+    it.sizes.push({ id: 'sz' + Date.now() + Math.floor(Math.random()*1000), size: '', qty: '' });
+    rerenderItemSizes(shipmentId, it);
+    try { await saveData(); } catch (e) { console.error(e); }
+}
+
+async function updateItemSize(shipmentId, itemId, rowId, field, value) {
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const it = sh.items.find(x => x.id === itemId);
+    if (!it || !Array.isArray(it.sizes)) return;
+    const row = it.sizes.find(r => r.id === rowId);
+    if (!row) return;
+    if (field === 'qty') {
+        row.qty = value === '' ? '' : (parseInt(value, 10) || 0);
+        // обновляем итоги без перерисовки (чтобы не терять фокус)
+        updateItemQtyTotal(shipmentId, it);
+        updateShipmentItemsTotal(shipmentId);
+    } else {
+        row.size = value;
+    }
+    try { await saveData(); } catch (e) { console.error(e); }
+}
+
+async function deleteItemSize(shipmentId, itemId, rowId) {
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const it = sh.items.find(x => x.id === itemId);
+    if (!it || !Array.isArray(it.sizes)) return;
+    it.sizes = it.sizes.filter(r => r.id !== rowId);
+    rerenderItemSizes(shipmentId, it);
+    updateShipmentItemsTotal(shipmentId);
+    try { await saveData(); } catch (e) { console.error(e); }
+}
+
+// Перерисовывает только список размеров одного товара.
+function rerenderItemSizes(shipmentId, it) {
+    const cont = document.getElementById(`shipSizes_${shipmentId}_${it.id}`);
+    if (cont) {
+        const rows = it.sizes.map(r => renderItemSizeRow(shipmentId, it, r)).join('');
+        cont.innerHTML = rows || '<div class="ship-sizes-empty">Размеры не добавлены</div>';
+    }
+    updateItemQtyTotal(shipmentId, it);
+}
+
+// Обновляет итог по одному товару (всего пар).
+function updateItemQtyTotal(shipmentId, it) {
+    const el = document.getElementById(`shipItemQty_${shipmentId}_${it.id}`);
+    if (!el) return;
+    const q = itemTotalQty(it);
+    el.innerHTML = `Итого: <b>${q}</b> ${pluralizeRu(q, ['пара','пары','пар'])}`;
+}
+
+async function onShipmentItemPhoto(shipmentId, itemId, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const it = sh.items.find(x => x.id === itemId);
+    if (!it) return;
+    try {
+        const dataUrl = await compressImageFile(file, 420, 0.6);
+        it.photo = dataUrl;
+        renderShipmentItems(shipmentId);
+        await saveData();
+        if (typeof showSuccess === 'function') showSuccess('Фото добавлено');
+    } catch (e) {
+        console.error(e);
+        alert('Не удалось обработать фото: ' + (e && e.message ? e.message : ''));
+    }
+}
+
+function viewShipmentPhoto(shipmentId, itemId) {
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    const it = sh.items.find(x => x.id === itemId);
+    if (!it || !it.photo) return;
+    let overlay = document.getElementById('shipPhotoOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'shipPhotoOverlay';
+        overlay.className = 'ship-photo-overlay';
+        overlay.onclick = () => { overlay.style.display = 'none'; };
+        document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = `<img src="${it.photo}" alt="фото товара">`;
+    overlay.style.display = 'flex';
+}
+
+async function deleteShipmentItem(shipmentId, itemId) {
+    if (!confirm('Удалить этот товар из состава отправки?')) return;
+    const sh = (appData.shipments || []).find(x => x.id == shipmentId);
+    if (!sh || !sh.items) return;
+    sh.items = sh.items.filter(x => x.id !== itemId);
+    renderShipmentItems(shipmentId);
+    try { await saveData(); } catch (e) { console.error(e); }
+}
+
+window.toggleShipmentItems  = toggleShipmentItems;
+window.loadShipmentSizeOptions = loadShipmentSizeOptions;
+window.compressImageFile    = compressImageFile;
+window.renderShipmentItems  = renderShipmentItems;
+window.addShipmentItem      = addShipmentItem;
+window.updateShipmentItem   = updateShipmentItem;
+window.deleteShipmentItem   = deleteShipmentItem;
+window.addItemSize          = addItemSize;
+window.updateItemSize       = updateItemSize;
+window.deleteItemSize       = deleteItemSize;
+window.onShipmentItemPhoto  = onShipmentItemPhoto;
+window.viewShipmentPhoto    = viewShipmentPhoto;
+
 
 function renderShipments() {
     const activeCont   = document.getElementById('activeShipmentsContainer');

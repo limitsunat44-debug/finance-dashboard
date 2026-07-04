@@ -4669,6 +4669,26 @@ function renderShipments() {
     const active   = all.filter(s => !s.archived).sort(sortByDateDesc);
     const archived = all.filter(s =>  s.archived).sort(sortByDateDesc);
 
+    // ===== ВРЕМЕННАЯ ДИАГНОСТИКА СОСТАВА (удалить после) =====
+    try {
+        const diag = all.map(s => `${s.cargo||'?'}: contents=${(s.contents||'').length}симв`).join(' | ');
+        console.log('[ДИАГ renderShipments] версия app.js:', document.querySelector('script[src*="app.js"]')?.src);
+        console.log('[ДИАГ renderShipments] отправок:', all.length, '| детали:', diag);
+        let banner = document.getElementById('__ship_diag');
+        if (!banner) {
+            banner = document.createElement('div');
+            banner.id = '__ship_diag';
+            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#111;color:#0f0;font:12px monospace;padding:8px 12px;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #0f0;';
+            document.body.appendChild(banner);
+        }
+        const withContents = all.filter(s => (s.contents||'').trim().length > 0).length;
+        banner.textContent = 'ДИАГНОСТИКА СОСТАВА (v20260704b)\n'
+            + 'app.js: ' + (document.querySelector('script[src*="app.js"]')?.src || '?') + '\n'
+            + 'Всего отправок: ' + all.length + ' | с непустым составом: ' + withContents + '\n'
+            + all.map(s => '  • ' + (s.cargo||'?') + ' [' + (s.archived?'архив':'актив') + '] contents=' + (s.contents||'').length + 'симв: "' + (s.contents||'').slice(0,40).replace(/\n/g,' ') + '"').join('\n');
+    } catch(e) { console.error('diag err', e); }
+    // ===== /ДИАГНОСТИКА =====
+
     if (activeCont) {
         if (active.length === 0) {
             activeCont.innerHTML = `<div class="shipments-empty">📭 Нет активных отправок. Нажмите «Новая отправка», чтобы добавить груз.</div>`;

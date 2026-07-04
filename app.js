@@ -4541,11 +4541,59 @@ function renderShipmentCard(s) {
         ? `<span class="shipment-status-icon in-transit-truck">🚚</span>`
         : `<span class="shipment-status-icon">✓</span>`;
 
-    const contentsHtml = s.contents ? `
+    // Состав груза: новый формат (массив items с артикулами/размерами/фото/ценами)
+    // с обратной совместимостью со старым текстовым полем contents.
+    const shipItems = Array.isArray(s.items) ? s.items : [];
+    let contentsHtml = '';
+    if (shipItems.length > 0) {
+        const itemsHtml = shipItems.map(it => {
+            const name     = escapeHtml(it.name || it.title || it.article || 'Без названия');
+            const category = it.category ? `<span class="ship-item-cat">${escapeHtml(it.category)}</span>` : '';
+            const photoHtml = it.photo
+                ? `<img class="ship-item-photo" src="${it.photo}" alt="" loading="lazy">`
+                : `<div class="ship-item-photo ship-item-photo--empty">📦</div>`;
+            const sizes = Array.isArray(it.sizes) ? it.sizes : [];
+            const totalQty = sizes.reduce((sum, sz) => sum + (parseInt(sz.qty, 10) || 0), 0);
+            const sizesHtml = sizes.length > 0
+                ? `<div class="ship-item-sizes">${sizes.map(sz =>
+                      `<span class="ship-size-chip">${escapeHtml(String(sz.size ?? '—'))}: <b>${parseInt(sz.qty, 10) || 0}</b></span>`
+                  ).join('')}</div>`
+                : '';
+            const priceParts = [];
+            if (it.priceArrival) priceParts.push(`приход ${formatCurrency(it.priceArrival)}`);
+            if (it.priceFirst)   priceParts.push(`1-я ${formatCurrency(it.priceFirst)}`);
+            if (it.priceSecond)  priceParts.push(`2-я ${formatCurrency(it.priceSecond)}`);
+            const priceHtml = priceParts.length
+                ? `<div class="ship-item-prices">${priceParts.map(p => escapeHtml(p)).join(' · ')}</div>`
+                : '';
+            return `
+                <div class="ship-item">
+                    ${photoHtml}
+                    <div class="ship-item-body">
+                        <div class="ship-item-name">${name} ${category}</div>
+                        ${sizesHtml}
+                        <div class="ship-item-meta">
+                            ${totalQty > 0 ? `<span class="ship-item-total">Всего: ${totalQty} шт</span>` : ''}
+                            ${priceHtml}
+                        </div>
+                    </div>
+                </div>`;
+        }).join('');
+        const grandTotal = shipItems.reduce((sum, it) =>
+            sum + (Array.isArray(it.sizes) ? it.sizes.reduce((a, sz) => a + (parseInt(sz.qty, 10) || 0), 0) : 0), 0);
+        contentsHtml = `
+        <div class="shipment-contents">
+            <div class="label">Состав груза (${shipItems.length} поз.${grandTotal > 0 ? `, ${grandTotal} шт` : ''})</div>
+            <div class="ship-items-list">${itemsHtml}</div>
+            ${s.contents ? `<div class="ship-contents-note">${escapeHtml(s.contents)}</div>` : ''}
+        </div>`;
+    } else if (s.contents) {
+        contentsHtml = `
         <div class="shipment-contents">
             <div class="label">Содержимое</div>
             <div>${escapeHtml(s.contents)}</div>
-        </div>` : '';
+        </div>`;
+    }
 
     const receiptsHtml = (s.receipts && s.receipts.length > 0) ? `
         <div class="receipts-history" id="receiptsHistory_${s.id}" style="display:none;">
@@ -4668,26 +4716,6 @@ function renderShipments() {
 
     const active   = all.filter(s => !s.archived).sort(sortByDateDesc);
     const archived = all.filter(s =>  s.archived).sort(sortByDateDesc);
-
-    // ===== ВРЕМЕННАЯ ДИАГНОСТИКА СОСТАВА (удалить после) =====
-    try {
-        const diag = all.map(s => `${s.cargo||'?'}: contents=${(s.contents||'').length}симв`).join(' | ');
-        console.log('[ДИАГ renderShipments] версия app.js:', document.querySelector('script[src*="app.js"]')?.src);
-        console.log('[ДИАГ renderShipments] отправок:', all.length, '| детали:', diag);
-        let banner = document.getElementById('__ship_diag');
-        if (!banner) {
-            banner = document.createElement('div');
-            banner.id = '__ship_diag';
-            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#111;color:#0f0;font:12px monospace;padding:8px 12px;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #0f0;';
-            document.body.appendChild(banner);
-        }
-        const withContents = all.filter(s => (s.contents||'').trim().length > 0).length;
-        banner.textContent = 'ДИАГНОСТИКА СОСТАВА (v20260704b)\n'
-            + 'app.js: ' + (document.querySelector('script[src*="app.js"]')?.src || '?') + '\n'
-            + 'Всего отправок: ' + all.length + ' | с непустым составом: ' + withContents + '\n'
-            + all.map(s => '  • ' + (s.cargo||'?') + ' [' + (s.archived?'архив':'актив') + '] contents=' + (s.contents||'').length + 'симв: "' + (s.contents||'').slice(0,40).replace(/\n/g,' ') + '"').join('\n');
-    } catch(e) { console.error('diag err', e); }
-    // ===== /ДИАГНОСТИКА =====
 
     if (activeCont) {
         if (active.length === 0) {

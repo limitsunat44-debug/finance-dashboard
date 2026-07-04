@@ -2758,6 +2758,102 @@ tbody tr:hover {
     letter-spacing: 0.4px;
 }
 
+/* ===== Состав груза — новый формат (items) ===== */
+.ship-items-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 6px;
+}
+.ship-item {
+    display: flex;
+    gap: 10px;
+    padding: 8px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    align-items: flex-start;
+}
+.ship-item-photo {
+    width: 52px;
+    height: 52px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+    background: #f1f5f9;
+}
+.ship-item-photo--empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    color: #cbd5e1;
+}
+.ship-item-body {
+    flex: 1;
+    min-width: 0;
+}
+.ship-item-name {
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 13px;
+    margin-bottom: 5px;
+    line-height: 1.3;
+}
+.ship-item-cat {
+    display: inline-block;
+    font-weight: 500;
+    font-size: 10px;
+    color: #64748b;
+    background: #f1f5f9;
+    padding: 1px 6px;
+    border-radius: 4px;
+    text-transform: none;
+    letter-spacing: 0;
+    vertical-align: middle;
+}
+.ship-item-sizes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 5px;
+}
+.ship-size-chip {
+    font-size: 11px;
+    color: #334155;
+    background: #eef2f7;
+    border: 1px solid #dde3ea;
+    border-radius: 5px;
+    padding: 1px 6px;
+    white-space: nowrap;
+}
+.ship-size-chip b {
+    color: #0f766e;
+}
+.ship-item-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    align-items: center;
+}
+.ship-item-total {
+    font-size: 11px;
+    font-weight: 600;
+    color: #0f766e;
+}
+.ship-item-prices {
+    font-size: 11px;
+    color: #94a3b8;
+}
+.ship-contents-note {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed #e2e8f0;
+    font-size: 12px;
+    color: #64748b;
+    white-space: pre-wrap;
+}
+
 .shipment-progress {
     margin: 8px 0 14px;
 }

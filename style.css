@@ -3727,3 +3727,9 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
 .bc-variant-size { font-weight: 600; }
 .bc-variant-stock { color: var(--color-text-secondary, #888); font-size: 12px; margin-left: auto; }
 .bc-variant-wh { color: var(--color-text-secondary, #999); font-size: 12px; }
+
+/* ── Сворачиваемый блок принтера ── */
+.bc-collapsible > summary { outline: none; }
+.bc-collapsible > summary::-webkit-details-marker { display: none; }
+.bc-collapsible .bc-caret { display: inline-block; transition: transform .15s ease; }
+.bc-collapsible[open] .bc-caret { transform: rotate(90deg); }

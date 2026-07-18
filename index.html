@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260719b-multiprint">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1356,34 +1356,69 @@
                         </div>
                     </div>
 
-                    <!-- Принтер -->
-                    <div class="card" style="margin-top:14px;background:var(--color-bg-1,#f7f7f7);">
-                        <h4 style="margin:0 0 10px 0;">🖨️ Принтер</h4>
-                        <div class="prod-filters">
-                            <div class="prod-filter-group" style="flex:1;min-width:240px;">
-                                <label for="bcPrinterName">Имя принтера (для справки)</label>
-                                <input type="text" id="bcPrinterName" class="form-control" placeholder="например: ATOL BP41">
-                            </div>
+                    <!-- Кнопка добавления в список + список выбранных номенклатур -->
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+                        <button class="btn btn-secondary" onclick="bcAddToCart()" title="Добавить выбранный товар с отмеченными размерами в список печати">➕ Добавить номенклатуру в список</button>
+                        <button class="btn btn-secondary" onclick="bcClearCart()" title="Очистить список">🗑️ Очистить список</button>
+                    </div>
+
+                    <div class="card" id="bcCartCard" style="margin-top:14px;background:var(--color-bg-1,#f7f7f7);display:none;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+                            <h4 style="margin:0;">📝 Список номенклатур к печати</h4>
+                            <span id="bcCartCount" style="font-size:12px;color:var(--color-text-secondary);"></span>
                         </div>
-                        <p style="font-size:12px;color:var(--color-text-secondary);margin:8px 0;">
-                            Браузер не отдаёт список системных принтеров. Имя выше — только для вашей
-                            справки. Фактический принтер выбирается в системном диалоге печати браузера.
-                        </p>
-                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-                            <button class="btn btn-secondary" onclick="testPrint()">🔌 Тест подключения / тестовая печать</button>
-                            <a class="btn btn-secondary" href="https://www.atol.ru/company/service-support/download-center/" target="_blank" rel="noopener">Скачать драйвер АТОЛ</a>
+                        <div id="bcCartList" style="margin-top:10px;"></div>
+                        <div id="bcCartSummary" style="margin-top:10px;font-size:13px;"></div>
+                        <div style="margin-top:10px;">
+                            <button class="btn btn-secondary" onclick="bcPreviewCount()" title="Посчитать, сколько этикеток потребуется (с учётом остатков и уже созданных кодов)">🧮 Посчитать этикетки</button>
                         </div>
                     </div>
 
-                    <!-- Размер этикетки -->
+                    <!-- Принтер (сворачиваемый) -->
+                    <details class="card bc-collapsible" style="margin-top:14px;background:var(--color-bg-1,#f7f7f7);">
+                        <summary style="cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:8px;">
+                            <span class="bc-caret">▸</span> 🖨️ Принтер
+                            <span style="font-weight:400;font-size:12px;color:var(--color-text-secondary);">(нажмите, чтобы развернуть)</span>
+                        </summary>
+                        <div style="margin-top:12px;">
+                            <div class="prod-filters">
+                                <div class="prod-filter-group" style="flex:1;min-width:240px;">
+                                    <label for="bcPrinterName">Имя принтера (для справки)</label>
+                                    <input type="text" id="bcPrinterName" class="form-control" placeholder="например: ATOL BP41">
+                                </div>
+                            </div>
+                            <p style="font-size:12px;color:var(--color-text-secondary);margin:8px 0;">
+                                Браузер не отдаёт список системных принтеров. Имя выше — только для вашей
+                                справки. Фактический принтер выбирается в системном диалоге печати браузера.
+                            </p>
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                                <button class="btn btn-secondary" onclick="testPrint()">🔌 Тест подключения / тестовая печать</button>
+                                <a class="btn btn-secondary" href="https://www.atol.ru/company/service-support/download-center/" target="_blank" rel="noopener">Скачать драйвер АТОЛ</a>
+                            </div>
+                        </div>
+                    </details>
+
+                    <!-- Размер этикетки (дропдаун) -->
                     <div class="card" style="margin-top:14px;background:var(--color-bg-1,#f7f7f7);">
                         <h4 style="margin:0 0 10px 0;">📐 Размер этикетки</h4>
-                        <div class="prod-filters">
-                            <div class="prod-filter-group">
+                        <div class="prod-filters" style="align-items:flex-end;">
+                            <div class="prod-filter-group" style="min-width:220px;">
+                                <label for="bcLabelPreset">Размер</label>
+                                <select id="bcLabelPreset" class="form-control" style="min-width:220px;">
+                                    <option value="40x50">40 × 50 мм</option>
+                                    <option value="40x30">40 × 30 мм</option>
+                                    <option value="40x25">40 × 25 мм</option>
+                                    <option value="58x40">58 × 40 мм</option>
+                                    <option value="58x60">58 × 60 мм</option>
+                                    <option value="30x20">30 × 20 мм</option>
+                                    <option value="custom">Свой размер…</option>
+                                </select>
+                            </div>
+                            <div class="prod-filter-group bc-custom-size" id="bcCustomSizeW" style="display:none;">
                                 <label for="bcLabelW">Ширина (мм)</label>
                                 <input type="number" id="bcLabelW" class="form-control" min="10" step="1" value="40" style="width:120px;">
                             </div>
-                            <div class="prod-filter-group">
+                            <div class="prod-filter-group bc-custom-size" id="bcCustomSizeH" style="display:none;">
                                 <label for="bcLabelH">Высота (мм)</label>
                                 <input type="number" id="bcLabelH" class="form-control" min="10" step="1" value="50" style="width:120px;">
                             </div>
@@ -1668,7 +1703,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260719a-smartplan-cap"></script>
+    <script src="app.js?v=20260719b-multiprint"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

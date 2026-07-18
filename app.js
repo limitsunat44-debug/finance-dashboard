@@ -6324,6 +6324,7 @@ const barcodesState = {
     variants: [],            // [{id, product_id, warehouse_id, size_label, stock}]
     variantInfo: {},         // variant_id -> { name, size }
     selectedProductId: null, // выбранный товар в поиске
+    printCart: [],           // список номенклатур к печати: [{productId,name,c1Ref,variants:[{variantId,charRef,size,stock}]}]
     scanned: new Set()       // отсканированные коды (ревизия)
 };
 
@@ -6341,7 +6342,13 @@ async function loadBarcodes() {
 
     if (barcodesState.inited) return;
 
-    // Обработчики полей размера этикетки — сохраняем в localStorage при изменении
+    // Дропдаун размера этикетки — переключение custom + сохранение
+    const presetEl = document.getElementById('bcLabelPreset');
+    if (presetEl && !presetEl.dataset.bcBound) {
+        presetEl.addEventListener('change', function () { bcToggleCustomSize(); bcSaveLabelSize(); });
+        presetEl.dataset.bcBound = '1';
+    }
+    // Поля Свой размер — сохраняем в localStorage при изменении
     ['bcLabelW', 'bcLabelH'].forEach(id => {
         const el = document.getElementById(id);
         if (el && !el.dataset.bcBound) {
@@ -6586,24 +6593,51 @@ function renderReceipts(receipts) {
 
 // ── Размер этикетки (localStorage) ──────────────────────────────
 function bcGetLabelSize() {
+    const preset = document.getElementById('bcLabelPreset')?.value || '40x50';
+    if (preset !== 'custom') {
+        const m = preset.split('x');
+        const w = parseFloat(m[0]) || 40;
+        const h = parseFloat(m[1]) || 50;
+        return { w, h };
+    }
     const w = parseFloat(document.getElementById('bcLabelW')?.value) || 40;
     const h = parseFloat(document.getElementById('bcLabelH')?.value) || 50;
     return { w, h };
 }
 function bcSaveLabelSize() {
+    const preset = document.getElementById('bcLabelPreset')?.value || '40x50';
     const { w, h } = bcGetLabelSize();
-    try { localStorage.setItem('labelSize', JSON.stringify({ w, h })); } catch (_) {}
+    try { localStorage.setItem('labelSize', JSON.stringify({ preset, w, h })); } catch (_) {}
 }
 function bcRestoreLabelSize() {
     try {
         const raw = localStorage.getItem('labelSize');
         if (!raw) return;
-        const { w, h } = JSON.parse(raw);
+        const saved = JSON.parse(raw);
+        const presetEl = document.getElementById('bcLabelPreset');
         const wEl = document.getElementById('bcLabelW');
         const hEl = document.getElementById('bcLabelH');
-        if (wEl && w) wEl.value = w;
-        if (hEl && h) hEl.value = h;
+        // подбираем пресет: явный или по w×h, иначе custom
+        let preset = saved.preset;
+        if (!preset && saved.w && saved.h) {
+            const key = `${saved.w}x${saved.h}`;
+            const has = presetEl && Array.from(presetEl.options).some(o => o.value === key);
+            preset = has ? key : 'custom';
+        }
+        if (presetEl && preset) presetEl.value = preset;
+        if (wEl && saved.w) wEl.value = saved.w;
+        if (hEl && saved.h) hEl.value = saved.h;
+        bcToggleCustomSize();
     } catch (_) {}
+}
+// Показать/скрыть поля Свой размер в зависимости от дропдауна
+function bcToggleCustomSize() {
+    const preset = document.getElementById('bcLabelPreset')?.value || '40x50';
+    const show = preset === 'custom';
+    ['bcCustomSizeW', 'bcCustomSizeH'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = show ? '' : 'none';
+    });
 }
 
 // ── Поиск товара по названию ────────────────────────────────────
@@ -6736,6 +6770,165 @@ function bcSelectedVariants() {
     }));
 }
 
+// ── Список номенклатур к печати (корзина) ───────────────────────
+// Добавить текущий выбранный товар с отмеченными размерами в список
+function bcAddToCart() {
+    const err = document.getElementById('bcPrintError');
+    if (err) err.style.display = 'none';
+
+    const pid = barcodesState.selectedProductId;
+    if (!pid) { bcShowPrintError('Сначала найдите и выберите товар, отметьте размеры, затем нажмите «Добавить».'); return; }
+    const sel = bcSelectedVariants();
+    if (!sel.length) { bcShowPrintError('Отметьте хотя бы один размер галочкой перед добавлением.'); return; }
+
+    const prod = barcodesState.products.find(p => String(p.id) === String(pid));
+    const name = (prod && prod.name_ru) || '';
+    const c1Ref = (barcodesState.prodC1ById && barcodesState.prodC1ById[pid]) || null;
+
+    const variants = sel.map(s => {
+        const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
+        return { variantId: s.variantId, charRef: vi.charRef || null, size: vi.size || '', stock: s.stock };
+    });
+
+    // Если товар уже в списке — объединяем размеры (без дублей по variantId)
+    const existing = barcodesState.printCart.find(c => String(c.productId) === String(pid));
+    if (existing) {
+        const have = new Set(existing.variants.map(v => String(v.variantId)));
+        variants.forEach(v => { if (!have.has(String(v.variantId))) existing.variants.push(v); });
+    } else {
+        barcodesState.printCart.push({ productId: pid, name, c1Ref, variants });
+    }
+
+    // Сбрасываем текущий выбор, чтобы можно было выбрать следующий товар
+    barcodesState.selectedProductId = null;
+    const searchInp = document.getElementById('bcProductSearch');
+    if (searchInp) searchInp.value = '';
+    const vbox = document.getElementById('bcVariants');
+    if (vbox) vbox.innerHTML = '<div class="bc-variants-empty">Выберите следующий товар выше или нажмите «Умная генерация и печать».</div>';
+
+    bcRenderCart();
+}
+
+// Отрисовать список номенклатур к печати
+function bcRenderCart() {
+    const card = document.getElementById('bcCartCard');
+    const list = document.getElementById('bcCartList');
+    const count = document.getElementById('bcCartCount');
+    const summary = document.getElementById('bcCartSummary');
+    if (!card || !list) return;
+
+    const cart = barcodesState.printCart;
+    if (!cart.length) {
+        card.style.display = 'none';
+        list.innerHTML = '';
+        if (summary) summary.innerHTML = '';
+        if (count) count.textContent = '';
+        return;
+    }
+    card.style.display = '';
+
+    const totalVariants = cart.reduce((s, c) => s + c.variants.length, 0);
+    const totalStock = cart.reduce((s, c) => s + c.variants.reduce((a, v) => a + (v.stock || 0), 0), 0);
+    if (count) count.textContent = `${cart.length} номенклатур, ${totalVariants} размеров`;
+
+    list.innerHTML = cart.map((c, i) => {
+        const sizes = c.variants
+            .slice()
+            .sort((a, b) => bcSizeSortKey(a.size) - bcSizeSortKey(b.size))
+            .map(v => `${escapeHtml(v.size || '?')} <span style="color:#888;">(${v.stock})</span>`)
+            .join(', ');
+        const sub = c.variants.reduce((a, v) => a + (v.stock || 0), 0);
+        return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #e5e5e5;">
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;">${i + 1}. ${escapeHtml(c.name || c.productId)}</div>
+                <div style="font-size:12px;color:var(--color-text-secondary);margin-top:2px;">Размеры: ${sizes} · сумма остатков ${sub}</div>
+            </div>
+            <button class="btn btn-secondary" style="padding:2px 10px;" onclick="bcRemoveFromCart(${i})" title="Убрать из списка">✕</button>
+        </div>`;
+    }).join('');
+
+    if (summary) {
+        summary.innerHTML = `<div>Итого в списке: <b>${cart.length}</b> номенклатур, <b>${totalVariants}</b> размеров, сумма остатков <b>${totalStock}</b>.</div>` +
+            `<div style="font-size:11px;color:var(--color-text-secondary);margin-top:2px;">Нажмите «Посчитать этикетки» для точного числа этикеток, либо сразу «Умная генерация и печать».</div>`;
+    }
+}
+
+function bcRemoveFromCart(idx) {
+    barcodesState.printCart.splice(idx, 1);
+    bcRenderCart();
+}
+function bcClearCart() {
+    barcodesState.printCart = [];
+    bcRenderCart();
+    const info = document.getElementById('bcPrintInfo');
+    if (info) info.textContent = '';
+}
+
+// Собрать все варианты из корзины + текущий выбор (для печати).
+// Возвращает { selected:[{variantId,stock}], productList:[{c1Ref, charRefs:Set}] }
+function bcCollectAllSelections() {
+    const map = {}; // variantId -> {variantId, stock}
+    // из корзины
+    for (const c of barcodesState.printCart) {
+        for (const v of c.variants) map[v.variantId] = { variantId: v.variantId, stock: v.stock };
+    }
+    // текущий выбор (если пользователь не нажал «Добавить», но что-то отметил)
+    for (const s of bcSelectedVariants()) map[s.variantId] = { variantId: s.variantId, stock: s.stock };
+    return Object.values(map);
+}
+
+// Предпросчёт: сколько этикеток потребуется по всему списку (dryRun smart-plan)
+async function bcPreviewCount() {
+    const summary = document.getElementById('bcCartSummary');
+    const selected = bcCollectAllSelections();
+    if (!selected.length) { bcShowPrintError('Список пуст. Добавьте номенклатуры или отметьте размеры.'); return; }
+    if (summary) summary.innerHTML = '<div>⏳ Считаю этикетки по остаткам и уже созданным кодам…</div>';
+
+    // группируем по номенклатуре -> charRefs
+    const groups = {};
+    for (const s of selected) {
+        const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
+        if (!vi.productC1Ref || !vi.charRef) continue;
+        (groups[vi.productC1Ref] = groups[vi.productC1Ref] || new Set()).add(vi.charRef);
+    }
+    const prods = Object.keys(groups);
+    if (!prods.length) { if (summary) summary.innerHTML = '<div style="color:#c0392b;">Не удалось определить характеристики. Обновите остатки из 1С.</div>'; return; }
+
+    let toPrint = 0, toGenerate = 0, errCount = 0;
+    const perProd = [];
+    for (const prod of prods) {
+        const charRefs = Array.from(groups[prod]);
+        try {
+            const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: true })
+            });
+            const jr = await r.json();
+            if (!r.ok || jr.ok === false) { errCount++; continue; }
+            // на печать по размеру = min(balance, own+ours+other+toGenerate) — но не больше balance
+            let prodPrint = 0, prodGen = 0;
+            (jr.plan || []).forEach(p => {
+                const willHave = p.own + p.ours + p.other + (p.toGenerate || 0);
+                prodPrint += Math.min(p.balance, willHave);
+                prodGen += (p.toGenerate || 0);
+            });
+            toPrint += prodPrint; toGenerate += prodGen;
+            const nm = (barcodesState.printCart.find(c => c.c1Ref === prod) || {}).name || prod;
+            perProd.push({ name: nm, print: prodPrint, gen: prodGen });
+        } catch (e) { errCount++; }
+    }
+
+    if (summary) {
+        const rows = perProd.map(p => `${escapeHtml(p.name)}: ${p.print} шт.${p.gen ? ` (+${p.gen} новых)` : ''}`).join(' | ');
+        summary.innerHTML =
+            `<div style="font-size:14px;">🧮 Потребуется этикеток: <b>${toPrint}</b>` +
+            (toGenerate ? `, из них новых кодов сгенерируется: <b>${toGenerate}</b>` : ', все коды уже есть') + '.</div>' +
+            (errCount ? `<div style="color:#c0392b;font-size:12px;">Не удалось посчитать ${errCount} позиц. (проверьте связь с 1С).</div>` : '') +
+            `<div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">По номенклатурам — ${rows}</div>`;
+    }
+}
+
 // ── Генерация штрихкодов и печать ───────────────────────────────
 async function generateAndPrint() {
     const err = document.getElementById('bcPrintError');
@@ -6743,8 +6936,8 @@ async function generateAndPrint() {
     if (err) err.style.display = 'none';
     if (info) info.textContent = '';
 
-    const selected = bcSelectedVariants();
-    if (!selected.length) { bcShowPrintError('Выберите хотя бы один размер (галочкой).'); return; }
+    const selected = bcCollectAllSelections();
+    if (!selected.length) { bcShowPrintError('Выберите хотя бы один размер (галочкой) или добавьте номенклатуры в список.'); return; }
 
     const mode = document.getElementById('bcQtyMode')?.value || 'stock';
     const manualQty = parseInt(document.getElementById('bcQty')?.value, 10);
@@ -6866,6 +7059,8 @@ async function generateAndPrint() {
                 `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
         }
         bcDoPrint(w, h);
+        // успешно отправили на печать — очищаем список номенклатур
+        if (barcodesState.printCart.length) { barcodesState.printCart = []; bcRenderCart(); }
     } catch (e) {
         console.error('smart-plan generate:', e);
         bcShowPrintError(bcMissingTableMsg(e));
@@ -6951,16 +7146,30 @@ async function reprintExisting() {
     if (err) err.style.display = 'none';
     if (info) info.textContent = '';
 
-    const selected = bcSelectedVariants();
-    if (!selected.length) { bcShowPrintError('Выберите хотя бы один размер (галочкой).'); return; }
+    const selected = bcCollectAllSelections();
+    if (!selected.length) { bcShowPrintError('Выберите хотя бы один размер (галочкой) или добавьте номенклатуры в список.'); return; }
 
     const { w, h } = bcGetLabelSize();
 
     try {
+        // расширяем до всех вариантов, делящих выбранные характеристики (код мог лечь на соседний вариант)
+        const selCharSet = new Set();
+        for (const s of selected) {
+            const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
+            if (vi.charRef) selCharSet.add(vi.charRef);
+        }
+        let variantIds = selected.map(s => s.variantId);
+        if (selCharSet.size && barcodesState.variantInfo) {
+            const extra = [];
+            for (const [vid, vi] of Object.entries(barcodesState.variantInfo)) {
+                if (vi && vi.charRef && selCharSet.has(vi.charRef)) extra.push(vid);
+            }
+            if (extra.length) variantIds = Array.from(new Set([...variantIds, ...extra]));
+        }
         const { data, error } = await ortobotClient
             .from('stock_units')
             .select('*')
-            .in('variant_id', selected.map(s => s.variantId))
+            .in('variant_id', variantIds)
             .eq('status', 'in_stock');
         if (error) throw error;
 

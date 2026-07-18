@@ -6754,53 +6754,159 @@ async function generateAndPrint() {
 
     const { w, h } = bcGetLabelSize();
 
+    // Ручной режим оставляем как прежде (генерация по варианту до N), т.к. это
+    // осознанное действие пользователя. Умный режим («по остатку») идёт через
+    // серверный smart-plan: считает ПО РАЗМЕРУ ЦЕЛИКОМ и НИКОГДА не превышает остаток 1С.
+    if (mode === 'manual') { return await generateAndPrintManual(selected, manualQty, w, h); }
+
+    try {
+        if (info) info.innerHTML = '<div>⏳ Считаю остатки и коды в 1С…</div>';
+
+        // 1) группируем выбранные размеры по номенклатуре (productC1Ref) + charRefs
+        const groups = {}; // productC1Ref -> Set(charRef)
+        const selCharSet = new Set();
+        for (const sel of selected) {
+            const vInfo = (barcodesState.variantInfo && barcodesState.variantInfo[sel.variantId]) || {};
+            const prod = vInfo.productC1Ref;
+            const ch = vInfo.charRef;
+            if (!prod || !ch) continue;
+            if (!groups[prod]) groups[prod] = new Set();
+            groups[prod].add(ch);
+            selCharSet.add(ch);
+        }
+        const prods = Object.keys(groups);
+        if (!prods.length) { bcShowPrintError('Не удалось определить номенклатуру/характеристику выбранных размеров. Обновите остатки из 1С.'); return; }
+
+        // 2) вызываем smart-plan (реальная генерация + отправка в 1С) по каждой номенклатуре
+        let totGen = 0, totReg = 0, totSkip = 0, totBalance = 0, totExisting = 0;
+        const planRows = [];
+        const c1errAll = [];
+        for (const prod of prods) {
+            const charRefs = Array.from(groups[prod]);
+            const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: false })
+            });
+            const text = await r.text();
+            let jr; try { jr = JSON.parse(text); } catch { jr = { ok: false, error: text.slice(0, 200) }; }
+            if (!r.ok || jr.ok === false) {
+                c1errAll.push(`HTTP ${r.status}: ${jr.error || ''}`);
+                continue;
+            }
+            totGen += jr.totals?.generated || 0;
+            totBalance += jr.totals?.balance || 0;
+            totExisting += jr.totals?.existing || 0;
+            totReg += jr.c1?.registered || 0;
+            totSkip += jr.c1?.skipped || 0;
+            if (Array.isArray(jr.c1?.errors)) c1errAll.push(...jr.c1.errors);
+            (jr.plan || []).forEach(p => planRows.push(p));
+        }
+
+        // 3) собираем экземпляры для ПЕЧАТИ: все in_stock коды выбранных РАЗМЕРОВ
+        //    (по ВСЕМ вариантам-складам этой характеристики, т.к. новый код мог лечь
+        //    на другой вариант того же размера), но не больше остатка.
+        //    Находим все variant_id, чей charRef входит в выбранные характеристики.
+        const selCharArr = Array.from(selCharSet);
+        const printVariantIds = [];
+        if (barcodesState.variantInfo) {
+            for (const [vid, vi] of Object.entries(barcodesState.variantInfo)) {
+                if (vi && vi.charRef && selCharSet.has(vi.charRef)) printVariantIds.push(vid);
+            }
+        }
+        // подстраховка: если индекс пуст, берём хотя бы выбранные варианты
+        const variantIdsForPrint = printVariantIds.length ? printVariantIds : selected.map(s => s.variantId);
+        const { data: units, error: uErr } = await ortobotClient
+            .from('stock_units')
+            .select('*')
+            .in('variant_id', variantIdsForPrint)
+            .eq('status', 'in_stock')
+            .order('seq', { ascending: true });
+        if (uErr) throw uErr;
+
+        // срез по остатку на каждый размер (charRef): печатаем не больше balance
+        const balByChar = {};
+        planRows.forEach(p => { balByChar[p.charRef] = p.balance; });
+        const takenByChar = {};
+        const allUnits = [];
+        for (const u of (units || [])) {
+            const vInfo = (barcodesState.variantInfo && barcodesState.variantInfo[u.variant_id]) || {};
+            const ch = vInfo.charRef || u.c1_char_ref;
+            const cap = (ch != null && balByChar[ch] != null) ? balByChar[ch] : Infinity;
+            takenByChar[ch] = (takenByChar[ch] || 0);
+            if (takenByChar[ch] >= cap) continue; // не печатаем больше остатка
+            takenByChar[ch]++;
+            allUnits.push(bcEnrichUnit(u));
+        }
+        if (!allUnits.length) { bcShowPrintError('Нет экземпляров для печати (проверьте остаток в 1С).'); return; }
+
+        // 4) строка состояния
+        let c1Line;
+        if (totGen === 0) {
+            c1Line = 'i Новых кодов не потребовалось — на все размеры кодов уже хватает (не больше остатка 1С).';
+        } else if (c1errAll.length > 0) {
+            c1Line = `⚠️ 1С: зарегистрировано ${totReg}, пропущено ${totSkip}, ошибки: ${c1errAll.slice(0, 2).join('; ')}`;
+        } else {
+            c1Line = `✅ 1С: отправлено ${totGen} новых код(ов) — зарегистрировано ${totReg}, уже было ${totSkip}`;
+        }
+
+        await bcEnsurePricesForUnits(allUnits);
+        renderLabels(allUnits, w, h);
+
+        if (info) {
+            const detail = planRows
+                .sort((a, b) => String(a.sizeLabel).localeCompare(String(b.sizeLabel), 'ru'))
+                .map(p => {
+                    const total1c = p.own + p.ours + p.other + (p.generated || 0);
+                    return `${escapeHtml(p.sizeLabel)}: остаток ${p.balance}, было кодов ${p.own + p.ours + p.other}${p.generated ? `, новых +${p.generated}` : ''}${p.cappedByBalance ? ' (ограничено остатком)' : ''}`;
+                }).join(' | ');
+            info.innerHTML =
+                `<div>На печать: <b>${allUnits.length}</b> шт. — новых сгенерировано: <b>${totGen}</b>. Правило: кодов на размер не больше остатка 1С.</div>` +
+                `<div style="margin-top:4px;">${c1Line}</div>` +
+                `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+        }
+        bcDoPrint(w, h);
+    } catch (e) {
+        console.error('smart-plan generate:', e);
+        bcShowPrintError(bcMissingTableMsg(e));
+    }
+}
+
+// Ручной режим: генерирует до N этикеток на каждый выбранный вариант (как раньше),
+// переиспользуя существующие. НЕ ограничивается остатком 1С (осознанный выбор).
+async function generateAndPrintManual(selected, manualQty, w, h) {
+    const info = document.getElementById('bcPrintInfo');
     try {
         const allUnits = [];
-        const newBarcodes = [];        // только новые коды — их отправим в 1С
-        const perSize = [];            // статистика по размерам
-        let reusedTotal = 0;           // уже было своих штрихкодов (взято в печать)
-        let createdTotal = 0;          // сгенерировано новых
+        const newBarcodes = [];
+        const perSize = [];
+        let reusedTotal = 0, createdTotal = 0;
         for (const sel of selected) {
-            const wantQty = mode === 'manual' ? manualQty : Math.max(sel.stock, 1);
             const vInfo = (barcodesState.variantInfo && barcodesState.variantInfo[sel.variantId]) || {};
             const sizeName = vInfo.size || sel.variantId;
-
-            // 1) все уже существующие экземпляры этого размера
             const { data: existing, error: exErr } = await ortobotClient
-                .from('stock_units')
-                .select('*')
-                .eq('variant_id', sel.variantId)
-                .eq('status', 'in_stock')
+                .from('stock_units').select('*')
+                .eq('variant_id', sel.variantId).eq('status', 'in_stock')
                 .order('seq', { ascending: true });
             if (exErr) throw exErr;
-
             const have = existing || [];
-            const reuse = have.slice(0, wantQty);
+            const reuse = have.slice(0, manualQty);
             reuse.forEach(u => allUnits.push(bcEnrichUnit(u)));
             reusedTotal += reuse.length;
-
-            // 2) генерируем только недостающие
-            const missing = wantQty - reuse.length;
+            const missing = manualQty - reuse.length;
             let createdHere = 0;
             if (missing > 0) {
                 const { data, error } = await ortobotClient.rpc('generate_stock_units', {
-                    p_variant_id: sel.variantId,
-                    p_qty: missing,
-                    p_source_doc: 'SMART-GEN'
+                    p_variant_id: sel.variantId, p_qty: missing, p_source_doc: 'SMART-GEN'
                 });
                 if (error) throw error;
-                (data || []).forEach(u => {
-                    allUnits.push(bcEnrichUnit(u));
-                    if (u.unique_barcode) newBarcodes.push(u.unique_barcode);
-                });
-                createdHere = (data || []).length;
-                createdTotal += createdHere;
+                (data || []).forEach(u => { allUnits.push(bcEnrichUnit(u)); if (u.unique_barcode) newBarcodes.push(u.unique_barcode); });
+                createdHere = (data || []).length; createdTotal += createdHere;
             }
             perSize.push({ size: sizeName, existed: have.length, created: createdHere });
         }
         if (!allUnits.length) { bcShowPrintError('Нет экземпляров для печати.'); return; }
 
-        // 3) ОТПРАВКА НОВЫХ КОДОВ В 1С (только если были созданы)
         let c1Line = '';
         if (newBarcodes.length > 0) {
             try {
@@ -6811,40 +6917,29 @@ async function generateAndPrint() {
                 });
                 const text = await r.text();
                 let jr; try { jr = JSON.parse(text); } catch { jr = { raw: text }; }
-                if (!r.ok || jr.ok === false) {
-                    c1Line = `❌ 1С: ошибка HTTP ${r.status}${jr.error ? ' — ' + jr.error : ''}`;
-                } else {
-                    const c1 = jr.c1 || {};
-                    const reg = c1.registered ?? 0;
-                    const skip = c1.skipped ?? 0;
+                if (!r.ok || jr.ok === false) c1Line = `❌ 1С: ошибка HTTP ${r.status}${jr.error ? ' — ' + jr.error : ''}`;
+                else {
+                    const c1 = jr.c1 || {}; const reg = c1.registered ?? 0; const skip = c1.skipped ?? 0;
                     const errs = Array.isArray(c1.errors) ? c1.errors : [];
-                    if (errs.length > 0) {
-                        c1Line = `⚠️ 1С: записано ${reg}, пропущено ${skip}, ошибки: ${errs.slice(0,2).join('; ')}`;
-                    } else {
-                        c1Line = `✅ 1С: успешно отправлено ${jr.sentToC1 ?? newBarcodes.length} код(ов) — зарегистрировано ${reg}, уже было в 1С ${skip}`;
-                    }
+                    c1Line = errs.length > 0
+                        ? `⚠️ 1С: записано ${reg}, пропущено ${skip}, ошибки: ${errs.slice(0,2).join('; ')}`
+                        : `✅ 1С: отправлено ${jr.sentToC1 ?? newBarcodes.length} — зарегистрировано ${reg}, уже было ${skip}`;
                 }
-            } catch (e) {
-                c1Line = `❌ 1С: сетевая ошибка — ${e.message}`;
-            }
-        } else {
-            c1Line = 'i Новых кодов нет — в 1С отправлять нечего (печать существующих).';
-        }
+            } catch (e) { c1Line = `❌ 1С: сетевая ошибка — ${e.message}`; }
+        } else c1Line = 'i Новых кодов нет — печать существующих.';
 
         await bcEnsurePricesForUnits(allUnits);
         renderLabels(allUnits, w, h);
-
-        // строка состояния + детализация по размерам
         if (info) {
             const detail = perSize.map(s => `${escapeHtml(s.size)}: было ${s.existed}, новых +${s.created}`).join(' | ');
             info.innerHTML =
-                `<div>На печать: <b>${allUnits.length}</b> шт. — новых сгенерировано: <b>${createdTotal}</b>, уже было своих: <b>${reusedTotal}</b> (без дублей; размеров: ${selected.length})</div>` +
+                `<div>⚙️ Ручной режим — На печать: <b>${allUnits.length}</b> шт., новых: <b>${createdTotal}</b>, было: <b>${reusedTotal}</b></div>` +
                 `<div style="margin-top:4px;">${c1Line}</div>` +
                 `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
         }
         bcDoPrint(w, h);
     } catch (e) {
-        console.error('generate_stock_units (smart):', e);
+        console.error('generateAndPrintManual:', e);
         bcShowPrintError(bcMissingTableMsg(e));
     }
 }

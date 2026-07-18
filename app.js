@@ -7044,12 +7044,34 @@ async function loadUnitsTable() {
     const dateFrom = document.getElementById('bcUnitsDateFrom')?.value || '';
     const dateTo = document.getElementById('bcUnitsDateTo')?.value || '';
     const sort = document.getElementById('bcUnitsSort')?.value || 'date_asc';
+    const search = (document.getElementById('bcUnitsSearch')?.value || '').trim().toLowerCase();
+
+    // Привязка Enter в поле поиска (однократно)
+    const searchEl = document.getElementById('bcUnitsSearch');
+    if (searchEl && !searchEl.dataset.bcBound) {
+        searchEl.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); bcUnitsApplyFilters(); }
+        });
+        searchEl.dataset.bcBound = '1';
+    }
 
     const from = bcUnitsPage * BC_UNITS_PAGE_SIZE;
     const to = from + BC_UNITS_PAGE_SIZE - 1;
 
     try {
+        // Поиск по номенклатуре: находим variant_id товаров, чьё название содержит запрос
+        let searchVariantIds = null;
+        if (search) {
+            const info = barcodesState.variantInfo || {};
+            searchVariantIds = Object.keys(info).filter(id => (info[id].name || '').toLowerCase().includes(search));
+            if (searchVariantIds.length === 0) {
+                listEl.innerHTML = '<p style="color:var(--color-text-secondary);">По запросу «' + escapeHtml(search) + '» товаров не найдено.</p>';
+                return;
+            }
+        }
+
         let q = ortobotClient.from('stock_units').select('*', { count: 'exact' });
+        if (searchVariantIds) q = q.in('variant_id', searchVariantIds);
         if (whId) q = q.eq('warehouse_id', whId);
         if (status) q = q.eq('status', status);
         if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');

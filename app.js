@@ -51,7 +51,8 @@ const ADMIN_ACCOUNTS = {
     'Sunnat': { password: 'Sunna0909', displayName: 'Sunnat', allowedTabs: '*' },
     'Iskandar': { password: '1111', displayName: 'Iskandar', allowedTabs: '*' },
     'Shahida': { password: 's2364170', displayName: 'Shahida', allowedTabs: '*' },
-    'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments', 'barcodes'] }
+    'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments', 'barcodes'] },
+    'Кассир': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] }
 };
 
 // Права доступа текущего пользователя: '*' (полный) или массив id вкладок.
@@ -1580,6 +1581,8 @@ function switchTab(tabName) {
         if (typeof loadProducts === 'function') loadProducts();
     } else if (tabName === 'barcodes') {
         if (typeof loadBarcodes === 'function') loadBarcodes();
+    } else if (tabName === 'cashier') {
+        if (typeof loadCashier === 'function') loadCashier();
     } else if (tabName === 'settings') {
         if (typeof loadSyncStatus === 'function') loadSyncStatus();
     }
@@ -7585,4 +7588,354 @@ async function revisionCompare() {
         console.error('revisionCompare:', e);
         if (errEl) { errEl.textContent = bcMissingTableMsg(e); errEl.style.display = 'block'; }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// КАССИР: Распечатать ценник для витрины
+// Отдельный минимальный сценарий: склад → товар (подсказки) → размер →
+// список СУЩЕСТВУЮЩИХ штрихкодов → выбор кода → печать.
+// НЕ генерирует и НЕ присваивает новые коды. Использует общие справочники
+// из barcodesState (грузятся loadBarcodes) и общие функции печати.
+// ═══════════════════════════════════════════════════════════════════
+const cashierState = {
+    inited: false,
+    selectedProductId: null,
+    selectedCharRef: null,
+    selectedSizeLabel: '',
+    selectedProductC1Ref: null,
+    selectedBarcode: null,
+    codes: [] // [{barcode, type}]
+};
+
+async function loadCashier() {
+    // Справочники товаров/складов те же, что в разделе «Штрихкоды».
+    if (typeof loadBarcodes === 'function') { try { await loadBarcodes(); } catch (e) { console.warn(e); } }
+
+    csFillWarehouses();
+    csRestoreLabelSize();
+
+    if (cashierState.inited) return;
+
+    // Размер этикетки — дропдаун + custom
+    const preset = document.getElementById('csLabelPreset');
+    if (preset && !preset.dataset.csBound) {
+        preset.addEventListener('change', function () { csToggleCustomSize(); csSaveLabelSize(); });
+        preset.dataset.csBound = '1';
+    }
+    ['csLabelW', 'csLabelH'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.csBound) { el.addEventListener('change', csSaveLabelSize); el.dataset.csBound = '1'; }
+    });
+
+    // Поиск товара
+    const searchEl = document.getElementById('csProductSearch');
+    if (searchEl && !searchEl.dataset.csBound) {
+        let t = null;
+        searchEl.addEventListener('input', function () {
+            clearTimeout(t);
+            const q = this.value;
+            t = setTimeout(() => csSearchProducts(q), 250);
+        });
+        searchEl.dataset.csBound = '1';
+    }
+
+    // Смена склада → перестроить размеры
+    const wh = document.getElementById('csWarehouse');
+    if (wh && !wh.dataset.csBound) {
+        wh.addEventListener('change', function () {
+            if (cashierState.selectedProductId) csSelectProduct(cashierState.selectedProductId);
+        });
+        wh.dataset.csBound = '1';
+    }
+
+    // Скрыть выпадашку при клике вне поля
+    document.addEventListener('click', function (e) {
+        const box = document.getElementById('csSearchResults');
+        const inp = document.getElementById('csProductSearch');
+        if (box && inp && !box.contains(e.target) && e.target !== inp) box.style.display = 'none';
+    });
+
+    cashierState.inited = true;
+}
+
+function csFillWarehouses() {
+    const wh = document.getElementById('csWarehouse');
+    if (!wh || !barcodesState || !barcodesState.warehouses) return;
+    const opts = barcodesState.warehouses
+        .map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name || w.c1_code)}</option>`)
+        .join('');
+    wh.innerHTML = '<option value="">— выберите склад —</option>' + opts;
+}
+
+function csShowError(msg) {
+    const err = document.getElementById('csError');
+    if (err) { err.textContent = msg; err.style.display = 'block'; }
+}
+function csClearError() {
+    const err = document.getElementById('csError');
+    if (err) err.style.display = 'none';
+}
+
+// ── Размер этикетки ──────────────────────────────────────────────
+function csToggleCustomSize() {
+    const preset = document.getElementById('csLabelPreset');
+    const custom = document.getElementById('csCustomSize');
+    if (!preset || !custom) return;
+    custom.style.display = preset.value === 'custom' ? '' : 'none';
+}
+function csGetLabelSize() {
+    const preset = document.getElementById('csLabelPreset');
+    const v = preset ? preset.value : '40x50';
+    if (v === 'custom') {
+        const w = parseInt(document.getElementById('csLabelW')?.value, 10) || 40;
+        const h = parseInt(document.getElementById('csLabelH')?.value, 10) || 50;
+        return { w, h };
+    }
+    const m = v.split('x');
+    return { w: parseInt(m[0], 10) || 40, h: parseInt(m[1], 10) || 50 };
+}
+function csSaveLabelSize() {
+    try {
+        const preset = document.getElementById('csLabelPreset');
+        localStorage.setItem('csLabelPreset', preset ? preset.value : '40x50');
+        localStorage.setItem('csLabelW', document.getElementById('csLabelW')?.value || '40');
+        localStorage.setItem('csLabelH', document.getElementById('csLabelH')?.value || '50');
+    } catch (e) {}
+}
+function csRestoreLabelSize() {
+    try {
+        const preset = document.getElementById('csLabelPreset');
+        const p = localStorage.getItem('csLabelPreset');
+        if (preset && p) preset.value = p;
+        const w = localStorage.getItem('csLabelW'); if (w) { const el = document.getElementById('csLabelW'); if (el) el.value = w; }
+        const h = localStorage.getItem('csLabelH'); if (h) { const el = document.getElementById('csLabelH'); if (el) el.value = h; }
+        csToggleCustomSize();
+    } catch (e) {}
+}
+
+// ── Поиск товара (подсказки) ─────────────────────────────────────
+function csEnsureSearchBox() {
+    let box = document.getElementById('csSearchResults');
+    if (!box) {
+        const inp = document.getElementById('csProductSearch');
+        box = document.createElement('div');
+        box.id = 'csSearchResults';
+        box.style.cssText = 'position:absolute;top:100%;left:0;right:0;z-index:60;background:#fff;' +
+            'border:1px solid #ccc;border-radius:6px;max-height:260px;overflow-y:auto;' +
+            'box-shadow:0 6px 18px rgba(0,0,0,.14);display:none;';
+        inp.parentElement.style.position = 'relative';
+        inp.parentElement.appendChild(box);
+    }
+    return box;
+}
+function csSearchProducts(query) {
+    const box = csEnsureSearchBox();
+    const q = String(query || '').trim().toLowerCase();
+    if (q.length < 2) { box.style.display = 'none'; return; }
+    const matches = (barcodesState.products || [])
+        .filter(p => (p.name_ru || '').toLowerCase().includes(q))
+        .slice(0, 30);
+    if (!matches.length) {
+        box.innerHTML = '<div style="padding:8px 10px;color:#888;">Ничего не найдено</div>';
+        box.style.display = 'block';
+        return;
+    }
+    box.innerHTML = matches.map(p =>
+        `<div class="cs-search-item" data-pid="${escapeHtml(p.id)}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #eee;">
+            ${escapeHtml(p.name_ru)}${p.category ? ` <span style="color:#999;">· ${escapeHtml(p.category)}</span>` : ''}
+        </div>`
+    ).join('');
+    box.style.display = 'block';
+    box.querySelectorAll('.cs-search-item').forEach(item => {
+        item.addEventListener('mouseenter', function () { this.style.background = '#f0f0f0'; });
+        item.addEventListener('mouseleave', function () { this.style.background = ''; });
+        item.addEventListener('click', function () { csSelectProduct(this.dataset.pid); box.style.display = 'none'; });
+    });
+}
+
+// ── Выбор товара → список размеров (одиночный выбор) ──────────────
+function csSelectProduct(pid) {
+    csClearError();
+    cashierState.selectedProductId = pid;
+    cashierState.selectedCharRef = null;
+    cashierState.selectedSizeLabel = '';
+    cashierState.selectedBarcode = null;
+    cashierState.codes = [];
+    csResetBarcodesBox();
+    csUpdatePrintBtn();
+
+    const prod = (barcodesState.products || []).find(p => String(p.id) === String(pid));
+    cashierState.selectedProductC1Ref = prod ? (prod.c1_ref || null) : null;
+    const inp = document.getElementById('csProductSearch');
+    if (inp && prod) inp.value = prod.name_ru || '';
+
+    const box = document.getElementById('csSizes');
+    if (!box) return;
+    const whId = document.getElementById('csWarehouse')?.value || '';
+    const multiWh = !whId;
+
+    let vs = (barcodesState.variants || []).filter(v => String(v.product_id) === String(pid));
+    if (whId) vs = vs.filter(v => String(v.warehouse_id) === String(whId));
+    vs = vs.filter(v => (v.stock || 0) > 0);
+
+    // Схлопываем по характеристике (charRef) — один размер один раз
+    const byChar = {};
+    vs.forEach(v => {
+        const key = v.c1_char_ref || ('sz:' + (v.size_label || ''));
+        if (!byChar[key]) byChar[key] = { charRef: v.c1_char_ref || null, size: v.size_label || '(без размера)', stock: 0 };
+        byChar[key].stock += (v.stock || 0);
+    });
+    let sizes = Object.values(byChar);
+    sizes.sort((a, b) => {
+        const ka = bcSizeSortKey(a.size), kb = bcSizeSortKey(b.size);
+        if (ka !== kb) return ka - kb;
+        return String(a.size).localeCompare(String(b.size));
+    });
+
+    if (!sizes.length) {
+        box.innerHTML = '<div class="bc-variants-empty">Нет размеров с остатком' + (whId ? ' на этом складе' : '') + '.</div>';
+        return;
+    }
+    box.innerHTML = sizes.map(s =>
+        `<button type="button" class="cs-size-btn btn btn-secondary" data-charref="${escapeHtml(s.charRef || '')}" data-size="${escapeHtml(s.size)}"
+            style="margin:4px 6px 4px 0;">${escapeHtml(s.size)} <span style="color:#999;">(${s.stock})</span></button>`
+    ).join('');
+    box.querySelectorAll('.cs-size-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            box.querySelectorAll('.cs-size-btn').forEach(b => b.classList.remove('btn-primary'));
+            box.querySelectorAll('.cs-size-btn').forEach(b => b.classList.add('btn-secondary'));
+            this.classList.remove('btn-secondary');
+            this.classList.add('btn-primary');
+            csSelectSize(this.dataset.charref, this.dataset.size);
+        });
+    });
+}
+
+function csResetBarcodesBox() {
+    const box = document.getElementById('csBarcodes');
+    if (box) box.innerHTML = '<div class="bc-variants-empty">Выберите размер.</div>';
+    const info = document.getElementById('csInfo');
+    if (info) info.textContent = '';
+}
+
+// ── Выбор размера → тянем существующие штрихкоды из 1С ────────────
+async function csSelectSize(charRef, sizeLabel) {
+    csClearError();
+    cashierState.selectedCharRef = charRef || null;
+    cashierState.selectedSizeLabel = sizeLabel || '';
+    cashierState.selectedBarcode = null;
+    csUpdatePrintBtn();
+
+    const box = document.getElementById('csBarcodes');
+    if (box) box.innerHTML = '<div class="bc-variants-empty">⏳ Загружаю штрихкоды…</div>';
+
+    const nom = cashierState.selectedProductC1Ref;
+    if (!nom) { csShowError('У товара нет ссылки 1С — обратитесь к администратору.'); if (box) box.innerHTML = ''; return; }
+
+    try {
+        // Тянем ВСЕ коды номенклатуры из 1С и фильтруем по характеристике
+        let items = await csFetchCodes(nom);
+        // Фильтр по характеристике (charRef), если он есть; иначе по имени размера
+        let codes = items.filter(it => {
+            if (cashierState.selectedCharRef) return String(it.characteristic_ref || '') === String(cashierState.selectedCharRef);
+            return String(it.characteristic_name || '') === String(sizeLabel);
+        });
+        // Порядок: родной (2200000) сверху, затем наши (2000000), затем прочие
+        codes.sort((a, b) => csCodeRank(a.barcode) - csCodeRank(b.barcode) || String(a.barcode).localeCompare(String(b.barcode)));
+        cashierState.codes = codes;
+        csRenderBarcodes(codes);
+    } catch (e) {
+        console.error('csSelectSize:', e);
+        csShowError('Не удалось загрузить штрихкоды из 1С: ' + (e && e.message ? e.message : ''));
+        if (box) box.innerHTML = '';
+    }
+}
+
+// Ранг для сортировки: родной размерный код — первым (его обычно печатают на витрину)
+function csCodeRank(code) {
+    const c = String(code || '');
+    if (c.startsWith('2200000')) return 0;   // родной размерный
+    if (c.startsWith('2000000')) return 1;   // наш индивидуальный
+    return 2;                                 // заводской/прочий
+}
+function csCodeType(code) {
+    const c = String(code || '');
+    if (c.startsWith('2200000')) return { label: 'родной (размер)', color: '#0a7d28' };
+    if (c.startsWith('2000000')) return { label: 'индивидуальный', color: '#8a6d00' };
+    return { label: 'заводской', color: '#555' };
+}
+
+// Получить список кодов номенклатуры из 1С через сервис (метод barcodes-list)
+async function csFetchCodes(nom) {
+    const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=barcodes-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+        body: JSON.stringify({ nomenclature: nom, limit: 5000 }),
+        cache: 'no-store'
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
+    return data.items || [];
+}
+
+function csRenderBarcodes(codes) {
+    const box = document.getElementById('csBarcodes');
+    if (!box) return;
+    if (!codes.length) {
+        box.innerHTML = '<div class="bc-variants-empty">Для этого размера в 1С нет штрихкодов.</div>';
+        return;
+    }
+    box.innerHTML = codes.map((c, i) => {
+        const t = csCodeType(c.barcode);
+        return `<label class="cs-code-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e3e3e3;border-radius:8px;margin-bottom:6px;cursor:pointer;">
+            <input type="radio" name="csCode" value="${escapeHtml(c.barcode)}" ${i === 0 ? 'checked' : ''}>
+            <span style="font-family:monospace;font-size:15px;font-weight:600;">${escapeHtml(c.barcode)}</span>
+            <span style="font-size:12px;color:${t.color};background:${t.color}18;padding:2px 8px;border-radius:10px;">${t.label}</span>
+        </label>`;
+    }).join('');
+    // выбрать первый по умолчанию
+    cashierState.selectedBarcode = codes[0].barcode;
+    csUpdatePrintBtn();
+    box.querySelectorAll('input[name="csCode"]').forEach(r => {
+        r.addEventListener('change', function () {
+            cashierState.selectedBarcode = this.value;
+            csUpdatePrintBtn();
+        });
+    });
+    const info = document.getElementById('csInfo');
+    if (info) info.textContent = `Найдено штрихкодов для размера «${cashierState.selectedSizeLabel}»: ${codes.length}. Обычно на витрину печатают родной (размерный) код.`;
+}
+
+function csUpdatePrintBtn() {
+    const btn = document.getElementById('csPrintBtn');
+    if (btn) btn.disabled = !cashierState.selectedBarcode;
+}
+
+// ── Печать выбранного штрихкода (один ценник) ────────────────────
+async function csPrint() {
+    csClearError();
+    if (!cashierState.selectedBarcode) { csShowError('Выберите штрихкод.'); return; }
+    const { w, h } = csGetLabelSize();
+
+    const prod = (barcodesState.products || []).find(p => String(p.id) === String(cashierState.selectedProductId));
+    const name = prod ? (prod.name_ru || '') : '';
+
+    // Подтягиваем цену размера (для ценника)
+    let unit = {
+        unique_barcode: cashierState.selectedBarcode,
+        size_label: cashierState.selectedSizeLabel,
+        name: name,
+        charRef: cashierState.selectedCharRef,
+        productC1Ref: cashierState.selectedProductC1Ref,
+        priceOld: null, priceNew: null, currency: 'TJS'
+    };
+    try {
+        if (cashierState.selectedProductC1Ref && typeof bcFetchPrices === 'function') {
+            await bcFetchPrices(cashierState.selectedProductC1Ref);
+            if (typeof bcApplyPriceToUnit === 'function') bcApplyPriceToUnit(unit);
+        }
+    } catch (e) { console.warn('csPrint prices:', e); }
+
+    renderLabels([unit], w, h);
+    bcDoPrint(w, h);
 }

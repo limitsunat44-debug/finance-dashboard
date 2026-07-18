@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260719b-multiprint">
+    <link rel="stylesheet" href="style.css?v=20260719c-cashier">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -60,6 +60,7 @@
             <button class="nav-tab" data-tab="aiInsights" onclick="switchTab('aiInsights')">🤖 ИИ-аналитика</button>
             <button class="nav-tab" data-tab="products" onclick="switchTab('products')">📦 Товары</button>
             <button class="nav-tab" data-tab="barcodes" onclick="switchTab('barcodes')">🏷️ Штрихкоды</button>
+            <button class="nav-tab" data-tab="cashier" onclick="switchTab('cashier')">🧾 Ценник для витрины</button>
         </nav>
 
         <!-- Loading Indicator -->
@@ -1526,6 +1527,73 @@
             </div>
         </section>
 
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- КАССИР: Распечатать ценник для витрины -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <section id="cashierSection" class="section">
+            <div class="card">
+                <h2 style="margin-top:0;">🧾 Распечатать ценник для витрины</h2>
+                <p style="color:var(--color-text-secondary);margin-top:4px;">
+                    Выберите склад, найдите товар, выберите размер и конкретный штрихкод — затем печать.
+                </p>
+
+                <div id="csError" class="error-message" style="display:none;margin-bottom:12px;"></div>
+
+                <div class="prod-filters">
+                    <div class="prod-filter-group">
+                        <label for="csWarehouse">Магазин / склад</label>
+                        <select id="csWarehouse" class="form-control" style="min-width:200px;"></select>
+                    </div>
+                    <div class="prod-filter-group" style="flex:1;min-width:240px;">
+                        <label for="csProductSearch">Поиск товара (слово или код)</label>
+                        <input type="text" id="csProductSearch" class="form-control" placeholder="например: кроссовки" autocomplete="off">
+                    </div>
+                    <div class="prod-filter-group">
+                        <label for="csLabelPreset">Размер этикетки</label>
+                        <select id="csLabelPreset" class="form-control">
+                            <option value="40x50">40 × 50 мм</option>
+                            <option value="40x30">40 × 30 мм</option>
+                            <option value="40x25">40 × 25 мм</option>
+                            <option value="58x40">58 × 40 мм</option>
+                            <option value="58x60">58 × 60 мм</option>
+                            <option value="30x20">30 × 20 мм</option>
+                            <option value="custom">Свой размер…</option>
+                        </select>
+                    </div>
+                    <div class="prod-filter-group" id="csCustomSize" style="display:none;">
+                        <label>Ш × В (мм)</label>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <input type="number" id="csLabelW" class="form-control" value="40" min="10" max="120" style="width:70px;">
+                            <span>×</span>
+                            <input type="number" id="csLabelH" class="form-control" value="50" min="10" max="120" style="width:70px;">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Размеры товара -->
+                <div style="margin-top:16px;">
+                    <label style="font-weight:600;">Размер</label>
+                    <div id="csSizes" class="bc-variants-box" style="margin-top:6px;">
+                        <div class="bc-variants-empty">Сначала выберите товар выше.</div>
+                    </div>
+                </div>
+
+                <!-- Список штрихкодов размера -->
+                <div style="margin-top:16px;">
+                    <label style="font-weight:600;">Штрихкод размера</label>
+                    <div id="csBarcodes" style="margin-top:6px;">
+                        <div class="bc-variants-empty">Выберите размер.</div>
+                    </div>
+                </div>
+
+                <div id="csInfo" style="margin-top:12px;color:var(--color-text-secondary);font-size:13px;"></div>
+
+                <div style="margin-top:16px;">
+                    <button class="btn btn-primary" id="csPrintBtn" onclick="csPrint()" disabled>🖨️ Напечатать ценник</button>
+                </div>
+            </div>
+        </section>
+
     </div>
 
     <!-- Скрытая область печати этикеток -->
@@ -1703,7 +1771,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260719b-multiprint"></script>
+    <script src="app.js?v=20260719c-cashier"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

@@ -52,7 +52,8 @@ const ADMIN_ACCOUNTS = {
     'Iskandar': { password: '1111', displayName: 'Iskandar', allowedTabs: '*' },
     'Shahida': { password: 's2364170', displayName: 'Shahida', allowedTabs: '*' },
     'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments', 'barcodes'] },
-    'Кассир': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] }
+    'Кассир': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] },
+    'kassir': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] }
 };
 
 // Права доступа текущего пользователя: '*' (полный) или массив id вкладок.
@@ -1484,8 +1485,15 @@ function autoBackup() {
 
 // Authentication functions
 function login(username, password) {
-    const account = ADMIN_ACCOUNTS[username];
-    if (account && account.password === password) {
+    // Точное совпадение, иначе — поиск без учёта регистра (удобно для логинов вроде kassir/Kassir/KASSIR)
+    let account = ADMIN_ACCOUNTS[username];
+    if (!account && username) {
+        const key = Object.keys(ADMIN_ACCOUNTS).find(
+            k => k.toLowerCase() === String(username).trim().toLowerCase()
+        );
+        if (key) account = ADMIN_ACCOUNTS[key];
+    }
+    if (account && account.password === String(password).trim()) {
         currentUser = account.displayName;
         currentAllowedTabs = account.allowedTabs || '*';
         document.getElementById('loginScreen').style.display = 'none';

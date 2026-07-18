@@ -7003,13 +7003,14 @@ async function loadUnitsTable() {
     const status = document.getElementById('bcUnitsStatus')?.value || '';
 
     try {
-        let q = ortobotClient.from('stock_units').select('*').limit(1000);
+        let q = ortobotClient.from('stock_units').select('*', { count: 'exact' }).order('unique_barcode', { ascending: true }).limit(2000);
         if (whId) q = q.eq('warehouse_id', whId);
         if (status) q = q.eq('status', status);
-        const { data, error } = await q;
+        const { data, error, count } = await q;
         if (error) throw error;
 
         const rows = data || [];
+        const totalCount = (typeof count === 'number') ? count : rows.length;
         if (!rows.length) {
             listEl.innerHTML = '<p style="color:var(--color-text-secondary);">Экземпляров не найдено.</p>';
             return;
@@ -7037,7 +7038,7 @@ async function loadUnitsTable() {
                 </tr></thead>
                 <tbody>${body}</tbody>
             </table>
-            <p style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;">Показано: ${rows.length}</p>`;
+            <p style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;">Показано: ${rows.length} из ${totalCount}${rows.length < totalCount ? ' (уточните склад/статус, чтобы увидеть остальные)' : ''}</p>`;
     } catch (e) {
         console.error('loadUnitsTable:', e);
         listEl.innerHTML = '';

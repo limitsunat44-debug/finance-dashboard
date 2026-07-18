@@ -1322,6 +1322,7 @@
 
                 <div class="section-tabs" id="barcodesSubTabs">
                     <button class="section-tab active" data-btab="print">🖨️ Печать</button>
+                    <button class="section-tab" data-btab="receipts">📦 Поступления</button>
                     <button class="section-tab" data-btab="units">📋 Экземпляры</button>
                     <button class="section-tab" data-btab="revision">🔍 Ревизия</button>
                 </div>
@@ -1392,11 +1393,32 @@
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
                         <button class="btn btn-primary" onclick="generateAndPrint()">🏷️ Сгенерировать и печатать</button>
                         <button class="btn btn-secondary" onclick="reprintExisting()">Печать уже сгенерированных</button>
+                        <button class="btn btn-secondary" onclick="refreshStockFrom1C()" title="Загрузить актуальные остатки из 1С (после оприходования)">🔄 Обновить остатки из 1С</button>
                     </div>
                     <div id="bcPrintInfo" style="font-size:12px;color:var(--color-text-secondary);margin-top:10px;"></div>
                 </div>
 
                 <!-- ── Экземпляры ─────────────────────────────────────── -->
+                <div id="bcReceiptsTab" class="prod-tab-content">
+                    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                        Последние документы «Поступление товаров» из 1С. Если у позиции уникальных
+                        штрихкодов меньше, чем пришло пар — она подсвечивается: нужно сгенерировать
+                        и распечатать этикетки через вкладку «Печать».
+                    </p>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+                        <button class="btn btn-primary" onclick="loadReceipts()">🔄 Загрузить поступления</button>
+                        <label style="font-size:12px;color:var(--color-text-secondary);">Показать
+                            <select id="bcReceiptsLimit" class="form-control" style="width:80px;display:inline-block;margin-left:4px;">
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                            </select> последних</label>
+                    </div>
+                    <div id="bcReceiptsError" class="error-message" style="display:none;margin:12px 0;"></div>
+                    <div id="bcReceiptsList" style="margin-top:12px;"></div>
+                </div>
+
+                <!-- ── Экземпляры ───────────────────── -->
                 <div id="bcUnitsTab" class="prod-tab-content">
                     <div class="prod-filters">
                         <div class="prod-filter-group">
@@ -1625,7 +1647,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260718c-sizes"></script>
+    <script src="app.js?v=20260718d-receipts"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

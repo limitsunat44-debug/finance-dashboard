@@ -75,6 +75,9 @@ const SYNC_BASE_URL = 'https://1c-sync.vercel.app';
 // Секрет для ручного запуска. Вкладка «Настройки» доступна только админам,
 // вход в дашборд защищён логином — секрет светится только админам.
 const SYNC_SECRET = '76b944f4444be766b2c27b7988118aec521c814d824b191a86cf8b6c420db44e';
+// ── Сервис уникальных штрихкодов (отдельный от 1c-sync, чтобы не ломать синхронизацию) ──
+const BARCODE_SVC_URL = 'https://1c-sync-barcodes.vercel.app';
+const BARCODE_SVC_SECRET = 'TySog2bN1bMJHsssoTvyCZO3IKOef1z0';
 // Описание всех типов синхронизации: метка sync_type в логе, эндпоинт, cron-расписание (UTC) и название.
 // schedule: { type:'hourly' } | { type:'everyN', hours:N } | { type:'daily', hourUtc:H }
 const SYNC_TYPES = [
@@ -6394,7 +6397,7 @@ async function loadBarcodes() {
     try {
         const [warehouses, products, variants] = await Promise.all([
             fetchAllRows('warehouses', 'id,c1_code,name,is_active'),
-            fetchAllRows('products', 'id,name_ru,category,is_active'),
+            fetchAllRows('products', 'id,name_ru,category,is_active,c1_ref'),
             fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock')
         ]);
 
@@ -6450,16 +6453,129 @@ function switchBarcodesSubtab(name) {
     document.querySelectorAll('#barcodesSubTabs .section-tab').forEach(b => {
         b.classList.toggle('active', b.dataset.btab === name);
     });
-    const map = { print: 'bcPrintTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
+    const map = { print: 'bcPrintTab', receipts: 'bcReceiptsTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
     document.querySelectorAll('#barcodesSection .prod-tab-content').forEach(c => c.classList.remove('active'));
     const el = document.getElementById(map[name]);
     if (el) el.classList.add('active');
 
     if (name === 'units') loadUnitsTable();
+    if (name === 'receipts') loadReceipts();
     if (name === 'revision') {
         const inp = document.getElementById('bcScanInput');
         if (inp) inp.focus();
     }
+}
+
+// ── Обновить остатки из 1С ──────────────────────────────
+// Читает актуальные остатки из 1С и обновляет product_variants.stock в Supabase.
+// Вызывается кнопкой на вкладке «Печать». После обновления перезагружает
+// список размеров выбранного товара, чтобы «по остатку» был актуальным.
+async function refreshStockFrom1C() {
+    const btns = document.querySelectorAll('button[onclick="refreshStockFrom1C()"]');
+    btns.forEach(b => { b.disabled = true; b.dataset._t = b.textContent; b.textContent = '⏳ Обновляю…'; });
+    const info = document.getElementById('bcPrintInfo');
+    try {
+        // Если выбран конкретный товар — обновляем только его (быстрее), иначе — всё.
+        let body = { all: true };
+        const curProd = barcodesState.products.find(p => String(p.id) === String(barcodesState.selectedProductId));
+        if (curProd && curProd.c1_ref) {
+            body = { productC1Ref: curProd.c1_ref };
+        }
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=balance`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            body: JSON.stringify(body),
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (info) {
+            info.innerHTML = `✅ Остатки обновлены из 1С: сопоставлено ${data.matched}, изменено ${data.updated}`
+                + (data.unmatched ? `, без совпадения ${data.unmatched}` : '') + '.';
+        }
+        // Обновляем stock в локальном состоянии из Supabase и перерисовываем размеры.
+        try {
+            const fresh = await fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock');
+            if (fresh && fresh.length) {
+                barcodesState.variants = fresh.map(v => ({ ...v, stock: Number(v.stock) || 0 }));
+            }
+        } catch (_) { /* не критично */ }
+        if (barcodesState.selectedProductId && typeof bcSelectProduct === 'function') {
+            bcSelectProduct(barcodesState.selectedProductId);
+        }
+    } catch (e) {
+        if (info) info.innerHTML = `<span style="color:var(--color-error,#c0392b);">❌ Не удалось обновить остатки: ${escapeHtml(e.message)}</span>`;
+    } finally {
+        btns.forEach(b => { b.disabled = false; if (b.dataset._t) b.textContent = b.dataset._t; });
+    }
+}
+
+// ── Недавние поступления ──────────────────────────
+async function loadReceipts() {
+    const listEl = document.getElementById('bcReceiptsList');
+    const errEl = document.getElementById('bcReceiptsError');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (listEl) listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Загружаю поступления…</div>';
+    const limitSel = document.getElementById('bcReceiptsLimit');
+    const limit = limitSel ? limitSel.value : 5;
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=receipts&limit=${encodeURIComponent(limit)}`, {
+            method: 'GET',
+            headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        renderReceipts(data.receipts || []);
+    } catch (e) {
+        if (listEl) listEl.innerHTML = '';
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = '❌ Не удалось загрузить поступления: ' + e.message; }
+    }
+}
+
+function renderReceipts(receipts) {
+    const listEl = document.getElementById('bcReceiptsList');
+    if (!listEl) return;
+    if (!receipts.length) {
+        listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">Нет документов поступления.</div>';
+        return;
+    }
+    let html = '';
+    for (const r of receipts) {
+        const dt = r.date ? new Date(r.date).toLocaleDateString('ru-RU') : '';
+        const warn = r.needAny
+            ? '<span style="background:#fdecea;color:#c0392b;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">⚠️ нужны штрихкоды</span>'
+            : '<span style="background:#eafaf1;color:#1e8449;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">✅ штрихкоды есть</span>';
+        let rows = '';
+        for (const l of (r.lines || [])) {
+            const need = l.needsBarcodes;
+            const rowStyle = need ? 'background:#fdf3f2;' : '';
+            const badge = need
+                ? `<span style="color:#c0392b;font-weight:600;">⊕ нужно +${Math.max(0, (l.qty||0) - (l.uniqueUnits||0))}</span>`
+                : '<span style="color:#1e8449;">ок</span>';
+            rows += `<tr style="${rowStyle}">`
+                + `<td style="padding:6px 10px;">${escapeHtml(l.productName || l.productC1Ref || '')}</td>`
+                + `<td style="padding:6px 10px;">${escapeHtml(l.sizeLabel || '')}</td>`
+                + `<td style="padding:6px 10px;text-align:center;">${l.qty || 0}</td>`
+                + `<td style="padding:6px 10px;text-align:center;">${l.uniqueUnits || 0}</td>`
+                + `<td style="padding:6px 10px;text-align:center;">${badge}</td>`
+                + `</tr>`;
+        }
+        html += `<div class="card" style="margin-bottom:14px;">`
+            + `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">`
+            + `<div><b>№ ${escapeHtml(r.number || '')}</b> · <span style="color:var(--color-text-secondary);">${dt}</span>`
+            + (r.posted === false ? ' · <span style="color:#c0392b;">не проведён</span>' : '')
+            + ` · <span style="color:var(--color-text-secondary);font-size:12px;">позиций: ${r.totalLines || 0}</span></div>`
+            + warn + `</div>`
+            + `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">`
+            + `<thead><tr style="text-align:left;color:var(--color-text-secondary);font-size:12px;">`
+            + `<th style="padding:6px 10px;">Товар</th><th style="padding:6px 10px;">Размер</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Пришло</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Штрихкодов</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Статус</th></tr></thead>`
+            + `<tbody>${rows}</tbody></table></div></div>`;
+    }
+    listEl.innerHTML = html;
 }
 
 // ── Размер этикетки (localStorage) ──────────────────────────────

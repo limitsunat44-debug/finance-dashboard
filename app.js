@@ -51,7 +51,7 @@ const ADMIN_ACCOUNTS = {
     'Sunnat': { password: 'Sunna0909', displayName: 'Sunnat', allowedTabs: '*' },
     'Iskandar': { password: '1111', displayName: 'Iskandar', allowedTabs: '*' },
     'Shahida': { password: 's2364170', displayName: 'Shahida', allowedTabs: '*' },
-    'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments'] }
+    'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments', 'barcodes'] }
 };
 
 // Права доступа текущего пользователя: '*' (полный) или массив id вкладок.
@@ -6398,7 +6398,7 @@ async function loadBarcodes() {
         const [warehouses, products, variants] = await Promise.all([
             fetchAllRows('warehouses', 'id,c1_code,name,is_active'),
             fetchAllRows('products', 'id,name_ru,category,is_active,c1_ref'),
-            fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock')
+            fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock,c1_char_ref')
         ]);
 
         barcodesState.warehouses = (warehouses || [])
@@ -6410,16 +6410,22 @@ async function loadBarcodes() {
         barcodesState.products = (products || []).filter(p => p.is_active !== false);
         barcodesState.variants = (variants || []).map(v => ({ ...v, stock: Number(v.stock) || 0 }));
 
-        // Карта variant_id -> название товара + размер (для этикеток и таблиц)
+        // Карта variant_id -> название товара + размер + характеристика (для этикеток и цен)
         const prodName = {};
-        barcodesState.products.forEach(p => { prodName[p.id] = p.name_ru || ''; });
+        const prodC1 = {};
+        barcodesState.products.forEach(p => { prodName[p.id] = p.name_ru || ''; prodC1[p.id] = p.c1_ref || null; });
+        barcodesState.prodC1ById = prodC1;
         barcodesState.variantInfo = {};
         barcodesState.variants.forEach(v => {
             barcodesState.variantInfo[v.id] = {
                 name: prodName[v.product_id] || '',
-                size: v.size_label || ''
+                size: v.size_label || '',
+                charRef: v.c1_char_ref || null,
+                productId: v.product_id,
+                productC1Ref: prodC1[v.product_id] || null
             };
         });
+        barcodesState.priceCache = {}; // productC1Ref -> { productPrice, prices }
 
         bcFillWarehouseSelects();
     } catch (e) {
@@ -6762,6 +6768,7 @@ async function generateAndPrint() {
         }
         if (!allUnits.length) { bcShowPrintError('RPC не вернул экземпляры.'); return; }
 
+        await bcEnsurePricesForUnits(allUnits);
         renderLabels(allUnits, w, h);
         if (info) info.textContent = `Сгенерировано и отправлено на печать: ${allUnits.length} шт. (размеров: ${selected.length})`;
         bcDoPrint(w, h);
@@ -6797,6 +6804,7 @@ async function reprintExisting() {
             return;
         }
 
+        await bcEnsurePricesForUnits(units);
         renderLabels(units, w, h);
         if (info) info.textContent = `Повторная печать: ${units.length} шт. (размеров: ${selected.length})`;
         bcDoPrint(w, h);
@@ -6810,9 +6818,10 @@ async function reprintExisting() {
 function testPrint() {
     const { w, h } = bcGetLabelSize();
     const unit = {
-        unique_barcode: 'TEST1234567890',
-        size_label: 'ТЕСТ',
-        name: 'ТЕСТОВАЯ ЭТИКЕТКА'
+        unique_barcode: '2200000052308',
+        size_label: 'размер:стандарт',
+        name: '199 корректор для пятки',
+        priceOld: 140, priceNew: 80, currency: 'TJS'
     };
     renderLabels([unit], w, h);
     bcDoPrint(w, h);
@@ -6820,17 +6829,69 @@ function testPrint() {
     if (info) info.textContent = 'Отправлена тестовая этикетка на печать.';
 }
 
-// Дополнить строку экземпляра названием товара/размером из справочника
+// Дополнить строку экземпляра названием товара/размером + ценами из справочника
 function bcEnrichUnit(u) {
     const info = u.variant_id != null ? barcodesState.variantInfo[u.variant_id] : null;
-    return {
+    const enriched = {
         unique_barcode: u.unique_barcode || u.barcode || '',
         size_label: u.size_label || (info && info.size) || '',
         name: u.name || (info && info.name) || '',
         warehouse_id: u.warehouse_id,
         status: u.status,
-        created_at: u.created_at || u.received_at
+        created_at: u.created_at || u.received_at,
+        charRef: (info && info.charRef) || u.c1_char_ref || null,
+        productC1Ref: (info && info.productC1Ref) || null,
+        priceOld: null, priceNew: null, currency: 'TJS'
     };
+    // если цены уже загружены в кэш — проставляем
+    bcApplyPriceToUnit(enriched);
+    return enriched;
+}
+
+// Проставить цены на экземпляр из кэша (сначала по размеру, иначе — цена товара)
+function bcApplyPriceToUnit(u) {
+    const cache = barcodesState.priceCache || {};
+    const pc = u.productC1Ref ? cache[u.productC1Ref] : null;
+    if (!pc) return;
+    let pair = (u.charRef && pc.prices && pc.prices[u.charRef]) ? pc.prices[u.charRef] : null;
+    if (!pair) pair = pc.productPrice || null;
+    if (pair) {
+        u.priceNew = (pair.new != null) ? pair.new : null;
+        u.priceOld = (pair.old != null) ? pair.old : null;
+        u.currency = pc.currency || 'TJS';
+    }
+}
+
+// Загрузить цены товара из 1С (через сервис) и положить в кэш
+async function bcFetchPrices(productC1Ref) {
+    if (!productC1Ref) return null;
+    if (!barcodesState.priceCache) barcodesState.priceCache = {};
+    if (barcodesState.priceCache[productC1Ref]) return barcodesState.priceCache[productC1Ref];
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=prices`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            body: JSON.stringify({ productC1Ref }),
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+            barcodesState.priceCache[productC1Ref] = {
+                productPrice: data.productPrice || null,
+                prices: data.prices || {},
+                currency: data.currency || 'TJS'
+            };
+            return barcodesState.priceCache[productC1Ref];
+        }
+    } catch (e) { console.warn('bcFetchPrices:', e); }
+    return null;
+}
+
+// Загрузить цены для текущего выбранного товара и перепроставить на экземпляры
+async function bcEnsurePricesForUnits(units) {
+    const refs = [...new Set(units.map(u => u.productC1Ref).filter(Boolean))];
+    for (const ref of refs) { await bcFetchPrices(ref); }
+    units.forEach(u => bcApplyPriceToUnit(u));
 }
 
 function bcShowPrintError(msg) {
@@ -6861,9 +6922,21 @@ function renderLabels(units, w, h) {
         const code = escapeHtml(u.unique_barcode || '');
         const size = escapeHtml(u.size_label || '');
         const title = escapeHtml(u.name || '');
+        const cur = escapeHtml(u.currency || 'TJS');
+        // Блок цен: если есть старая (большая) — показываем обе (старая зачёркнута),
+        // иначе — только новую (продажную).
+        let priceBlock = '';
+        if (u.priceNew != null && u.priceOld != null) {
+            priceBlock =
+                `<div class="label-price-old">Старая цена: <s>${u.priceOld} ${cur}</s></div>` +
+                `<div class="label-price-new">Новая цена: <b>${u.priceNew} ${cur}</b></div>`;
+        } else if (u.priceNew != null) {
+            priceBlock = `<div class="label-price-new"><b>${u.priceNew} ${cur}</b></div>`;
+        }
         return `<div class="label-tag" style="width:${w}mm;height:${h}mm;">
             <div class="label-title">${title}</div>
             <div class="label-size">${size}</div>
+            ${priceBlock}
             <div class="label-barcode"><svg id="bcSvg${i}"></svg></div>
             <div class="label-code">${code}</div>
         </div>`;

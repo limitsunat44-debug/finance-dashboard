@@ -3629,10 +3629,30 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
   word-break: break-word;
 }
 .label-tag .label-size {
-  font-size: 6mm;
-  font-weight: 700;
+  font-size: 3.2mm;
+  font-weight: 600;
   line-height: 1;
   margin: 0.5mm 0;
+}
+/* Цены (акционная этикетка) */
+.label-tag .label-price-old {
+  width: 100%;
+  text-align: center;
+  font-size: 2.9mm;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+.label-tag .label-price-old s {
+  text-decoration: line-through;
+}
+.label-tag .label-price-new {
+  width: 100%;
+  text-align: center;
+  font-size: 3.8mm;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0.3mm 0 0.5mm;
+  white-space: nowrap;
 }
 .label-tag .label-barcode {
   width: 100%;

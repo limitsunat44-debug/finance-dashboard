@@ -6756,12 +6756,16 @@ async function generateAndPrint() {
 
     try {
         const allUnits = [];
-        let reusedTotal = 0;   // взято из уже существующих (без дублей)
-        let createdTotal = 0;  // сгенерировано недостающих
+        const newBarcodes = [];        // только новые коды — их отправим в 1С
+        const perSize = [];            // статистика по размерам
+        let reusedTotal = 0;           // уже было своих штрихкодов (взято в печать)
+        let createdTotal = 0;          // сгенерировано новых
         for (const sel of selected) {
             const wantQty = mode === 'manual' ? manualQty : Math.max(sel.stock, 1);
+            const vInfo = (barcodesState.variantInfo && barcodesState.variantInfo[sel.variantId]) || {};
+            const sizeName = vInfo.size || sel.variantId;
 
-            // 1) берём уже существующие экземпляры этого размера
+            // 1) все уже существующие экземпляры этого размера
             const { data: existing, error: exErr } = await ortobotClient
                 .from('stock_units')
                 .select('*')
@@ -6771,13 +6775,13 @@ async function generateAndPrint() {
             if (exErr) throw exErr;
 
             const have = existing || [];
-            // берём в печать не больше, чем нужно (остальные уже лежат, их не печатаем повторно)
             const reuse = have.slice(0, wantQty);
             reuse.forEach(u => allUnits.push(bcEnrichUnit(u)));
             reusedTotal += reuse.length;
 
             // 2) генерируем только недостающие
             const missing = wantQty - reuse.length;
+            let createdHere = 0;
             if (missing > 0) {
                 const { data, error } = await ortobotClient.rpc('generate_stock_units', {
                     p_variant_id: sel.variantId,
@@ -6785,15 +6789,59 @@ async function generateAndPrint() {
                     p_source_doc: 'SMART-GEN'
                 });
                 if (error) throw error;
-                (data || []).forEach(u => allUnits.push(bcEnrichUnit(u)));
-                createdTotal += (data || []).length;
+                (data || []).forEach(u => {
+                    allUnits.push(bcEnrichUnit(u));
+                    if (u.unique_barcode) newBarcodes.push(u.unique_barcode);
+                });
+                createdHere = (data || []).length;
+                createdTotal += createdHere;
             }
+            perSize.push({ size: sizeName, existed: have.length, created: createdHere });
         }
         if (!allUnits.length) { bcShowPrintError('Нет экземпляров для печати.'); return; }
 
+        // 3) ОТПРАВКА НОВЫХ КОДОВ В 1С (только если были созданы)
+        let c1Line = '';
+        if (newBarcodes.length > 0) {
+            try {
+                const r = await fetch(`${BARCODE_SVC_URL}/api/register-existing`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                    body: JSON.stringify({ barcodes: newBarcodes, onlyUnsent: false })
+                });
+                const text = await r.text();
+                let jr; try { jr = JSON.parse(text); } catch { jr = { raw: text }; }
+                if (!r.ok || jr.ok === false) {
+                    c1Line = `❌ 1С: ошибка HTTP ${r.status}${jr.error ? ' — ' + jr.error : ''}`;
+                } else {
+                    const c1 = jr.c1 || {};
+                    const reg = c1.registered ?? 0;
+                    const skip = c1.skipped ?? 0;
+                    const errs = Array.isArray(c1.errors) ? c1.errors : [];
+                    if (errs.length > 0) {
+                        c1Line = `⚠️ 1С: записано ${reg}, пропущено ${skip}, ошибки: ${errs.slice(0,2).join('; ')}`;
+                    } else {
+                        c1Line = `✅ 1С: успешно отправлено ${jr.sentToC1 ?? newBarcodes.length} код(ов) — зарегистрировано ${reg}, уже было в 1С ${skip}`;
+                    }
+                }
+            } catch (e) {
+                c1Line = `❌ 1С: сетевая ошибка — ${e.message}`;
+            }
+        } else {
+            c1Line = 'i Новых кодов нет — в 1С отправлять нечего (печать существующих).';
+        }
+
         await bcEnsurePricesForUnits(allUnits);
         renderLabels(allUnits, w, h);
-        if (info) info.textContent = `На печать: ${allUnits.length} шт. — новых штрихкодов: ${createdTotal}, уже существовало: ${reusedTotal} (без дублей; размеров: ${selected.length})`;
+
+        // строка состояния + детализация по размерам
+        if (info) {
+            const detail = perSize.map(s => `${escapeHtml(s.size)}: было ${s.existed}, новых +${s.created}`).join(' | ');
+            info.innerHTML =
+                `<div>На печать: <b>${allUnits.length}</b> шт. — новых сгенерировано: <b>${createdTotal}</b>, уже было своих: <b>${reusedTotal}</b> (без дублей; размеров: ${selected.length})</div>` +
+                `<div style="margin-top:4px;">${c1Line}</div>` +
+                `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+        }
         bcDoPrint(w, h);
     } catch (e) {
         console.error('generate_stock_units (smart):', e);

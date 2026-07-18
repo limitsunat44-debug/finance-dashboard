@@ -7893,25 +7893,93 @@ function csRenderBarcodes(codes) {
         box.innerHTML = '<div class="bc-variants-empty">Для этого размера в 1С нет штрихкодов.</div>';
         return;
     }
-    box.innerHTML = codes.map((c, i) => {
+    // Поле поиска (по последним 4 цифрам или любой части кода) показываем, когда кодов много
+    const showSearch = codes.length > 5;
+    box.innerHTML =
+        (showSearch
+            ? `<div style="margin-bottom:8px;">
+                 <input type="text" id="csCodeSearch" class="form-control" inputmode="numeric"
+                        placeholder="🔍 Поиск по цифрам (напр. последние 4: 0418)" autocomplete="off">
+               </div>`
+            : '') +
+        `<div id="csCodeList"></div>`;
+
+    if (showSearch) {
+        const s = document.getElementById('csCodeSearch');
+        if (s) {
+            s.addEventListener('input', function () { csFilterBarcodes(this.value); });
+            s.addEventListener('keydown', function (e) {
+                // Enter — если остался ровно один код, сразу его выбираем и печатаем
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const matched = csMatchCodes(this.value);
+                    if (matched.length === 1) { cashierState.selectedBarcode = matched[0].barcode; csUpdatePrintBtn(); csPrint(); }
+                }
+            });
+        }
+    }
+    csFilterBarcodes('');
+}
+
+// Отбор кодов по запросу: только цифры, совпадение как подстрока (вкл. последние N цифр)
+function csMatchCodes(query) {
+    const q = String(query || '').replace(/\D/g, '');
+    const codes = cashierState.codes || [];
+    if (!q) return codes.slice();
+    return codes.filter(c => String(c.barcode).includes(q));
+}
+
+// Отрисовать отфильтрованный список кодов
+function csFilterBarcodes(query) {
+    const list = document.getElementById('csCodeList');
+    if (!list) return;
+    const q = String(query || '').replace(/\D/g, '');
+    const matched = csMatchCodes(query);
+
+    if (!matched.length) {
+        list.innerHTML = '<div class="bc-variants-empty">Ничего не найдено по «' + escapeHtml(query) + '».</div>';
+        cashierState.selectedBarcode = null;
+        csUpdatePrintBtn();
+        return;
+    }
+
+    list.innerHTML = matched.map((c, i) => {
         const t = csCodeType(c.barcode);
+        const code = String(c.barcode);
+        // подсветка совпавшей части
+        let codeHtml = escapeHtml(code);
+        if (q) {
+            const idx = code.indexOf(q);
+            if (idx >= 0) {
+                codeHtml = escapeHtml(code.slice(0, idx)) +
+                    '<mark style="background:#ffe27a;padding:0 1px;border-radius:3px;">' + escapeHtml(code.slice(idx, idx + q.length)) + '</mark>' +
+                    escapeHtml(code.slice(idx + q.length));
+            }
+        }
         return `<label class="cs-code-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid #e3e3e3;border-radius:8px;margin-bottom:6px;cursor:pointer;">
-            <input type="radio" name="csCode" value="${escapeHtml(c.barcode)}" ${i === 0 ? 'checked' : ''}>
-            <span style="font-family:monospace;font-size:15px;font-weight:600;">${escapeHtml(c.barcode)}</span>
+            <input type="radio" name="csCode" value="${escapeHtml(code)}" ${i === 0 ? 'checked' : ''}>
+            <span style="font-family:monospace;font-size:15px;font-weight:600;">${codeHtml}</span>
             <span style="font-size:12px;color:${t.color};background:${t.color}18;padding:2px 8px;border-radius:10px;">${t.label}</span>
         </label>`;
     }).join('');
-    // выбрать первый по умолчанию
-    cashierState.selectedBarcode = codes[0].barcode;
+
+    // выбрать первый из отфильтрованных по умолчанию
+    cashierState.selectedBarcode = matched[0].barcode;
     csUpdatePrintBtn();
-    box.querySelectorAll('input[name="csCode"]').forEach(r => {
+    list.querySelectorAll('input[name="csCode"]').forEach(r => {
         r.addEventListener('change', function () {
             cashierState.selectedBarcode = this.value;
             csUpdatePrintBtn();
         });
     });
+
     const info = document.getElementById('csInfo');
-    if (info) info.textContent = `Найдено штрихкодов для размера «${cashierState.selectedSizeLabel}»: ${codes.length}. Обычно на витрину печатают родной (размерный) код.`;
+    if (info) {
+        const total = (cashierState.codes || []).length;
+        info.textContent = q
+            ? `Показано ${matched.length} из ${total} (фильтр: «${q}»).`
+            : `Найдено штрихкодов для размера «${cashierState.selectedSizeLabel}»: ${total}. Обычно на витрину печатают родной (размерный) код.`;
+    }
 }
 
 function csUpdatePrintBtn() {

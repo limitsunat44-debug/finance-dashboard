@@ -1339,13 +1339,19 @@
                             <label for="bcProductSearch">Поиск товара по названию</label>
                             <input type="text" id="bcProductSearch" class="form-control" placeholder="например: кроссовки" autocomplete="off">
                         </div>
-                        <div class="prod-filter-group" style="min-width:220px;">
-                            <label for="bcVariant">Вариант (размер)</label>
-                            <select id="bcVariant" class="form-control" style="min-width:220px;"></select>
+                        <div class="prod-filter-group" style="flex:1;min-width:260px;">
+                            <label>Размеры (можно выбрать несколько)</label>
+                            <div id="bcVariants" class="bc-variants-box">
+                                <div class="bc-variants-empty">Выберите товар выше.</div>
+                            </div>
                         </div>
-                        <div class="prod-filter-group">
-                            <label for="bcQty">Количество этикеток</label>
-                            <input type="number" id="bcQty" class="form-control" min="1" step="1" value="1" style="width:120px;">
+                        <div class="prod-filter-group" style="min-width:180px;">
+                            <label for="bcQtyMode">Кол-во этикеток</label>
+                            <select id="bcQtyMode" class="form-control" style="min-width:180px;">
+                                <option value="stock" selected>По остатку (на каждую пару)</option>
+                                <option value="manual">Вручную (одинаково)</option>
+                            </select>
+                            <input type="number" id="bcQty" class="form-control" min="1" step="1" value="1" style="width:120px;margin-top:6px;display:none;" placeholder="шт. на размер">
                         </div>
                     </div>
 
@@ -1619,7 +1625,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260718b-ean13"></script>
+    <script src="app.js?v=20260718c-sizes"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

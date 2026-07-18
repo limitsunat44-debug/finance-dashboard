@@ -6359,16 +6359,23 @@ async function loadBarcodes() {
         searchEl.dataset.bcBound = '1';
     }
 
-    // Выбор варианта -> подставить остаток в поле количества
-    const varEl = document.getElementById('bcVariant');
-    if (varEl && !varEl.dataset.bcBound) {
-        varEl.addEventListener('change', function () {
-            const opt = this.selectedOptions[0];
-            const stock = opt ? parseInt(opt.dataset.stock || '0', 10) : 0;
-            const qtyEl = document.getElementById('bcQty');
-            if (qtyEl) qtyEl.value = stock > 0 ? stock : 1;
+    // Режим количества: «по остатку» (авто) или «вручную» (показать поле)
+    const qtyModeEl = document.getElementById('bcQtyMode');
+    if (qtyModeEl && !qtyModeEl.dataset.bcBound) {
+        qtyModeEl.addEventListener('change', function () {
+            const q = document.getElementById('bcQty');
+            if (q) q.style.display = this.value === 'manual' ? '' : 'none';
         });
-        varEl.dataset.bcBound = '1';
+        qtyModeEl.dataset.bcBound = '1';
+    }
+
+    // Перевыбор склада -> перестроить список размеров текущего товара
+    const whSel = document.getElementById('bcWarehouse');
+    if (whSel && !whSel.dataset.bcBoundVar) {
+        whSel.addEventListener('change', function () {
+            if (barcodesState.selectedProductId) bcSelectProduct(barcodesState.selectedProductId);
+        });
+        whSel.dataset.bcBoundVar = '1';
     }
 
     // Скрыть выпадающий список результатов при клике вне поля
@@ -6526,43 +6533,85 @@ function bcEnsureSearchBox() {
     return box;
 }
 
-// Выбор товара -> заполнить поле поиска и селект вариантов
+// Натуральная сортировка размеров (числа перед текстом, «33-35» по первому числу)
+function bcSizeSortKey(s) {
+    const m = String(s || '').match(/\d+/);
+    return m ? parseInt(m[0], 10) : 99999;
+}
+
+// Выбор товара -> список размеров чекбоксами (мультивыбор + «выбрать все»)
 function bcSelectProduct(pid) {
     barcodesState.selectedProductId = pid;
     const prod = barcodesState.products.find(p => String(p.id) === String(pid));
     const inp = document.getElementById('bcProductSearch');
     if (inp && prod) inp.value = prod.name_ru || '';
 
+    const box = document.getElementById('bcVariants');
+    if (!box) return;
+
     const whId = document.getElementById('bcWarehouse')?.value || '';
-    // Варианты выбранного товара. Если выбран склад — берём остаток по этому складу,
-    // иначе суммируем остатки по всем складам для отображения.
+    const multiWh = !whId; // если склад не выбран — показываем склад у каждого размера
+
     let vs = barcodesState.variants.filter(v => String(v.product_id) === String(pid));
-    let opts;
-    if (whId) {
-        vs = vs.filter(v => String(v.warehouse_id) === String(whId));
-        opts = vs.map(v =>
-            `<option value="${escapeHtml(v.id)}" data-stock="${v.stock}">${escapeHtml(v.size_label || '—')} (остаток: ${v.stock})</option>`
-        );
-    } else {
-        // Группируем по размеру, суммируем остатки; value — id первого варианта размера
-        const bySize = {};
-        vs.forEach(v => {
-            const key = v.size_label || '—';
-            if (!bySize[key]) bySize[key] = { id: v.id, stock: 0 };
-            bySize[key].stock += v.stock;
-        });
-        opts = Object.keys(bySize).map(sz =>
-            `<option value="${escapeHtml(bySize[sz].id)}" data-stock="${bySize[sz].stock}">${escapeHtml(sz)} (остаток: ${bySize[sz].stock})</option>`
-        );
+    if (whId) vs = vs.filter(v => String(v.warehouse_id) === String(whId));
+    // только с остатком > 0 (печатать этикетки без остатка бессмысленно)
+    vs = vs.filter(v => (v.stock || 0) > 0);
+
+    // Сортировка: по размеру, затем по складу
+    vs.sort((a, b) => {
+        const ka = bcSizeSortKey(a.size_label), kb = bcSizeSortKey(b.size_label);
+        if (ka !== kb) return ka - kb;
+        return String(a.size_label || '').localeCompare(String(b.size_label || ''));
+    });
+
+    if (!vs.length) {
+        box.innerHTML = '<div class="bc-variants-empty">Нет размеров с остатком' +
+            (whId ? ' на этом складе' : '') + '.</div>';
+        return;
     }
 
-    const varEl = document.getElementById('bcVariant');
-    if (varEl) {
-        varEl.innerHTML = opts.length
-            ? opts.join('')
-            : '<option value="">— нет вариантов —</option>';
-        varEl.dispatchEvent(new Event('change'));
+    const rows = vs.map(v => {
+        const size = escapeHtml(v.size_label || '(без размера)');
+        const whName = multiWh ? `<span class="bc-variant-wh">${escapeHtml(bcWhName(v.warehouse_id))}</span>` : '';
+        return `<label class="bc-variant-row">
+            <input type="checkbox" class="bc-variant-cb" value="${escapeHtml(v.id)}" data-stock="${v.stock}">
+            <span class="bc-variant-size">${size}</span>
+            ${whName}
+            <span class="bc-variant-stock">остаток: ${v.stock}</span>
+        </label>`;
+    }).join('');
+
+    box.innerHTML =
+        `<label class="bc-variants-head">
+            <input type="checkbox" id="bcSelectAll"> Выбрать все размеры (${vs.length})
+        </label>${rows}`;
+
+    // «Выбрать все»
+    const selAll = box.querySelector('#bcSelectAll');
+    const cbs = () => Array.from(box.querySelectorAll('.bc-variant-cb'));
+    if (selAll) {
+        selAll.addEventListener('change', function () {
+            cbs().forEach(cb => { cb.checked = this.checked; });
+        });
     }
+    // при ручном изменении обновляем состояние «выбрать все»
+    box.addEventListener('change', function (e) {
+        if (e.target.classList.contains('bc-variant-cb') && selAll) {
+            const all = cbs();
+            selAll.checked = all.length > 0 && all.every(cb => cb.checked);
+            selAll.indeterminate = !selAll.checked && all.some(cb => cb.checked);
+        }
+    });
+}
+
+// Собрать выбранные варианты: [{variantId, stock}]
+function bcSelectedVariants() {
+    const box = document.getElementById('bcVariants');
+    if (!box) return [];
+    return Array.from(box.querySelectorAll('.bc-variant-cb:checked')).map(cb => ({
+        variantId: cb.value,
+        stock: parseInt(cb.dataset.stock || '0', 10)
+    }));
 }
 
 // ── Генерация штрихкодов и печать ───────────────────────────────
@@ -6572,26 +6621,33 @@ async function generateAndPrint() {
     if (err) err.style.display = 'none';
     if (info) info.textContent = '';
 
-    const variantId = document.getElementById('bcVariant')?.value;
-    const qty = parseInt(document.getElementById('bcQty')?.value, 10);
-    if (!variantId) { bcShowPrintError('Выберите товар и вариант (размер).'); return; }
-    if (!qty || qty < 1) { bcShowPrintError('Укажите количество этикеток (≥ 1).'); return; }
+    const selected = bcSelectedVariants();
+    if (!selected.length) { bcShowPrintError('Выберите хотя бы один размер (галочкой).'); return; }
+
+    const mode = document.getElementById('bcQtyMode')?.value || 'stock';
+    const manualQty = parseInt(document.getElementById('bcQty')?.value, 10);
+    if (mode === 'manual' && (!manualQty || manualQty < 1)) {
+        bcShowPrintError('Укажите количество этикеток на размер (≥ 1).'); return;
+    }
 
     const { w, h } = bcGetLabelSize();
 
     try {
-        const { data, error } = await ortobotClient.rpc('generate_stock_units', {
-            p_variant_id: variantId,
-            p_qty: qty,
-            p_source_doc: null
-        });
-        if (error) throw error;
+        const allUnits = [];
+        for (const sel of selected) {
+            const qty = mode === 'manual' ? manualQty : Math.max(sel.stock, 1);
+            const { data, error } = await ortobotClient.rpc('generate_stock_units', {
+                p_variant_id: sel.variantId,
+                p_qty: qty,
+                p_source_doc: null
+            });
+            if (error) throw error;
+            (data || []).forEach(u => allUnits.push(bcEnrichUnit(u)));
+        }
+        if (!allUnits.length) { bcShowPrintError('RPC не вернул экземпляры.'); return; }
 
-        const units = (data || []).map(u => bcEnrichUnit(u));
-        if (!units.length) { bcShowPrintError('RPC не вернул экземпляры.'); return; }
-
-        renderLabels(units, w, h);
-        if (info) info.textContent = `Сгенерировано и отправлено на печать: ${units.length} шт.`;
+        renderLabels(allUnits, w, h);
+        if (info) info.textContent = `Сгенерировано и отправлено на печать: ${allUnits.length} шт. (размеров: ${selected.length})`;
         bcDoPrint(w, h);
     } catch (e) {
         console.error('generate_stock_units:', e);
@@ -6606,8 +6662,8 @@ async function reprintExisting() {
     if (err) err.style.display = 'none';
     if (info) info.textContent = '';
 
-    const variantId = document.getElementById('bcVariant')?.value;
-    if (!variantId) { bcShowPrintError('Выберите товар и вариант (размер).'); return; }
+    const selected = bcSelectedVariants();
+    if (!selected.length) { bcShowPrintError('Выберите хотя бы один размер (галочкой).'); return; }
 
     const { w, h } = bcGetLabelSize();
 
@@ -6615,18 +6671,18 @@ async function reprintExisting() {
         const { data, error } = await ortobotClient
             .from('stock_units')
             .select('*')
-            .eq('variant_id', variantId)
+            .in('variant_id', selected.map(s => s.variantId))
             .eq('status', 'in_stock');
         if (error) throw error;
 
         const units = (data || []).map(u => bcEnrichUnit(u));
         if (!units.length) {
-            bcShowPrintError('Нет экземпляров со статусом «на складе» для этого варианта.');
+            bcShowPrintError('Нет экземпляров со статусом «на складе» для выбранных размеров.');
             return;
         }
 
         renderLabels(units, w, h);
-        if (info) info.textContent = `Повторная печать: ${units.length} шт.`;
+        if (info) info.textContent = `Повторная печать: ${units.length} шт. (размеров: ${selected.length})`;
         bcDoPrint(w, h);
     } catch (e) {
         console.error('reprintExisting:', e);

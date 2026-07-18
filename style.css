@@ -3669,3 +3669,41 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
     display: flex !important;
   }
 }
+
+/* ── Выбор размеров чекбоксами (штрихкоды) ─────────────────────── */
+.bc-variants-box {
+  border: 1px solid var(--color-border, #ccc);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--color-surface, #fff);
+}
+.bc-variants-empty {
+  color: var(--color-text-secondary, #888);
+  font-size: 13px;
+  padding: 6px 4px;
+}
+.bc-variants-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 8px 4px;
+  border-bottom: 1px solid var(--color-border, #eee);
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.bc-variant-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.bc-variant-row:hover { background: var(--color-bg-1, #f3f4f6); }
+.bc-variant-row input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
+.bc-variant-size { font-weight: 600; }
+.bc-variant-stock { color: var(--color-text-secondary, #888); font-size: 12px; margin-left: auto; }
+.bc-variant-wh { color: var(--color-text-secondary, #999); font-size: 12px; }

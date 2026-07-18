@@ -1391,7 +1391,7 @@
                     </div>
 
                     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
-                        <button class="btn btn-primary" onclick="generateAndPrint()">🏷️ Сгенерировать и печатать</button>
+                        <button class="btn btn-primary" onclick="generateAndPrint()">🏷️ Умная генерация и печать</button>
                         <button class="btn btn-secondary" onclick="reprintExisting()">Печать уже сгенерированных</button>
                         <button class="btn btn-secondary" onclick="refreshStockFrom1C()" title="Загрузить актуальные остатки из 1С (после оприходования)">🔄 Обновить остатки из 1С</button>
                     </div>
@@ -1434,12 +1434,29 @@
                                 <option value="written_off">Списан</option>
                             </select>
                         </div>
+                        <div class="prod-filter-group">
+                            <label for="bcUnitsDateFrom">Дата прихода с</label>
+                            <input type="date" id="bcUnitsDateFrom" class="form-control" style="min-width:150px;">
+                        </div>
+                        <div class="prod-filter-group">
+                            <label for="bcUnitsDateTo">по</label>
+                            <input type="date" id="bcUnitsDateTo" class="form-control" style="min-width:150px;">
+                        </div>
+                        <div class="prod-filter-group">
+                            <label for="bcUnitsSort">Сортировка</label>
+                            <select id="bcUnitsSort" class="form-control" style="min-width:180px;">
+                                <option value="date_asc" selected>Сначала давно лежащие</option>
+                                <option value="date_desc">Сначала новые</option>
+                                <option value="barcode">По штрихкоду</option>
+                            </select>
+                        </div>
                         <div class="prod-filter-group" style="align-self:flex-end;">
-                            <button class="btn btn-secondary" onclick="loadUnitsTable()">🔄 Обновить</button>
+                            <button class="btn btn-secondary" onclick="bcUnitsApplyFilters()">🔄 Применить</button>
                         </div>
                     </div>
                     <div id="bcUnitsError" class="error-message" style="display:none;margin:12px 0;"></div>
                     <div id="bcUnitsList" style="margin-top:12px;overflow-x:auto;"></div>
+                    <div id="bcUnitsPager" style="display:flex;gap:10px;align-items:center;justify-content:center;margin-top:14px;flex-wrap:wrap;"></div>
                 </div>
 
                 <!-- ── Ревизия ────────────────────────────────────────── -->
@@ -1647,7 +1664,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260718f-units"></script>
+    <script src="app.js?v=20260718g-smartgen-pager"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

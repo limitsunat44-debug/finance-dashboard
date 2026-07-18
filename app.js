@@ -6756,24 +6756,47 @@ async function generateAndPrint() {
 
     try {
         const allUnits = [];
+        let reusedTotal = 0;   // взято из уже существующих (без дублей)
+        let createdTotal = 0;  // сгенерировано недостающих
         for (const sel of selected) {
-            const qty = mode === 'manual' ? manualQty : Math.max(sel.stock, 1);
-            const { data, error } = await ortobotClient.rpc('generate_stock_units', {
-                p_variant_id: sel.variantId,
-                p_qty: qty,
-                p_source_doc: null
-            });
-            if (error) throw error;
-            (data || []).forEach(u => allUnits.push(bcEnrichUnit(u)));
+            const wantQty = mode === 'manual' ? manualQty : Math.max(sel.stock, 1);
+
+            // 1) берём уже существующие экземпляры этого размера
+            const { data: existing, error: exErr } = await ortobotClient
+                .from('stock_units')
+                .select('*')
+                .eq('variant_id', sel.variantId)
+                .eq('status', 'in_stock')
+                .order('seq', { ascending: true });
+            if (exErr) throw exErr;
+
+            const have = existing || [];
+            // берём в печать не больше, чем нужно (остальные уже лежат, их не печатаем повторно)
+            const reuse = have.slice(0, wantQty);
+            reuse.forEach(u => allUnits.push(bcEnrichUnit(u)));
+            reusedTotal += reuse.length;
+
+            // 2) генерируем только недостающие
+            const missing = wantQty - reuse.length;
+            if (missing > 0) {
+                const { data, error } = await ortobotClient.rpc('generate_stock_units', {
+                    p_variant_id: sel.variantId,
+                    p_qty: missing,
+                    p_source_doc: 'SMART-GEN'
+                });
+                if (error) throw error;
+                (data || []).forEach(u => allUnits.push(bcEnrichUnit(u)));
+                createdTotal += (data || []).length;
+            }
         }
-        if (!allUnits.length) { bcShowPrintError('RPC не вернул экземпляры.'); return; }
+        if (!allUnits.length) { bcShowPrintError('Нет экземпляров для печати.'); return; }
 
         await bcEnsurePricesForUnits(allUnits);
         renderLabels(allUnits, w, h);
-        if (info) info.textContent = `Сгенерировано и отправлено на печать: ${allUnits.length} шт. (размеров: ${selected.length})`;
+        if (info) info.textContent = `На печать: ${allUnits.length} шт. — новых штрихкодов: ${createdTotal}, уже существовало: ${reusedTotal} (без дублей; размеров: ${selected.length})`;
         bcDoPrint(w, h);
     } catch (e) {
-        console.error('generate_stock_units:', e);
+        console.error('generate_stock_units (smart):', e);
         bcShowPrintError(bcMissingTableMsg(e));
     }
 }
@@ -6991,42 +7014,83 @@ function bcDoPrint(w, h) {
     setTimeout(cleanup, 1500);
 }
 
-// ── Таблица экземпляров ─────────────────────────────────────────
+// ── Таблица экземпляров (с пагинацией и фильтром по дате) ────────
+const BC_UNITS_PAGE_SIZE = 100;
+let bcUnitsPage = 0; // 0-based
+
+// Применить фильтры — сбрасывает на первую страницу
+function bcUnitsApplyFilters() {
+    bcUnitsPage = 0;
+    loadUnitsTable();
+}
+
+function bcUnitsGoTo(page) {
+    if (page < 0) return;
+    bcUnitsPage = page;
+    loadUnitsTable();
+}
+
 async function loadUnitsTable() {
     const listEl = document.getElementById('bcUnitsList');
     const errEl = document.getElementById('bcUnitsError');
+    const pagerEl = document.getElementById('bcUnitsPager');
     if (!listEl) return;
     if (errEl) errEl.style.display = 'none';
     listEl.innerHTML = '<p style="color:var(--color-text-secondary);">Загрузка…</p>';
+    if (pagerEl) pagerEl.innerHTML = '';
 
     const whId = document.getElementById('bcUnitsWarehouse')?.value || '';
     const status = document.getElementById('bcUnitsStatus')?.value || '';
+    const dateFrom = document.getElementById('bcUnitsDateFrom')?.value || '';
+    const dateTo = document.getElementById('bcUnitsDateTo')?.value || '';
+    const sort = document.getElementById('bcUnitsSort')?.value || 'date_asc';
+
+    const from = bcUnitsPage * BC_UNITS_PAGE_SIZE;
+    const to = from + BC_UNITS_PAGE_SIZE - 1;
 
     try {
-        let q = ortobotClient.from('stock_units').select('*', { count: 'exact' }).order('unique_barcode', { ascending: true }).limit(2000);
+        let q = ortobotClient.from('stock_units').select('*', { count: 'exact' });
         if (whId) q = q.eq('warehouse_id', whId);
         if (status) q = q.eq('status', status);
+        if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
+        if (dateTo) q = q.lte('created_at', dateTo + 'T23:59:59');
+
+        if (sort === 'date_desc') q = q.order('created_at', { ascending: false });
+        else if (sort === 'barcode') q = q.order('unique_barcode', { ascending: true });
+        else q = q.order('created_at', { ascending: true }); // date_asc — давно лежащие сверху
+
+        q = q.range(from, to);
         const { data, error, count } = await q;
         if (error) throw error;
 
         const rows = data || [];
         const totalCount = (typeof count === 'number') ? count : rows.length;
+        const totalPages = Math.max(1, Math.ceil(totalCount / BC_UNITS_PAGE_SIZE));
+
         if (!rows.length) {
-            listEl.innerHTML = '<p style="color:var(--color-text-secondary);">Экземпляров не найдено.</p>';
+            listEl.innerHTML = '<p style="color:var(--color-text-secondary);">Экземпляров не найдено по заданным фильтрам.</p>';
             return;
         }
 
         const statusLabel = { in_stock: 'На складе', sold: 'Продан', written_off: 'Списан' };
+        const today = new Date();
         const body = rows.map(r => {
             const u = bcEnrichUnit(r);
             const date = u.created_at ? String(u.created_at).slice(0, 10) : '—';
+            // сколько дней лежит
+            let ageBadge = '';
+            if (u.created_at) {
+                const days = Math.floor((today - new Date(u.created_at)) / 86400000);
+                const color = days >= 90 ? '#c0392b' : (days >= 30 ? '#e67e22' : 'var(--color-text-secondary)');
+                ageBadge = ` <span style="font-size:11px;color:${color};">(${days} дн.)</span>`;
+            }
             return `<tr>
                 <td><code>${escapeHtml(u.unique_barcode)}</code></td>
                 <td>${escapeHtml(u.size_label)}</td>
                 <td>${escapeHtml(u.name)}</td>
                 <td>${escapeHtml(bcWhName(u.warehouse_id))}</td>
                 <td>${escapeHtml(statusLabel[u.status] || u.status || '—')}</td>
-                <td>${escapeHtml(date)}</td>
+                <td>${escapeHtml(date)}${ageBadge}</td>
             </tr>`;
         }).join('');
 
@@ -7037,8 +7101,22 @@ async function loadUnitsTable() {
                     <th>Склад</th><th>Статус</th><th>Дата прихода</th>
                 </tr></thead>
                 <tbody>${body}</tbody>
-            </table>
-            <p style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;">Показано: ${rows.length} из ${totalCount}${rows.length < totalCount ? ' (уточните склад/статус, чтобы увидеть остальные)' : ''}</p>`;
+            </table>`;
+
+        // пагинация
+        if (pagerEl) {
+            const cur = bcUnitsPage;
+            const firstIdx = from + 1;
+            const lastIdx = from + rows.length;
+            const disPrev = cur <= 0 ? 'disabled' : '';
+            const disNext = cur >= totalPages - 1 ? 'disabled' : '';
+            pagerEl.innerHTML = `
+                <button class="btn btn-secondary" ${disPrev} onclick="bcUnitsGoTo(0)">‹‹ В начало</button>
+                <button class="btn btn-secondary" ${disPrev} onclick="bcUnitsGoTo(${cur - 1})">‹ Назад</button>
+                <span style="font-size:13px;color:var(--color-text-secondary);">Страница ${cur + 1} из ${totalPages} &nbsp;•&nbsp; ${firstIdx}–${lastIdx} из ${totalCount}</span>
+                <button class="btn btn-secondary" ${disNext} onclick="bcUnitsGoTo(${cur + 1})">Вперёд ›</button>
+                <button class="btn btn-secondary" ${disNext} onclick="bcUnitsGoTo(${totalPages - 1})">В конец ››</button>`;
+        }
     } catch (e) {
         console.error('loadUnitsTable:', e);
         listEl.innerHTML = '';

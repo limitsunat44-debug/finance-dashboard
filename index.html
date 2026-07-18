@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
 <body>
     <!-- Login Screen -->
@@ -58,6 +59,7 @@
             <button class="nav-tab" data-tab="cards1c" onclick="switchTab('cards1c')">💳 Карты 1С</button>
             <button class="nav-tab" data-tab="aiInsights" onclick="switchTab('aiInsights')">🤖 ИИ-аналитика</button>
             <button class="nav-tab" data-tab="products" onclick="switchTab('products')">📦 Товары</button>
+            <button class="nav-tab" data-tab="barcodes" onclick="switchTab('barcodes')">🏷️ Штрихкоды</button>
         </nav>
 
         <!-- Loading Indicator -->
@@ -1306,7 +1308,144 @@
             </div>
         </section>
 
+        <!-- Barcodes Section -->
+        <section id="barcodesSection" class="section">
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                    <h3 style="margin:0;">🏷️ Штрихкоды — печать этикеток пар обуви</h3>
+                </div>
+                <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px 0;">
+                    Печать индивидуальных этикеток на термопринтер АТОЛ (BP41/TT41/TT42).
+                    Принтер ставится как обычный Windows-принтер, печать идёт через системный
+                    диалог браузера (Ctrl+P → выбрать принтер АТОЛ).
+                </p>
+
+                <div class="section-tabs" id="barcodesSubTabs">
+                    <button class="section-tab active" data-btab="print">🖨️ Печать</button>
+                    <button class="section-tab" data-btab="units">📋 Экземпляры</button>
+                    <button class="section-tab" data-btab="revision">🔍 Ревизия</button>
+                </div>
+
+                <!-- ── Печать ─────────────────────────────────────────── -->
+                <div id="bcPrintTab" class="prod-tab-content active">
+                    <div id="bcPrintError" class="error-message" style="display:none;margin-bottom:12px;"></div>
+
+                    <div class="prod-filters">
+                        <div class="prod-filter-group">
+                            <label for="bcWarehouse">Магазин / склад</label>
+                            <select id="bcWarehouse" class="form-control" style="min-width:200px;"></select>
+                        </div>
+                        <div class="prod-filter-group" style="flex:1;min-width:220px;">
+                            <label for="bcProductSearch">Поиск товара по названию</label>
+                            <input type="text" id="bcProductSearch" class="form-control" placeholder="например: кроссовки" autocomplete="off">
+                        </div>
+                        <div class="prod-filter-group" style="min-width:220px;">
+                            <label for="bcVariant">Вариант (размер)</label>
+                            <select id="bcVariant" class="form-control" style="min-width:220px;"></select>
+                        </div>
+                        <div class="prod-filter-group">
+                            <label for="bcQty">Количество этикеток</label>
+                            <input type="number" id="bcQty" class="form-control" min="1" step="1" value="1" style="width:120px;">
+                        </div>
+                    </div>
+
+                    <!-- Принтер -->
+                    <div class="card" style="margin-top:14px;background:var(--color-bg-1,#f7f7f7);">
+                        <h4 style="margin:0 0 10px 0;">🖨️ Принтер</h4>
+                        <div class="prod-filters">
+                            <div class="prod-filter-group" style="flex:1;min-width:240px;">
+                                <label for="bcPrinterName">Имя принтера (для справки)</label>
+                                <input type="text" id="bcPrinterName" class="form-control" placeholder="например: ATOL BP41">
+                            </div>
+                        </div>
+                        <p style="font-size:12px;color:var(--color-text-secondary);margin:8px 0;">
+                            Браузер не отдаёт список системных принтеров. Имя выше — только для вашей
+                            справки. Фактический принтер выбирается в системном диалоге печати браузера.
+                        </p>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                            <button class="btn btn-secondary" onclick="testPrint()">🔌 Тест подключения / тестовая печать</button>
+                            <a class="btn btn-secondary" href="https://www.atol.ru/company/service-support/download-center/" target="_blank" rel="noopener">Скачать драйвер АТОЛ</a>
+                        </div>
+                    </div>
+
+                    <!-- Размер этикетки -->
+                    <div class="card" style="margin-top:14px;background:var(--color-bg-1,#f7f7f7);">
+                        <h4 style="margin:0 0 10px 0;">📐 Размер этикетки</h4>
+                        <div class="prod-filters">
+                            <div class="prod-filter-group">
+                                <label for="bcLabelW">Ширина (мм)</label>
+                                <input type="number" id="bcLabelW" class="form-control" min="10" step="1" value="40" style="width:120px;">
+                            </div>
+                            <div class="prod-filter-group">
+                                <label for="bcLabelH">Высота (мм)</label>
+                                <input type="number" id="bcLabelH" class="form-control" min="10" step="1" value="50" style="width:120px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;">
+                        <button class="btn btn-primary" onclick="generateAndPrint()">🏷️ Сгенерировать и печатать</button>
+                        <button class="btn btn-secondary" onclick="reprintExisting()">Печать уже сгенерированных</button>
+                    </div>
+                    <div id="bcPrintInfo" style="font-size:12px;color:var(--color-text-secondary);margin-top:10px;"></div>
+                </div>
+
+                <!-- ── Экземпляры ─────────────────────────────────────── -->
+                <div id="bcUnitsTab" class="prod-tab-content">
+                    <div class="prod-filters">
+                        <div class="prod-filter-group">
+                            <label for="bcUnitsWarehouse">Склад</label>
+                            <select id="bcUnitsWarehouse" class="form-control" style="min-width:200px;"></select>
+                        </div>
+                        <div class="prod-filter-group">
+                            <label for="bcUnitsStatus">Статус</label>
+                            <select id="bcUnitsStatus" class="form-control" style="min-width:160px;">
+                                <option value="">Все</option>
+                                <option value="in_stock" selected>На складе</option>
+                                <option value="sold">Продан</option>
+                                <option value="written_off">Списан</option>
+                            </select>
+                        </div>
+                        <div class="prod-filter-group" style="align-self:flex-end;">
+                            <button class="btn btn-secondary" onclick="loadUnitsTable()">🔄 Обновить</button>
+                        </div>
+                    </div>
+                    <div id="bcUnitsError" class="error-message" style="display:none;margin:12px 0;"></div>
+                    <div id="bcUnitsList" style="margin-top:12px;overflow-x:auto;"></div>
+                </div>
+
+                <!-- ── Ревизия ────────────────────────────────────────── -->
+                <div id="bcRevisionTab" class="prod-tab-content">
+                    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                        Сканируйте штрихкоды экземпляров сканером (курсор в поле ниже). Затем нажмите
+                        «Сверить», чтобы сравнить отсканированное с тем, что числится на складе.
+                    </p>
+                    <div class="prod-filters">
+                        <div class="prod-filter-group">
+                            <label for="bcRevWarehouse">Склад для сверки</label>
+                            <select id="bcRevWarehouse" class="form-control" style="min-width:200px;"></select>
+                        </div>
+                        <div class="prod-filter-group" style="flex:1;min-width:240px;">
+                            <label for="bcScanInput">Сканирование (штрихкод)</label>
+                            <input type="text" id="bcScanInput" class="form-control" placeholder="наведите сканер и сканируйте…" autocomplete="off">
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
+                        <button class="btn btn-primary" onclick="revisionCompare()">Сверить</button>
+                        <button class="btn btn-secondary" onclick="revisionClear()">Очистить список</button>
+                    </div>
+                    <div id="bcScanCount" style="font-size:13px;font-weight:600;margin-top:12px;"></div>
+                    <div id="bcScanList" style="margin-top:8px;font-size:12px;color:var(--color-text-secondary);max-height:160px;overflow-y:auto;"></div>
+                    <div id="bcRevisionError" class="error-message" style="display:none;margin:12px 0;"></div>
+                    <div id="bcRevisionResult" style="margin-top:16px;"></div>
+                </div>
+            </div>
+        </section>
+
     </div>
+
+    <!-- Скрытая область печати этикеток -->
+    <div id="labelPrintArea"></div>
 
     <!-- Modals -->
     <div id="modalOverlay" class="modal-overlay" style="display: none;">
@@ -1480,7 +1619,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260704e-sizes"></script>
+    <script src="app.js?v=20260718b-ean13"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

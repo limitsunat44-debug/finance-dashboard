@@ -1575,6 +1575,8 @@ function switchTab(tabName) {
         if (typeof loadAiInsights === 'function') loadAiInsights();
     } else if (tabName === 'products') {
         if (typeof loadProducts === 'function') loadProducts();
+    } else if (tabName === 'barcodes') {
+        if (typeof loadBarcodes === 'function') loadBarcodes();
     } else if (tabName === 'settings') {
         if (typeof loadSyncStatus === 'function') loadSyncStatus();
     }
@@ -2902,9 +2904,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.querySelectorAll('.section-tab').forEach(tab => {
         if (tab.dataset.prodtab) return; // подразделы «Товары» обрабатываются отдельно
+        if (tab.dataset.btab) return;    // подразделы «Штрихкоды» обрабатываются отдельно
         tab.addEventListener('click', function() {
             const section = this.closest('.section').id.replace('Section', '');
             switchSectionTab(section, this.dataset.section);
+        });
+    });
+
+    document.querySelectorAll('#barcodesSubTabs .section-tab').forEach(tab => {
+        tab.addEventListener('click', function() {
+            switchBarcodesSubtab(this.dataset.btab);
         });
     });
 
@@ -6294,4 +6303,588 @@ function switchProductTab(name) {
     const map = { stock: 'prodStockTab', transfers: 'prodTransfersTab', turnover: 'prodTurnoverTab', stale: 'prodStaleTab', fast: 'prodFastTab' };
     const el = document.getElementById(map[name]);
     if (el) el.classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 🏷️ ШТРИХКОДЫ — печать этикеток пар обуви на термопринтер АТОЛ
+// ═══════════════════════════════════════════════════════════════
+// Данные (warehouses/products/product_variants) берём из базы ОРТОБОТ
+// через ortobotClient. Таблица stock_units и RPC generate_stock_units
+// применяются отдельной миграцией — вызовы к ним обёрнуты в try/catch,
+// чтобы раздел работал даже до применения миграции.
+
+const barcodesState = {
+    inited: false,
+    warehouses: [],          // [{id, name, c1_code}]
+    whById: {},              // id -> warehouse
+    products: [],            // [{id, name_ru, category}]
+    variants: [],            // [{id, product_id, warehouse_id, size_label, stock}]
+    variantInfo: {},         // variant_id -> { name, size }
+    selectedProductId: null, // выбранный товар в поиске
+    scanned: new Set()       // отсканированные коды (ревизия)
+};
+
+// Понятное имя склада по id
+function bcWhName(id) {
+    const w = barcodesState.whById[id];
+    return w ? (w.name || w.c1_code || '—') : (id != null ? String(id) : '—');
+}
+
+// Инициализация раздела: подгрузка справочников, восстановление настроек,
+// навешивание обработчиков. Вызывается при каждом входе, но тяжёлая часть — один раз.
+async function loadBarcodes() {
+    // Восстановить размер этикетки из localStorage (не зависит от базы)
+    bcRestoreLabelSize();
+
+    if (barcodesState.inited) return;
+
+    // Обработчики полей размера этикетки — сохраняем в localStorage при изменении
+    ['bcLabelW', 'bcLabelH'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.bcBound) {
+            el.addEventListener('change', bcSaveLabelSize);
+            el.dataset.bcBound = '1';
+        }
+    });
+
+    // Поиск товара по названию (клиентская фильтрация загруженного списка)
+    const searchEl = document.getElementById('bcProductSearch');
+    if (searchEl && !searchEl.dataset.bcBound) {
+        let t = null;
+        searchEl.addEventListener('input', function () {
+            clearTimeout(t);
+            const q = this.value;
+            t = setTimeout(() => bcSearchProducts(q), 250);
+        });
+        searchEl.dataset.bcBound = '1';
+    }
+
+    // Выбор варианта -> подставить остаток в поле количества
+    const varEl = document.getElementById('bcVariant');
+    if (varEl && !varEl.dataset.bcBound) {
+        varEl.addEventListener('change', function () {
+            const opt = this.selectedOptions[0];
+            const stock = opt ? parseInt(opt.dataset.stock || '0', 10) : 0;
+            const qtyEl = document.getElementById('bcQty');
+            if (qtyEl) qtyEl.value = stock > 0 ? stock : 1;
+        });
+        varEl.dataset.bcBound = '1';
+    }
+
+    // Скрыть выпадающий список результатов при клике вне поля
+    document.addEventListener('click', function (e) {
+        const box = document.getElementById('bcSearchResults');
+        const inp = document.getElementById('bcProductSearch');
+        if (box && inp && !box.contains(e.target) && e.target !== inp) {
+            box.style.display = 'none';
+        }
+    });
+
+    setupRevision();
+
+    // Загрузка справочников из ОРТОБОТ. Эти таблицы существуют — но если
+    // что-то пойдёт не так, раздел всё равно останется рабочим для тестовой печати.
+    try {
+        const [warehouses, products, variants] = await Promise.all([
+            fetchAllRows('warehouses', 'id,c1_code,name,is_active'),
+            fetchAllRows('products', 'id,name_ru,category,is_active'),
+            fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock')
+        ]);
+
+        barcodesState.warehouses = (warehouses || [])
+            .filter(w => w.is_active !== false)
+            .sort((a, b) => String(a.c1_code || '').localeCompare(String(b.c1_code || '')));
+        barcodesState.whById = {};
+        barcodesState.warehouses.forEach(w => { barcodesState.whById[w.id] = w; });
+
+        barcodesState.products = (products || []).filter(p => p.is_active !== false);
+        barcodesState.variants = (variants || []).map(v => ({ ...v, stock: Number(v.stock) || 0 }));
+
+        // Карта variant_id -> название товара + размер (для этикеток и таблиц)
+        const prodName = {};
+        barcodesState.products.forEach(p => { prodName[p.id] = p.name_ru || ''; });
+        barcodesState.variantInfo = {};
+        barcodesState.variants.forEach(v => {
+            barcodesState.variantInfo[v.id] = {
+                name: prodName[v.product_id] || '',
+                size: v.size_label || ''
+            };
+        });
+
+        bcFillWarehouseSelects();
+    } catch (e) {
+        console.error('Штрихкоды: не удалось загрузить справочники ОРТОБОТ:', e);
+        const err = document.getElementById('bcPrintError');
+        if (err) {
+            err.textContent = 'Не удалось загрузить справочники товаров/складов. ' +
+                (e && e.message ? e.message : '') + ' Тестовая печать всё равно доступна.';
+            err.style.display = 'block';
+        }
+    }
+
+    barcodesState.inited = true;
+}
+
+// Заполнить все селекты складов
+function bcFillWarehouseSelects() {
+    const opts = barcodesState.warehouses
+        .map(w => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name || w.c1_code)}</option>`)
+        .join('');
+    const wh = document.getElementById('bcWarehouse');
+    if (wh) wh.innerHTML = '<option value="">— выберите склад —</option>' + opts;
+    const uw = document.getElementById('bcUnitsWarehouse');
+    if (uw) uw.innerHTML = '<option value="">Все склады</option>' + opts;
+    const rw = document.getElementById('bcRevWarehouse');
+    if (rw) rw.innerHTML = '<option value="">— выберите склад —</option>' + opts;
+}
+
+// Переключение под-вкладок раздела «Штрихкоды»
+function switchBarcodesSubtab(name) {
+    document.querySelectorAll('#barcodesSubTabs .section-tab').forEach(b => {
+        b.classList.toggle('active', b.dataset.btab === name);
+    });
+    const map = { print: 'bcPrintTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
+    document.querySelectorAll('#barcodesSection .prod-tab-content').forEach(c => c.classList.remove('active'));
+    const el = document.getElementById(map[name]);
+    if (el) el.classList.add('active');
+
+    if (name === 'units') loadUnitsTable();
+    if (name === 'revision') {
+        const inp = document.getElementById('bcScanInput');
+        if (inp) inp.focus();
+    }
+}
+
+// ── Размер этикетки (localStorage) ──────────────────────────────
+function bcGetLabelSize() {
+    const w = parseFloat(document.getElementById('bcLabelW')?.value) || 40;
+    const h = parseFloat(document.getElementById('bcLabelH')?.value) || 50;
+    return { w, h };
+}
+function bcSaveLabelSize() {
+    const { w, h } = bcGetLabelSize();
+    try { localStorage.setItem('labelSize', JSON.stringify({ w, h })); } catch (_) {}
+}
+function bcRestoreLabelSize() {
+    try {
+        const raw = localStorage.getItem('labelSize');
+        if (!raw) return;
+        const { w, h } = JSON.parse(raw);
+        const wEl = document.getElementById('bcLabelW');
+        const hEl = document.getElementById('bcLabelH');
+        if (wEl && w) wEl.value = w;
+        if (hEl && h) hEl.value = h;
+    } catch (_) {}
+}
+
+// ── Поиск товара по названию ────────────────────────────────────
+function bcSearchProducts(query) {
+    const box = bcEnsureSearchBox();
+    const q = String(query || '').trim().toLowerCase();
+    if (q.length < 2) { box.style.display = 'none'; return; }
+
+    const matches = barcodesState.products
+        .filter(p => (p.name_ru || '').toLowerCase().includes(q))
+        .slice(0, 30);
+
+    if (!matches.length) {
+        box.innerHTML = '<div style="padding:8px 10px;color:#888;">Ничего не найдено</div>';
+        box.style.display = 'block';
+        return;
+    }
+
+    box.innerHTML = matches.map(p =>
+        `<div class="bc-search-item" data-pid="${escapeHtml(p.id)}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #eee;">
+            ${escapeHtml(p.name_ru)}${p.category ? ` <span style="color:#999;">· ${escapeHtml(p.category)}</span>` : ''}
+        </div>`
+    ).join('');
+    box.style.display = 'block';
+
+    box.querySelectorAll('.bc-search-item').forEach(item => {
+        item.addEventListener('mouseenter', function () { this.style.background = '#f0f0f0'; });
+        item.addEventListener('mouseleave', function () { this.style.background = ''; });
+        item.addEventListener('click', function () {
+            bcSelectProduct(this.dataset.pid);
+            box.style.display = 'none';
+        });
+    });
+}
+
+// Создать/получить контейнер выпадающего списка результатов поиска
+function bcEnsureSearchBox() {
+    let box = document.getElementById('bcSearchResults');
+    if (!box) {
+        const inp = document.getElementById('bcProductSearch');
+        box = document.createElement('div');
+        box.id = 'bcSearchResults';
+        box.style.cssText = 'position:absolute;top:100%;left:0;right:0;z-index:60;background:#fff;' +
+            'border:1px solid #ccc;border-radius:6px;max-height:260px;overflow-y:auto;' +
+            'box-shadow:0 6px 18px rgba(0,0,0,.14);display:none;';
+        inp.parentElement.style.position = 'relative';
+        inp.parentElement.appendChild(box);
+    }
+    return box;
+}
+
+// Выбор товара -> заполнить поле поиска и селект вариантов
+function bcSelectProduct(pid) {
+    barcodesState.selectedProductId = pid;
+    const prod = barcodesState.products.find(p => String(p.id) === String(pid));
+    const inp = document.getElementById('bcProductSearch');
+    if (inp && prod) inp.value = prod.name_ru || '';
+
+    const whId = document.getElementById('bcWarehouse')?.value || '';
+    // Варианты выбранного товара. Если выбран склад — берём остаток по этому складу,
+    // иначе суммируем остатки по всем складам для отображения.
+    let vs = barcodesState.variants.filter(v => String(v.product_id) === String(pid));
+    let opts;
+    if (whId) {
+        vs = vs.filter(v => String(v.warehouse_id) === String(whId));
+        opts = vs.map(v =>
+            `<option value="${escapeHtml(v.id)}" data-stock="${v.stock}">${escapeHtml(v.size_label || '—')} (остаток: ${v.stock})</option>`
+        );
+    } else {
+        // Группируем по размеру, суммируем остатки; value — id первого варианта размера
+        const bySize = {};
+        vs.forEach(v => {
+            const key = v.size_label || '—';
+            if (!bySize[key]) bySize[key] = { id: v.id, stock: 0 };
+            bySize[key].stock += v.stock;
+        });
+        opts = Object.keys(bySize).map(sz =>
+            `<option value="${escapeHtml(bySize[sz].id)}" data-stock="${bySize[sz].stock}">${escapeHtml(sz)} (остаток: ${bySize[sz].stock})</option>`
+        );
+    }
+
+    const varEl = document.getElementById('bcVariant');
+    if (varEl) {
+        varEl.innerHTML = opts.length
+            ? opts.join('')
+            : '<option value="">— нет вариантов —</option>';
+        varEl.dispatchEvent(new Event('change'));
+    }
+}
+
+// ── Генерация штрихкодов и печать ───────────────────────────────
+async function generateAndPrint() {
+    const err = document.getElementById('bcPrintError');
+    const info = document.getElementById('bcPrintInfo');
+    if (err) err.style.display = 'none';
+    if (info) info.textContent = '';
+
+    const variantId = document.getElementById('bcVariant')?.value;
+    const qty = parseInt(document.getElementById('bcQty')?.value, 10);
+    if (!variantId) { bcShowPrintError('Выберите товар и вариант (размер).'); return; }
+    if (!qty || qty < 1) { bcShowPrintError('Укажите количество этикеток (≥ 1).'); return; }
+
+    const { w, h } = bcGetLabelSize();
+
+    try {
+        const { data, error } = await ortobotClient.rpc('generate_stock_units', {
+            p_variant_id: variantId,
+            p_qty: qty,
+            p_source_doc: null
+        });
+        if (error) throw error;
+
+        const units = (data || []).map(u => bcEnrichUnit(u));
+        if (!units.length) { bcShowPrintError('RPC не вернул экземпляры.'); return; }
+
+        renderLabels(units, w, h);
+        if (info) info.textContent = `Сгенерировано и отправлено на печать: ${units.length} шт.`;
+        bcDoPrint(w, h);
+    } catch (e) {
+        console.error('generate_stock_units:', e);
+        bcShowPrintError(bcMissingTableMsg(e));
+    }
+}
+
+// Повторная печать уже сгенерированных экземпляров (status='in_stock')
+async function reprintExisting() {
+    const err = document.getElementById('bcPrintError');
+    const info = document.getElementById('bcPrintInfo');
+    if (err) err.style.display = 'none';
+    if (info) info.textContent = '';
+
+    const variantId = document.getElementById('bcVariant')?.value;
+    if (!variantId) { bcShowPrintError('Выберите товар и вариант (размер).'); return; }
+
+    const { w, h } = bcGetLabelSize();
+
+    try {
+        const { data, error } = await ortobotClient
+            .from('stock_units')
+            .select('*')
+            .eq('variant_id', variantId)
+            .eq('status', 'in_stock');
+        if (error) throw error;
+
+        const units = (data || []).map(u => bcEnrichUnit(u));
+        if (!units.length) {
+            bcShowPrintError('Нет экземпляров со статусом «на складе» для этого варианта.');
+            return;
+        }
+
+        renderLabels(units, w, h);
+        if (info) info.textContent = `Повторная печать: ${units.length} шт.`;
+        bcDoPrint(w, h);
+    } catch (e) {
+        console.error('reprintExisting:', e);
+        bcShowPrintError(bcMissingTableMsg(e));
+    }
+}
+
+// Тестовая печать — одна пробная этикетка. НЕ зависит от базы.
+function testPrint() {
+    const { w, h } = bcGetLabelSize();
+    const unit = {
+        unique_barcode: 'TEST1234567890',
+        size_label: 'ТЕСТ',
+        name: 'ТЕСТОВАЯ ЭТИКЕТКА'
+    };
+    renderLabels([unit], w, h);
+    bcDoPrint(w, h);
+    const info = document.getElementById('bcPrintInfo');
+    if (info) info.textContent = 'Отправлена тестовая этикетка на печать.';
+}
+
+// Дополнить строку экземпляра названием товара/размером из справочника
+function bcEnrichUnit(u) {
+    const info = u.variant_id != null ? barcodesState.variantInfo[u.variant_id] : null;
+    return {
+        unique_barcode: u.unique_barcode || u.barcode || '',
+        size_label: u.size_label || (info && info.size) || '',
+        name: u.name || (info && info.name) || '',
+        warehouse_id: u.warehouse_id,
+        status: u.status,
+        created_at: u.created_at || u.received_at
+    };
+}
+
+function bcShowPrintError(msg) {
+    const err = document.getElementById('bcPrintError');
+    if (err) { err.textContent = msg; err.style.display = 'block'; }
+}
+
+// Понятное сообщение, если таблица/RPC ещё не созданы миграцией
+function bcMissingTableMsg(e) {
+    const m = (e && e.message ? e.message : String(e || '')).toLowerCase();
+    if (m.includes('does not exist') || m.includes('not find') || m.includes('schema cache') ||
+        m.includes('relation') || m.includes('function') || m.includes('404')) {
+        return 'Таблица экземпляров ещё не создана — примените миграцию.';
+    }
+    return 'Ошибка: ' + (e && e.message ? e.message : 'неизвестная ошибка');
+}
+
+// ── Рендер этикеток ─────────────────────────────────────────────
+// Формирует HTML этикеток в скрытом #labelPrintArea и рисует штрихкоды EAN13 (фоллбэк CODE128).
+function renderLabels(units, w, h) {
+    const area = document.getElementById('labelPrintArea');
+    if (!area) return;
+
+    // Высота штрихкода зависит от высоты этикетки (в px), с разумными границами
+    const barHeight = Math.max(18, Math.min(60, Math.round(h * 0.9)));
+
+    area.innerHTML = units.map((u, i) => {
+        const code = escapeHtml(u.unique_barcode || '');
+        const size = escapeHtml(u.size_label || '');
+        const title = escapeHtml(u.name || '');
+        return `<div class="label-tag" style="width:${w}mm;height:${h}mm;">
+            <div class="label-title">${title}</div>
+            <div class="label-size">${size}</div>
+            <div class="label-barcode"><svg id="bcSvg${i}"></svg></div>
+            <div class="label-code">${code}</div>
+        </div>`;
+    }).join('');
+
+    // Рисуем штрихкоды: EAN13 для 13-значных цифровых, иначе фоллбэк CODE128
+    units.forEach((u, i) => {
+        const svg = document.getElementById('bcSvg' + i);
+        if (!svg) return;
+        const value = String(u.unique_barcode || '').trim();
+        if (!value) return;
+        // Наши штрихкоды — настоящие EAN13 (13 цифр, префикс 20). Старые/чужие — CODE128.
+        const isEan13 = /^\d{13}$/.test(value);
+        try {
+            JsBarcode(svg, value, {
+                format: isEan13 ? 'EAN13' : 'CODE128',
+                displayValue: false,
+                margin: 0,
+                height: barHeight,
+                width: isEan13 ? 2 : 1.4,
+                flat: true
+            });
+        } catch (e) {
+            // если EAN13 не прошёл валидацию (напр. контрольная цифра) — чертим CODE128
+            try {
+                JsBarcode(svg, value, { format: 'CODE128', displayValue: false, margin: 0, height: barHeight, width: 1.4 });
+            } catch (e2) {
+                console.error('JsBarcode:', e2);
+            }
+        }
+    });
+}
+
+// Печать: инжектим @page нужного размера, показываем только область этикеток
+function bcDoPrint(w, h) {
+    let st = document.getElementById('labelPageStyle');
+    if (!st) {
+        st = document.createElement('style');
+        st.id = 'labelPageStyle';
+        document.head.appendChild(st);
+    }
+    st.textContent = `@media print { @page { size: ${w}mm ${h}mm; margin: 0; } }`;
+
+    document.body.classList.add('printing-labels');
+    const cleanup = () => {
+        document.body.classList.remove('printing-labels');
+        window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    window.print();
+    // Фолбэк на случай, если событие afterprint не сработает
+    setTimeout(cleanup, 1500);
+}
+
+// ── Таблица экземпляров ─────────────────────────────────────────
+async function loadUnitsTable() {
+    const listEl = document.getElementById('bcUnitsList');
+    const errEl = document.getElementById('bcUnitsError');
+    if (!listEl) return;
+    if (errEl) errEl.style.display = 'none';
+    listEl.innerHTML = '<p style="color:var(--color-text-secondary);">Загрузка…</p>';
+
+    const whId = document.getElementById('bcUnitsWarehouse')?.value || '';
+    const status = document.getElementById('bcUnitsStatus')?.value || '';
+
+    try {
+        let q = ortobotClient.from('stock_units').select('*').limit(1000);
+        if (whId) q = q.eq('warehouse_id', whId);
+        if (status) q = q.eq('status', status);
+        const { data, error } = await q;
+        if (error) throw error;
+
+        const rows = data || [];
+        if (!rows.length) {
+            listEl.innerHTML = '<p style="color:var(--color-text-secondary);">Экземпляров не найдено.</p>';
+            return;
+        }
+
+        const statusLabel = { in_stock: 'На складе', sold: 'Продан', written_off: 'Списан' };
+        const body = rows.map(r => {
+            const u = bcEnrichUnit(r);
+            const date = u.created_at ? String(u.created_at).slice(0, 10) : '—';
+            return `<tr>
+                <td><code>${escapeHtml(u.unique_barcode)}</code></td>
+                <td>${escapeHtml(u.size_label)}</td>
+                <td>${escapeHtml(u.name)}</td>
+                <td>${escapeHtml(bcWhName(u.warehouse_id))}</td>
+                <td>${escapeHtml(statusLabel[u.status] || u.status || '—')}</td>
+                <td>${escapeHtml(date)}</td>
+            </tr>`;
+        }).join('');
+
+        listEl.innerHTML =
+            `<table class="bc-units-table">
+                <thead><tr>
+                    <th>Штрихкод</th><th>Размер</th><th>Товар</th>
+                    <th>Склад</th><th>Статус</th><th>Дата прихода</th>
+                </tr></thead>
+                <tbody>${body}</tbody>
+            </table>
+            <p style="font-size:12px;color:var(--color-text-secondary);margin-top:8px;">Показано: ${rows.length}</p>`;
+    } catch (e) {
+        console.error('loadUnitsTable:', e);
+        listEl.innerHTML = '';
+        if (errEl) { errEl.textContent = bcMissingTableMsg(e); errEl.style.display = 'block'; }
+    }
+}
+
+// ── Ревизия (сканирование и сверка) ─────────────────────────────
+function setupRevision() {
+    const inp = document.getElementById('bcScanInput');
+    if (inp && !inp.dataset.bcBound) {
+        inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const code = this.value.trim();
+                if (code) {
+                    barcodesState.scanned.add(code);
+                    bcRenderScanned();
+                }
+                this.value = '';
+            }
+        });
+        inp.dataset.bcBound = '1';
+    }
+    bcRenderScanned();
+}
+
+function bcRenderScanned() {
+    const countEl = document.getElementById('bcScanCount');
+    const listEl = document.getElementById('bcScanList');
+    const arr = Array.from(barcodesState.scanned);
+    if (countEl) countEl.textContent = `Отсканировано уникальных кодов: ${arr.length}`;
+    if (listEl) {
+        listEl.innerHTML = arr.length
+            ? arr.map(c => `<div>${escapeHtml(c)}</div>`).join('')
+            : '<em>пусто</em>';
+    }
+}
+
+function revisionClear() {
+    barcodesState.scanned.clear();
+    bcRenderScanned();
+    const res = document.getElementById('bcRevisionResult');
+    if (res) res.innerHTML = '';
+    const inp = document.getElementById('bcScanInput');
+    if (inp) inp.focus();
+}
+
+// Сверка: сравнить отсканированные коды с числящимися in_stock на складе
+async function revisionCompare() {
+    const errEl = document.getElementById('bcRevisionError');
+    const resEl = document.getElementById('bcRevisionResult');
+    if (errEl) errEl.style.display = 'none';
+    if (resEl) resEl.innerHTML = '';
+
+    const whId = document.getElementById('bcRevWarehouse')?.value || '';
+    if (!whId) {
+        if (errEl) { errEl.textContent = 'Выберите склад для сверки.'; errEl.style.display = 'block'; }
+        return;
+    }
+
+    try {
+        const { data, error } = await ortobotClient
+            .from('stock_units')
+            .select('unique_barcode')
+            .eq('warehouse_id', whId)
+            .eq('status', 'in_stock');
+        if (error) throw error;
+
+        const inStock = new Set((data || []).map(r => String(r.unique_barcode || '').trim()).filter(Boolean));
+        const scanned = barcodesState.scanned;
+
+        // Недостача — числятся, но не отсканированы
+        const missing = Array.from(inStock).filter(c => !scanned.has(c));
+        // Лишние/чужие — отсканированы, но не числятся in_stock
+        const extra = Array.from(scanned).filter(c => !inStock.has(c));
+
+        resEl.innerHTML =
+            `<div class="bc-rev-block">
+                <h4>Итог сверки по складу «${escapeHtml(bcWhName(whId))}»</h4>
+                <div>Числится на складе: <b>${inStock.size}</b> · Отсканировано: <b>${scanned.size}</b></div>
+            </div>
+            <div class="bc-rev-block">
+                <h4 class="bc-rev-miss">Недостача (числятся, но не отсканированы): ${missing.length}</h4>
+                <ul class="bc-rev-list">${missing.map(c => `<li>${escapeHtml(c)}</li>`).join('') || '<li class="bc-rev-ok">нет</li>'}</ul>
+            </div>
+            <div class="bc-rev-block">
+                <h4 class="bc-rev-extra">Лишние/чужие (отсканированы, но не числятся): ${extra.length}</h4>
+                <ul class="bc-rev-list">${extra.map(c => `<li>${escapeHtml(c)}</li>`).join('') || '<li class="bc-rev-ok">нет</li>'}</ul>
+            </div>`;
+    } catch (e) {
+        console.error('revisionCompare:', e);
+        if (errEl) { errEl.textContent = bcMissingTableMsg(e); errEl.style.display = 'block'; }
+    }
 }

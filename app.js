@@ -6440,7 +6440,8 @@ async function loadBarcodes() {
                 size: v.size_label || '',
                 charRef: v.c1_char_ref || null,
                 productId: v.product_id,
-                productC1Ref: prodC1[v.product_id] || null
+                productC1Ref: prodC1[v.product_id] || null,
+                warehouseId: v.warehouse_id || null
             };
         });
         barcodesState.priceCache = {}; // productC1Ref -> { productPrice, prices }
@@ -6981,45 +6982,65 @@ async function generateAndPrint() {
         const prods = Object.keys(groups);
         if (!prods.length) { bcShowPrintError('Не удалось определить номенклатуру/характеристику выбранных размеров. Обновите остатки из 1С.'); return; }
 
-        // 2) вызываем smart-plan (реальная генерация + отправка в 1С) по каждой номенклатуре
+        // 2) генерация новых кодов (smart-plan) — ТОЛЬКО если СКЛАД НЕ ВЫБРАН.
+        //    При выбранном складе печатаем только СУЩЕСТВУЮЩИЕ коды этого склада,
+        //    ничего не генерируем (чтобы не плодить коды после наклейки).
+        const bcWhIdEarly = document.getElementById('bcWarehouse')?.value || '';
         let totGen = 0, totReg = 0, totSkip = 0, totBalance = 0, totExisting = 0;
         const planRows = [];
         const c1errAll = [];
-        for (const prod of prods) {
-            const charRefs = Array.from(groups[prod]);
-            const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
-                body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: false })
-            });
-            const text = await r.text();
-            let jr; try { jr = JSON.parse(text); } catch { jr = { ok: false, error: text.slice(0, 200) }; }
-            if (!r.ok || jr.ok === false) {
-                c1errAll.push(`HTTP ${r.status}: ${jr.error || ''}`);
-                continue;
+        if (!bcWhIdEarly) {
+            for (const prod of prods) {
+                const charRefs = Array.from(groups[prod]);
+                const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                    body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: false })
+                });
+                const text = await r.text();
+                let jr; try { jr = JSON.parse(text); } catch { jr = { ok: false, error: text.slice(0, 200) }; }
+                if (!r.ok || jr.ok === false) {
+                    c1errAll.push(`HTTP ${r.status}: ${jr.error || ''}`);
+                    continue;
+                }
+                totGen += jr.totals?.generated || 0;
+                totBalance += jr.totals?.balance || 0;
+                totExisting += jr.totals?.existing || 0;
+                totReg += jr.c1?.registered || 0;
+                totSkip += jr.c1?.skipped || 0;
+                if (Array.isArray(jr.c1?.errors)) c1errAll.push(...jr.c1.errors);
+                (jr.plan || []).forEach(p => planRows.push(p));
             }
-            totGen += jr.totals?.generated || 0;
-            totBalance += jr.totals?.balance || 0;
-            totExisting += jr.totals?.existing || 0;
-            totReg += jr.c1?.registered || 0;
-            totSkip += jr.c1?.skipped || 0;
-            if (Array.isArray(jr.c1?.errors)) c1errAll.push(...jr.c1.errors);
-            (jr.plan || []).forEach(p => planRows.push(p));
         }
 
-        // 3) собираем экземпляры для ПЕЧАТИ: все in_stock коды выбранных РАЗМЕРОВ
-        //    (по ВСЕМ вариантам-складам этой характеристики, т.к. новый код мог лечь
-        //    на другой вариант того же размера), но не больше остатка.
-        //    Находим все variant_id, чей charRef входит в выбранные характеристики.
-        const selCharArr = Array.from(selCharSet);
+        // 3) собираем экземпляры для ПЕЧАТИ.
+        //    ЕСЛИ ВЫБРАН СКЛАД (#bcWarehouse) — печатаем ТОЛЬКО коды этого склада
+        //    (варианты с warehouse_id = выбранный склад), без среза по общему остатку.
+        //    ЕСЛИ СКЛАД НЕ ВЫБРАН — старое поведение: по всем складам характеристики,
+        //    срез по остатку 1С.
+        const bcWhId = document.getElementById('bcWarehouse')?.value || '';
         const printVariantIds = [];
         if (barcodesState.variantInfo) {
             for (const [vid, vi] of Object.entries(barcodesState.variantInfo)) {
-                if (vi && vi.charRef && selCharSet.has(vi.charRef)) printVariantIds.push(vid);
+                if (!vi || !vi.charRef || !selCharSet.has(vi.charRef)) continue;
+                // если выбран склад — только варианты этого склада
+                if (bcWhId && String(vi.warehouseId || '') !== String(bcWhId)) continue;
+                printVariantIds.push(vid);
             }
         }
-        // подстраховка: если индекс пуст, берём хотя бы выбранные варианты
-        const variantIdsForPrint = printVariantIds.length ? printVariantIds : selected.map(s => s.variantId);
+        // подстраховка: если индекс пуст, берём выбранные варианты
+        //    (с учётом склада, если он выбран)
+        let variantIdsForPrint = printVariantIds;
+        if (!variantIdsForPrint.length) {
+            variantIdsForPrint = selected
+                .filter(s => {
+                    if (!bcWhId) return true;
+                    const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
+                    return String(vi.warehouseId || '') === String(bcWhId);
+                })
+                .map(s => s.variantId);
+        }
+        if (!variantIdsForPrint.length) { bcShowPrintError('На выбранном складе нет вариантов для этих размеров.'); return; }
         const { data: units, error: uErr } = await ortobotClient
             .from('stock_units')
             .select('*')
@@ -7058,16 +7079,27 @@ async function generateAndPrint() {
         renderLabels(allUnits, w, h);
 
         if (info) {
-            const detail = planRows
-                .sort((a, b) => String(a.sizeLabel).localeCompare(String(b.sizeLabel), 'ru'))
-                .map(p => {
-                    const total1c = p.own + p.ours + p.other + (p.generated || 0);
-                    return `${escapeHtml(p.sizeLabel)}: остаток ${p.balance}, было кодов ${p.own + p.ours + p.other}${p.generated ? `, новых +${p.generated}` : ''}${p.cappedByBalance ? ' (ограничено остатком)' : ''}`;
-                }).join(' | ');
-            info.innerHTML =
-                `<div>На печать: <b>${allUnits.length}</b> шт. — новых сгенерировано: <b>${totGen}</b>. Правило: кодов на размер не больше остатка 1С.</div>` +
-                `<div style="margin-top:4px;">${c1Line}</div>` +
-                `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+            if (bcWhIdEarly) {
+                // Режим «по складу»: только существующие коды выбранного склада
+                const whName = (barcodesState.whById[bcWhIdEarly] || {}).name || 'выбранный склад';
+                const byChar = {};
+                allUnits.forEach(u => { const k = u.size_label || '?'; byChar[k] = (byChar[k] || 0) + 1; });
+                const detail = Object.keys(byChar).sort((a, b) => a.localeCompare(b, 'ru'))
+                    .map(k => `${escapeHtml(k)}: ${byChar[k]} шт.`).join(' | ');
+                info.innerHTML =
+                    `<div>На печать по складу <b>${escapeHtml(whName)}</b>: <b>${allUnits.length}</b> шт. — только существующие коды этого склада, новые НЕ генерируются.</div>` +
+                    `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+            } else {
+                const detail = planRows
+                    .sort((a, b) => String(a.sizeLabel).localeCompare(String(b.sizeLabel), 'ru'))
+                    .map(p => {
+                        return `${escapeHtml(p.sizeLabel)}: остаток ${p.balance}, было кодов ${p.own + p.ours + p.other}${p.generated ? `, новых +${p.generated}` : ''}${p.cappedByBalance ? ' (ограничено остатком)' : ''}`;
+                    }).join(' | ');
+                info.innerHTML =
+                    `<div>На печать: <b>${allUnits.length}</b> шт. — новых сгенерировано: <b>${totGen}</b>. Правило: кодов на размер не больше остатка 1С.</div>` +
+                    `<div style="margin-top:4px;">${c1Line}</div>` +
+                    `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+            }
         }
         bcDoPrint(w, h);
         // успешно отправили на печать — очищаем список номенклатур

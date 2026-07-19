@@ -6479,6 +6479,12 @@ function bcFillWarehouseSelects() {
     if (uw) uw.innerHTML = '<option value="">Все склады</option>' + opts;
     const rw = document.getElementById('bcRevWarehouse');
     if (rw) rw.innerHTML = '<option value="">— выберите склад —</option>' + opts;
+    const bw = document.getElementById('bcBatchWarehouse');
+    if (bw) {
+        const prev = bw.value;
+        bw.innerHTML = '<option value="">— выберите склад —</option>' + opts;
+        if (prev) bw.value = prev;
+    }
 }
 
 // Переключение под-вкладок раздела «Штрихкоды»
@@ -7351,25 +7357,54 @@ async function generateAndPrint() {
 }
 
 // ── Массовая печать по складу (пачками) ─────────────────────────
-// Берёт следующую пачку ещё НЕ напечатанных (printed_at IS NULL) экземпляров
-// in_stock выбранного склада. При нехватке — догенерирует коды до остатка 1С
-// (smart-plan по складу), затем формирует PDF (печать браузера) и помечает
-// экземпляры как напечатанные (printed_at). После этого они станут зелёными.
-async function bcFormBatchByWarehouse() {
+// Рабочий процесс:
+//  1) выбираем склад в самой карточке (#bcBatchWarehouse) и размер пачки,
+//  2) «Загрузить пачку» — берём следующие N ещё НЕ напечатанных (printed_at IS NULL)
+//     in_stock экземпляров склада (без «Диагностика стоп»), при нехватке — догенерируем
+//     коды до остатка 1С; строим таблицу-предпросмотр с чекбоксами, отсортированную
+//     по номенклатуре, внутри — по размерам,
+//  3) «Печать выбранных → PDF» — печатаем только отмеченные строки (можно одну),
+//     помечаем их printed_at, они становятся зелёными и «уже использованы».
+const bcBatchState = { units: [], whId: '', whName: '' };
+
+// Натуральная сортировка размеров (S/M/L/XL, числа 35..46, «стандарт» в конец)
+function bcSizeSortKey(size) {
+    const s = String(size || '').toLowerCase().replace(/^размер:?\s*/, '').trim();
+    const order = { xs: 1, s: 2, m: 3, l: 4, xl: 5, xxl: 6, xxxl: 7 };
+    if (order[s]) return [1, order[s], s];
+    const num = parseFloat(s.replace(',', '.'));
+    if (!isNaN(num)) return [2, num, s];
+    if (s === 'стандарт' || s === '' || s === '—') return [4, 0, s];
+    return [3, 0, s]; // прочие строковые размеры — по алфавиту
+}
+// Сортировка экземпляров: сначала по названию номенклатуры, потом по размеру
+function bcSortUnits(units) {
+    return units.slice().sort((a, b) => {
+        const na = (a.name || '').toLowerCase();
+        const nb = (b.name || '').toLowerCase();
+        if (na !== nb) return na.localeCompare(nb, 'ru');
+        const ka = bcSizeSortKey(a.size_label), kb = bcSizeSortKey(b.size_label);
+        if (ka[0] !== kb[0]) return ka[0] - kb[0];
+        if (ka[0] === 2) return ka[1] - kb[1]; // числовые размеры
+        return String(ka[2]).localeCompare(String(kb[2]), 'ru');
+    });
+}
+
+// Шаг 1: загрузить пачку в предпросмотр
+async function bcLoadBatchPreview() {
     const err = document.getElementById('bcPrintError');
     const info = document.getElementById('bcBatchInfo');
     if (err) err.style.display = 'none';
 
-    const whId = document.getElementById('bcWarehouse')?.value || '';
-    if (!whId) { bcShowPrintError('Сначала выберите склад / магазин вверху.'); return; }
+    const whId = document.getElementById('bcBatchWarehouse')?.value || '';
+    if (!whId) { bcShowPrintError('Выберите склад в карточке массовой печати.'); return; }
     const batchSize = Math.max(1, parseInt(document.getElementById('bcBatchSize')?.value, 10) || 100);
-    const { w, h } = bcGetLabelSize();
     const whName = (barcodesState.whById[whId] || {}).name || 'склад';
 
     try {
         if (info) info.innerHTML = '⏳ Считаю доступные экземпляры…';
 
-        // 1) сколько уже есть НЕ напечатанных in_stock на складе
+        // 1) сколько уже есть НЕ напечатанных in_stock на складе (без диагностики)
         let ready = await bcFetchUnprintedUnits(whId, batchSize);
 
         // 2) если не хватает на полную пачку — догенерируем коды до остатка 1С
@@ -7383,52 +7418,143 @@ async function bcFormBatchByWarehouse() {
             if (gen.errors && gen.errors.length) {
                 genMsg += ` ⚠️ 1С-ошибки: ${gen.errors.slice(0, 2).join('; ')}`;
             }
-            // повторно берём пачку
             ready = await bcFetchUnprintedUnits(whId, batchSize);
         }
 
-        if (!ready.length) {
-            if (info) info.innerHTML =
-                `На складе <b>${escapeHtml(whName)}</b> не осталось ненапечатанных экземпляров.` + genMsg;
-            return;
+        // 3) обогащаем + сортируем по номенклатуре и размерам.
+        //    bcEnrichUnit не переносит id/printed_at — проставляем вручную
+        const enriched = ready.slice(0, batchSize).map(r => {
+            const e = bcEnrichUnit({ ...r });
+            e.id = r.id;
+            e.printed_at = r.printed_at || null;
+            e.printed_doc = r.printed_doc || null;
+            return e;
+        });
+        const sorted = bcSortUnits(enriched);
+        bcBatchState.units = sorted;
+        bcBatchState.whId = whId;
+        bcBatchState.whName = whName;
+
+        const remaining = await bcCountUnprinted(whId);
+        if (info) {
+            info.innerHTML =
+                `Склад <b>${escapeHtml(whName)}</b>: загружено <b>${sorted.length}</b> экземпляр(ов) в пачку.${genMsg}` +
+                ` Всего ненапечатанных на складе: <b>${remaining}</b>.`;
         }
+        bcRenderBatchPreview();
+    } catch (e) {
+        console.error('bcLoadBatchPreview:', e);
+        bcShowPrintError(bcMissingTableMsg(e));
+    }
+}
 
-        const batch = ready.slice(0, batchSize);
-        const batchIds = batch.map(u => u.id);
+// Рендер таблицы предпросмотра с чекбоксами (сгруппировано по номенклатуре)
+function bcRenderBatchPreview() {
+    const box = document.getElementById('bcBatchPreview');
+    if (!box) return;
+    const units = bcBatchState.units || [];
+    if (!units.length) {
+        box.innerHTML = '<p style="color:var(--color-text-secondary);">Нет экземпляров для печати на этом складе.</p>';
+        return;
+    }
+    let lastName = null;
+    const rows = units.map((u, idx) => {
+        const printed = !!u.printed_at;
+        const rowStyle = printed ? 'background:#e8f7ec;' : '';
+        const nameCell = (u.name !== lastName)
+            ? `<td style="font-weight:600;">${escapeHtml(u.name || '—')}</td>`
+            : '<td style="color:var(--color-text-secondary);"></td>';
+        lastName = u.name;
+        const chk = printed
+            ? '<span style="color:#1e8e3e;" title="Уже в документе">✅</span>'
+            : `<input type="checkbox" class="bc-batch-chk" data-idx="${idx}" checked onchange="bcUpdateBatchCount()">`;
+        const usedBadge = printed
+            ? ' <span style="font-size:11px;color:#1e8e3e;">🖨️ в документе</span>'
+            : '';
+        return `<tr style="${rowStyle}">
+            <td style="text-align:center;width:34px;">${chk}</td>
+            ${nameCell}
+            <td>${escapeHtml(u.size_label || '—')}</td>
+            <td><code>${escapeHtml(u.unique_barcode || '')}</code>${usedBadge}</td>
+        </tr>`;
+    }).join('');
 
-        // 3) готовим этикетки (названия, размеры, цены) и рисуем
-        const units = batch.map(u => bcEnrichUnit(u));
-        await bcEnsurePricesForUnits(units);
-        renderLabels(units, w, h);
+    box.innerHTML =
+        `<div style="display:flex;align-items:center;gap:12px;margin:8px 0;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                <input type="checkbox" id="bcBatchAll" checked onchange="bcBatchToggleAll(this.checked)"> Выбрать все (непечатанные)
+            </label>
+            <span id="bcBatchSelCount" style="font-size:12px;color:var(--color-text-secondary);"></span>
+            <button class="btn btn-primary" style="margin-left:auto;" onclick="bcPrintSelectedBatch()">🖨️ Печать выбранных → PDF</button>
+        </div>
+        <div style="max-height:420px;overflow:auto;border:1px solid var(--color-border,#e0e0e0);border-radius:6px;">
+        <table class="bc-units-table" style="width:100%;">
+            <thead><tr>
+                <th style="width:34px;"></th><th>Товар</th><th>Размер</th><th>Штрихкод</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>`;
+    bcUpdateBatchCount();
+}
 
-        // 4) помечаем как напечатанные (printed_at) ДО открытия диалога печати,
-        //    чтобы при повторном нажатии пришла следующая пачка
+// Мастер-чекбокс: отметить/снять все непечатанные
+function bcBatchToggleAll(checked) {
+    document.querySelectorAll('.bc-batch-chk').forEach(c => { c.checked = checked; });
+    bcUpdateBatchCount();
+}
+// Обновить счётчик выбранных
+function bcUpdateBatchCount() {
+    const chks = document.querySelectorAll('.bc-batch-chk');
+    const sel = Array.from(chks).filter(c => c.checked).length;
+    const el = document.getElementById('bcBatchSelCount');
+    if (el) el.textContent = `Выбрано: ${sel} из ${chks.length}`;
+    const all = document.getElementById('bcBatchAll');
+    if (all) all.checked = (sel === chks.length && chks.length > 0);
+}
+
+// Шаг 2: печать только выбранных строк
+async function bcPrintSelectedBatch() {
+    const err = document.getElementById('bcPrintError');
+    const info = document.getElementById('bcBatchInfo');
+    if (err) err.style.display = 'none';
+    const { w, h } = bcGetLabelSize();
+
+    const chks = Array.from(document.querySelectorAll('.bc-batch-chk')).filter(c => c.checked);
+    if (!chks.length) { bcShowPrintError('Отметьте хотя бы одну строку для печати.'); return; }
+    const idxs = chks.map(c => parseInt(c.dataset.idx, 10));
+    const units = idxs.map(i => bcBatchState.units[i]).filter(Boolean);
+    const batchIds = units.map(u => u.id).filter(Boolean);
+
+    try {
+        // цены + рендер (уже отсортированы, т.к. берём из отсортированного bcBatchState.units)
+        const ordered = bcSortUnits(units);
+        await bcEnsurePricesForUnits(ordered);
+        renderLabels(ordered, w, h);
+
+        // помечаем как напечатанные ДО диалога печати
         const docTag = 'BATCH-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
         const nowIso = new Date().toISOString();
-        const { error: upErr } = await ortobotClient
-            .from('stock_units')
-            .update({ printed_at: nowIso, printed_doc: docTag })
-            .in('id', batchIds);
-        if (upErr) throw upErr;
-
-        // 5) сколько ещё осталось после этой пачки
-        const remaining = await bcCountUnprinted(whId);
-
-        if (info) {
-            const byChar = {};
-            units.forEach(u => { const k = u.size_label || '?'; byChar[k] = (byChar[k] || 0) + 1; });
-            const detail = Object.keys(byChar).sort((a, b) => a.localeCompare(b, 'ru'))
-                .map(k => `${escapeHtml(k)}: ${byChar[k]} шт.`).join(' | ');
-            info.innerHTML =
-                `<div>✅ Пачка по складу <b>${escapeHtml(whName)}</b>: <b>${units.length}</b> этикет(ок) — сформирован PDF (в диалоге печати выберите «Сохранить как PDF»).${genMsg}</div>` +
-                `<div style="margin-top:4px;">Осталось ненапечатанных на этом складе: <b>${remaining}</b>${remaining > 0 ? ' — нажмите кнопку ещё раз для следующей пачки.' : ' — всё напечатано. 🎉'}</div>` +
-                `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+        if (batchIds.length) {
+            const { error: upErr } = await ortobotClient
+                .from('stock_units')
+                .update({ printed_at: nowIso, printed_doc: docTag })
+                .in('id', batchIds);
+            if (upErr) throw upErr;
+            // отражаем в локальном состоянии → строки станут зелёными
+            units.forEach(u => { u.printed_at = nowIso; u.printed_doc = docTag; });
         }
 
-        // 6) открываем печать (пользователь сохраняет как PDF)
-        bcDoPrint(w, h);
+        const remaining = await bcCountUnprinted(bcBatchState.whId);
+        if (info) {
+            info.innerHTML =
+                `<div>✅ Напечатано <b>${ordered.length}</b> этикет(ок) по складу <b>${escapeHtml(bcBatchState.whName)}</b> — в диалоге выберите «Сохранить как PDF».</div>` +
+                `<div style="margin-top:4px;">Осталось ненапечатанных: <b>${remaining}</b>${remaining > 0 ? '.' : ' — всё напечатано. 🎉'}</div>`;
+        }
 
-        // 7) обновим список экземпляров, если вкладка «Экземпляры» открыта (зелёная подсветка)
+        bcDoPrint(w, h);
+        bcRenderBatchPreview(); // перерисуем — напечатанные строки станут зелёными и без чекбокса
+
+        // если открыта вкладка «Экземпляры» — обновим и её
         try {
             const unitsTab = document.getElementById('bcUnitsTab');
             if (unitsTab && unitsTab.classList.contains('active') && typeof loadUnitsTable === 'function') {
@@ -7436,12 +7562,12 @@ async function bcFormBatchByWarehouse() {
             }
         } catch (_) {}
     } catch (e) {
-        console.error('bcFormBatchByWarehouse:', e);
+        console.error('bcPrintSelectedBatch:', e);
         bcShowPrintError(bcMissingTableMsg(e));
     }
 }
 
-// Следующая пачка ненапечатанных in_stock экземпляров склада (по seq/created_at)
+// Следующая пачка ненапечатанных in_stock экземпляров склада (без «Диагностика стоп»)
 async function bcFetchUnprintedUnits(whId, limit) {
     const { data, error } = await ortobotClient
         .from('stock_units')
@@ -7449,6 +7575,7 @@ async function bcFetchUnprintedUnits(whId, limit) {
         .eq('warehouse_id', whId)
         .eq('status', 'in_stock')
         .is('printed_at', null)
+        .neq('c1_prod_ref', BC_DIAGNOSTIC_C1_REF)
         .order('created_at', { ascending: true })
         .order('seq', { ascending: true })
         .limit(limit);
@@ -7456,31 +7583,30 @@ async function bcFetchUnprintedUnits(whId, limit) {
     return data || [];
 }
 
-// Сколько всего ненапечатанных in_stock на складе
+// Сколько всего ненапечатанных in_stock на складе (без диагностики)
 async function bcCountUnprinted(whId) {
     const { count, error } = await ortobotClient
         .from('stock_units')
         .select('id', { count: 'exact', head: true })
         .eq('warehouse_id', whId)
         .eq('status', 'in_stock')
-        .is('printed_at', null);
+        .is('printed_at', null)
+        .neq('c1_prod_ref', BC_DIAGNOSTIC_C1_REF);
     if (error) throw error;
     return count || 0;
 }
 
-// Догенерация кодов до остатка 1С для ВСЕХ товаров, у которых на этом складе
-// экземпляров меньше, чем остаток. Использует smart-plan (режим по складу).
+// Догенерация кодов до остатка 1С для всех товаров склада (кроме «Диагностика стоп»).
 async function bcTopUpWarehouseCodes(whId) {
     let generated = 0; const errors = [];
-    // товары, у которых на складе есть вариант с остатком > 0
     const variantsOnWh = (barcodesState.variants || []).filter(v => String(v.warehouse_id || '') === String(whId) && (v.stock || 0) > 0);
-    // группируем по номенклатуре (productC1Ref), чтобы вызвать smart-plan один раз на товар
     const nomByProduct = {}; // productId -> c1_ref
     for (const v of variantsOnWh) {
         const c1 = barcodesState.prodC1ById ? barcodesState.prodC1ById[v.product_id] : null;
         if (c1) nomByProduct[v.product_id] = c1;
     }
-    const noms = [...new Set(Object.values(nomByProduct))];
+    // исключаем услугу «Диагностика стоп» из догенерации
+    const noms = [...new Set(Object.values(nomByProduct))].filter(ref => ref !== BC_DIAGNOSTIC_C1_REF);
     for (const nom of noms) {
         try {
             const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
@@ -7505,8 +7631,8 @@ async function bcRefreshBatchCounter() {
     const err = document.getElementById('bcPrintError');
     const info = document.getElementById('bcBatchInfo');
     if (err) err.style.display = 'none';
-    const whId = document.getElementById('bcWarehouse')?.value || '';
-    if (!whId) { bcShowPrintError('Сначала выберите склад / магазин вверху.'); return; }
+    const whId = document.getElementById('bcBatchWarehouse')?.value || '';
+    if (!whId) { bcShowPrintError('Выберите склад в карточке массовой печати.'); return; }
     const whName = (barcodesState.whById[whId] || {}).name || 'склад';
     try {
         if (info) info.innerHTML = '⏳ Считаю…';
@@ -7516,10 +7642,11 @@ async function bcRefreshBatchCounter() {
             .select('id', { count: 'exact', head: true })
             .eq('warehouse_id', whId)
             .eq('status', 'in_stock')
+            .neq('c1_prod_ref', BC_DIAGNOSTIC_C1_REF)
             .not('printed_at', 'is', null);
         if (info) info.innerHTML =
-            `Склад <b>${escapeHtml(whName)}</b>: ненапечатанных экземпляров — <b>${remaining}</b>, уже напечатано — <b>${printedCount || 0}</b>.` +
-            (remaining > 0 ? ' Нажмите «Сформировать пачку → PDF».' : ' Всё напечатано. 🎉');
+            `Склад <b>${escapeHtml(whName)}</b>: ненапечатанных — <b>${remaining}</b>, уже напечатано — <b>${printedCount || 0}</b>.` +
+            (remaining > 0 ? ' Нажмите «Загрузить пачку».' : ' Всё напечатано. 🎉');
     } catch (e) {
         console.error('bcRefreshBatchCounter:', e);
         bcShowPrintError(bcMissingTableMsg(e));

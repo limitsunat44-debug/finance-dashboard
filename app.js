@@ -6519,7 +6519,7 @@ async function refreshStockFrom1C() {
         }
         // Обновляем stock в локальном состоянии из Supabase и перерисовываем размеры.
         try {
-            const fresh = await fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock');
+            const fresh = await fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock,c1_char_ref');
             if (fresh && fresh.length) {
                 barcodesState.variants = fresh.map(v => ({ ...v, stock: Number(v.stock) || 0 }));
             }
@@ -7826,7 +7826,9 @@ function csResetBarcodesBox() {
     if (info) info.textContent = '';
 }
 
-// ── Выбор размера → тянем существующие штрихкоды из 1С ────────────
+// ── Выбор размера → тянем штрихкоды ИЗ SUPABASE с фильтром ПО СКЛАДУ ──────
+// Печатаем только те коды, что реально числятся на выбранном складе (stock_units).
+// Кол-во этикеток = число кодов именно этого склада, не больше остатка.
 async function csSelectSize(charRef, sizeLabel) {
     csClearError();
     cashierState.selectedCharRef = charRef || null;
@@ -7837,24 +7839,34 @@ async function csSelectSize(charRef, sizeLabel) {
     const box = document.getElementById('csBarcodes');
     if (box) box.innerHTML = '<div class="bc-variants-empty">⏳ Загружаю штрихкоды…</div>';
 
-    const nom = cashierState.selectedProductC1Ref;
-    if (!nom) { csShowError('У товара нет ссылки 1С — обратитесь к администратору.'); if (box) box.innerHTML = ''; return; }
+    const pid = cashierState.selectedProductId;
+    if (!pid) { csShowError('Сначала выберите товар.'); if (box) box.innerHTML = ''; return; }
 
     try {
-        // Тянем ВСЕ коды номенклатуры из 1С и фильтруем по характеристике
-        let items = await csFetchCodes(nom);
-        // Фильтр по характеристике (charRef), если он есть; иначе по имени размера
-        let codes = items.filter(it => {
-            if (cashierState.selectedCharRef) return String(it.characteristic_ref || '') === String(cashierState.selectedCharRef);
-            return String(it.characteristic_name || '') === String(sizeLabel);
-        });
+        // Варианты этого товара нужного размера, с учётом выбранного склада
+        const whId = document.getElementById('csWarehouse')?.value || '';
+        let vs = (barcodesState.variants || []).filter(v => String(v.product_id) === String(pid));
+        if (cashierState.selectedCharRef) {
+            vs = vs.filter(v => String(v.c1_char_ref || '') === String(cashierState.selectedCharRef));
+        } else {
+            vs = vs.filter(v => String(v.size_label || '') === String(sizeLabel));
+        }
+        if (whId) vs = vs.filter(v => String(v.warehouse_id) === String(whId));
+        const variantIds = vs.map(v => v.id).filter(Boolean);
+        if (!variantIds.length) {
+            cashierState.codes = [];
+            csRenderBarcodes([]);
+            return;
+        }
+        // Коды из stock_units только этих вариантов (= выбранный склад), только в наличии
+        let codes = await csFetchCodes(variantIds);
         // Порядок: родной (2200000) сверху, затем наши (2000000), затем прочие
         codes.sort((a, b) => csCodeRank(a.barcode) - csCodeRank(b.barcode) || String(a.barcode).localeCompare(String(b.barcode)));
         cashierState.codes = codes;
         csRenderBarcodes(codes);
     } catch (e) {
         console.error('csSelectSize:', e);
-        csShowError('Не удалось загрузить штрихкоды из 1С: ' + (e && e.message ? e.message : ''));
+        csShowError('Не удалось загрузить штрихкоды: ' + (e && e.message ? e.message : ''));
         if (box) box.innerHTML = '';
     }
 }
@@ -7873,24 +7885,29 @@ function csCodeType(code) {
     return { label: 'заводской', color: '#555' };
 }
 
-// Получить список кодов номенклатуры из 1С через сервис (метод barcodes-list)
-async function csFetchCodes(nom) {
-    const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=barcodes-list`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
-        body: JSON.stringify({ nomenclature: nom, limit: 5000 }),
-        cache: 'no-store'
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-    return data.items || [];
+// Получить коды ИЗ SUPABASE (stock_units) по списку вариантов выбранного склада.
+// Возвращает [{barcode, type, characteristic_ref}] — только status='in_stock'.
+async function csFetchCodes(variantIds) {
+    if (!variantIds || !variantIds.length) return [];
+    const { data, error } = await ortobotClient
+        .from('stock_units')
+        .select('unique_barcode, c1_char_ref, status, variant_id')
+        .in('variant_id', variantIds)
+        .eq('status', 'in_stock')
+        .limit(5000);
+    if (error) throw new Error(error.message || 'ошибка чтения stock_units');
+    return (data || []).map(r => ({
+        barcode: r.unique_barcode,
+        characteristic_ref: r.c1_char_ref,
+        type: csCodeType(r.unique_barcode).label
+    }));
 }
 
 function csRenderBarcodes(codes) {
     const box = document.getElementById('csBarcodes');
     if (!box) return;
     if (!codes.length) {
-        box.innerHTML = '<div class="bc-variants-empty">Для этого размера в 1С нет штрихкодов.</div>';
+        box.innerHTML = '<div class="bc-variants-empty">На этом складе нет штрихкодов для этого размера (кодов меньше остатка — догенерируйте).</div>';
         return;
     }
     // Поле поиска (по последним 4 цифрам или любой части кода) показываем, когда кодов много

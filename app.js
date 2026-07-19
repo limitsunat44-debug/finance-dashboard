@@ -7878,25 +7878,30 @@ async function bcLoadUnitHistory(barcode, bodyEl) {
     bodyEl.dataset.loaded = '1';
     bodyEl.innerHTML = '<span style="color:var(--color-text-secondary);">Загрузка истории…</span>';
 
-    let movements, sales;
+    let movements, sales, returns;
     const cached = barcodesState.unitHistoryCache[barcode];
     if (cached) {
         movements = cached.movements;
         sales = cached.sales;
+        returns = cached.returns || [];
     } else {
         try {
-            const [mvRes, saleRes] = await Promise.all([
+            const [mvRes, saleRes, retRes] = await Promise.all([
                 // ВАЖНО: в stock_unit_movements нет created_at — сортируем по moved_at
                 ortobotClient.from('stock_unit_movements').select('*')
                     .eq('unique_barcode', barcode).order('moved_at', { ascending: true }),
                 ortobotClient.from('stock_unit_sales').select('*')
-                    .eq('unique_barcode', barcode).order('sold_at', { ascending: true })
+                    .eq('unique_barcode', barcode).order('sold_at', { ascending: true }),
+                ortobotClient.from('stock_unit_returns').select('*')
+                    .eq('unique_barcode', barcode).order('returned_at', { ascending: true })
             ]);
             if (mvRes.error) throw mvRes.error;
             if (saleRes.error) throw saleRes.error;
+            // таблицы возвратов может не быть на старых базах — не роняем
             movements = mvRes.data || [];
             sales = saleRes.data || [];
-            barcodesState.unitHistoryCache[barcode] = { movements, sales };
+            returns = (retRes && !retRes.error && retRes.data) ? retRes.data : [];
+            barcodesState.unitHistoryCache[barcode] = { movements, sales, returns };
         } catch (e) {
             console.error('bcLoadUnitHistory:', e);
             bodyEl.dataset.loaded = ''; // разрешаем повторную попытку
@@ -7906,16 +7911,16 @@ async function bcLoadUnitHistory(barcode, bodyEl) {
         }
     }
 
-    bodyEl.innerHTML = bcRenderUnitHistory(barcode, movements, sales);
+    bodyEl.innerHTML = bcRenderUnitHistory(barcode, movements, sales, returns);
 }
 
 // Сборка хронологической ленты жизни экземпляра
-function bcRenderUnitHistory(barcode, movements, sales) {
+function bcRenderUnitHistory(barcode, movements, sales, returns) {
     const rd = barcodesState.unitRowData[barcode] || {};
     const items = [];
 
-    // 📦 Приход: дата, склад прихода (from первого перемещения, иначе текущий), документ
-    const arrivalDate = bcFmtHistDate(rd.received_at || rd.created_at);
+    // 📦 Приход (всегда первым): дата, склад прихода, документ
+    const arrivalRaw = rd.received_at || rd.created_at || null;
     const arrivalWhId = (movements && movements.length) ? movements[0].from_warehouse_id : rd.warehouse_id;
     const arrivalWh = arrivalWhId != null ? bcWhName(arrivalWhId) : '';
     let arrivalText = 'приход';
@@ -7923,11 +7928,7 @@ function bcRenderUnitHistory(barcode, movements, sales) {
     if (arrivalWh) parts.push('склад ' + escapeHtml(arrivalWh));
     if (rd.source_doc_1c) parts.push('док ' + escapeHtml(rd.source_doc_1c));
     if (parts.length) arrivalText = parts.join(', ');
-    items.push({
-        icon: '📦', color: '#7f8c8d',
-        date: arrivalDate,
-        text: arrivalText
-    });
+    items.push({ icon: '📦', color: '#7f8c8d', sort: arrivalRaw ? new Date(arrivalRaw).getTime() : 0, first: true, date: bcFmtHistDate(arrivalRaw), text: arrivalText });
 
     // 🔄 Перемещения
     (movements || []).forEach(m => {
@@ -7935,22 +7936,37 @@ function bcRenderUnitHistory(barcode, movements, sales) {
         const toWh = m.to_warehouse_id != null ? bcWhName(m.to_warehouse_id) : '—';
         let t = escapeHtml(fromWh) + ' → ' + escapeHtml(toWh);
         if (m.doc_number) t += ', док №' + escapeHtml(m.doc_number);
-        items.push({ icon: '🔄', color: '#2980b9', date: bcFmtHistDate(m.moved_at), text: t });
+        items.push({ icon: '🔄', color: '#2980b9', sort: m.moved_at ? new Date(m.moved_at).getTime() : 0, date: bcFmtHistDate(m.moved_at), text: t });
     });
 
-    // 💰 Продажа — только для проданных экземпляров
-    if (rd.status === 'sold') {
-        const sale = (sales && sales.length) ? sales[0] : {};
-        const soldDate = bcFmtHistDate(sale.sold_at || rd.sold_at);
-        const seller = sale.seller_name || rd.sold_seller || '';
-        const shop = sale.shop_name || rd.sold_shop || '';
-        const receipt = sale.receipt_number || rd.sold_receipt_1c || '';
+    // 💰 Продажи (все из истории)
+    (sales || []).forEach(sale => {
         const p = [];
-        if (seller) p.push('продал ' + escapeHtml(seller));
-        if (shop) p.push('магазин ' + escapeHtml(shop));
-        if (receipt) p.push('чек №' + escapeHtml(receipt));
-        items.push({ icon: '💰', color: '#27ae60', date: soldDate, text: p.length ? p.join(', ') : 'продан' });
+        if (sale.seller_name) p.push('продал ' + escapeHtml(sale.seller_name));
+        if (sale.shop_name) p.push('магазин ' + escapeHtml(sale.shop_name));
+        if (sale.receipt_number) p.push('чек №' + escapeHtml(sale.receipt_number));
+        items.push({ icon: '💰', color: '#27ae60', sort: sale.sold_at ? new Date(sale.sold_at).getTime() : 0, date: bcFmtHistDate(sale.sold_at), text: p.length ? p.join(', ') : 'продан' });
+    });
+    // Фоллбэк: продан, но записи продажи нет (старые данные)
+    if (rd.status === 'sold' && (!sales || !sales.length)) {
+        const p = [];
+        if (rd.sold_seller) p.push('продал ' + escapeHtml(rd.sold_seller));
+        if (rd.sold_shop) p.push('магазин ' + escapeHtml(rd.sold_shop));
+        if (rd.sold_receipt_1c) p.push('чек №' + escapeHtml(rd.sold_receipt_1c));
+        items.push({ icon: '💰', color: '#27ae60', sort: rd.sold_at ? new Date(rd.sold_at).getTime() : 0, date: bcFmtHistDate(rd.sold_at), text: p.length ? p.join(', ') : 'продан' });
     }
+
+    // ↩️ Возвраты (все из истории)
+    (returns || []).forEach(r => {
+        const p = [];
+        if (r.shop_name) p.push('магазин ' + escapeHtml(r.shop_name));
+        if (r.receipt_number) p.push('чек №' + escapeHtml(r.receipt_number));
+        const txt = 'возврат' + (p.length ? ' (' + p.join(', ') + ')' : '') + ' — возвращён на склад';
+        items.push({ icon: '↩️', color: '#e67e22', sort: r.returned_at ? new Date(r.returned_at).getTime() : 0, date: bcFmtHistDate(r.returned_at), text: txt });
+    });
+
+    // сортировка: приход всегда первый, остальное по дате
+    items.sort((a, b) => (a.first ? -1 : b.first ? 1 : (a.sort || 0) - (b.sort || 0)));
 
     return items.map(it =>
         `<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;line-height:1.4;">

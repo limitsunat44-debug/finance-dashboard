@@ -6336,7 +6336,10 @@ const barcodesState = {
     variantInfo: {},         // variant_id -> { name, size }
     selectedProductId: null, // выбранный товар в поиске
     printCart: [],           // список номенклатур к печати: [{productId,name,c1Ref,variants:[{variantId,charRef,size,stock}]}]
-    scanned: new Set()       // отсканированные коды (ревизия)
+    scanned: new Set(),      // отсканированные коды (ревизия)
+    prodCategoryByC1Ref: {}, // c1_ref товара -> категория
+    unitHistoryCache: {},    // unique_barcode -> { movements:[], sales:[] } (ленивая история)
+    unitRowData: {}          // unique_barcode -> поля stock_units для истории (приход/продажа)
 };
 
 // Понятное имя склада по id
@@ -6433,6 +6436,11 @@ async function loadBarcodes() {
         const prodC1 = {};
         barcodesState.products.forEach(p => { prodName[p.id] = p.name_ru || ''; prodC1[p.id] = p.c1_ref || null; });
         barcodesState.prodC1ById = prodC1;
+        // Карта c1_ref товара -> категория (для фильтра экземпляров по категории)
+        barcodesState.prodCategoryByC1Ref = {};
+        barcodesState.products.forEach(p => {
+            if (p.c1_ref) barcodesState.prodCategoryByC1Ref[p.c1_ref] = (p.category || '').trim();
+        });
         barcodesState.variantInfo = {};
         barcodesState.variants.forEach(v => {
             barcodesState.variantInfo[v.id] = {
@@ -7659,6 +7667,8 @@ function bcDoPrint(w, h) {
 // ── Таблица экземпляров (с пагинацией и фильтром по дате) ────────
 const BC_UNITS_PAGE_SIZE = 100;
 let bcUnitsPage = 0; // 0-based
+// Услуга «Диагностика стоп» — не физический товар, скрываем из списка экземпляров
+const BC_DIAGNOSTIC_C1_REF = '7aca2288-3ade-11f0-8313-c018500f4abe';
 
 // Применить фильтры — сбрасывает на первую страницу
 function bcUnitsApplyFilters() {
@@ -7687,14 +7697,28 @@ async function loadUnitsTable() {
     const dateTo = document.getElementById('bcUnitsDateTo')?.value || '';
     const sort = document.getElementById('bcUnitsSort')?.value || 'date_asc';
     const search = (document.getElementById('bcUnitsSearch')?.value || '').trim().toLowerCase();
+    const category = document.getElementById('bcUnitsCategory')?.value || '';
+    const sizeSearch = (document.getElementById('bcUnitsSizeSearch')?.value || '').trim();
 
-    // Привязка Enter в поле поиска (однократно)
+    // Привязка Enter в полях поиска (однократно)
     const searchEl = document.getElementById('bcUnitsSearch');
     if (searchEl && !searchEl.dataset.bcBound) {
         searchEl.addEventListener('keydown', function (e) {
             if (e.key === 'Enter') { e.preventDefault(); bcUnitsApplyFilters(); }
         });
         searchEl.dataset.bcBound = '1';
+    }
+    const sizeEl = document.getElementById('bcUnitsSizeSearch');
+    if (sizeEl && !sizeEl.dataset.bcBound) {
+        sizeEl.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); bcUnitsApplyFilters(); }
+        });
+        sizeEl.dataset.bcBound = '1';
+    }
+    const catEl = document.getElementById('bcUnitsCategory');
+    if (catEl && !catEl.dataset.bcBound) {
+        catEl.addEventListener('change', function () { bcUnitsApplyFilters(); });
+        catEl.dataset.bcBound = '1';
     }
 
     const from = bcUnitsPage * BC_UNITS_PAGE_SIZE;
@@ -7712,8 +7736,23 @@ async function loadUnitsTable() {
             }
         }
 
+        // Фильтр по категории: список c1_ref товаров выбранной категории
+        if (category) {
+            const catMap = barcodesState.prodCategoryByC1Ref || {};
+            const catRefs = Object.keys(catMap).filter(ref => catMap[ref] === category);
+            if (catRefs.length === 0) {
+                listEl.innerHTML = '<p style="color:var(--color-text-secondary);">В категории «' + escapeHtml(category) + '» товаров не найдено.</p>';
+                return;
+            }
+            var categoryRefs = catRefs;
+        }
+
         let q = ortobotClient.from('stock_units').select('*', { count: 'exact' });
+        // Скрываем услугу «Диагностика стоп» (не физический товар)
+        q = q.neq('c1_prod_ref', BC_DIAGNOSTIC_C1_REF);
         if (searchVariantIds) q = q.in('variant_id', searchVariantIds);
+        if (typeof categoryRefs !== 'undefined') q = q.in('c1_prod_ref', categoryRefs);
+        if (sizeSearch) q = q.ilike('size_label', '%' + sizeSearch + '%');
         if (whId) q = q.eq('warehouse_id', whId);
         if (status) q = q.eq('status', status);
         if (dateFrom) q = q.gte('created_at', dateFrom + 'T00:00:00');
@@ -7740,7 +7779,20 @@ async function loadUnitsTable() {
         const today = new Date();
         const body = rows.map(r => {
             const u = bcEnrichUnit(r);
+            const bc = u.unique_barcode || '';
             const date = u.created_at ? String(u.created_at).slice(0, 10) : '—';
+            // Сохраняем поля прихода/продажи для ленивого рендера истории
+            barcodesState.unitRowData[bc] = {
+                received_at: r.received_at || null,
+                created_at: r.created_at || null,
+                source_doc_1c: r.source_doc_1c || null,
+                warehouse_id: r.warehouse_id,
+                status: r.status || null,
+                sold_at: r.sold_at || null,
+                sold_seller: r.sold_seller || null,
+                sold_shop: r.sold_shop || null,
+                sold_receipt_1c: r.sold_receipt_1c || null
+            };
             // сколько дней лежит
             let ageBadge = '';
             if (u.created_at) {
@@ -7748,20 +7800,26 @@ async function loadUnitsTable() {
                 const color = days >= 90 ? '#c0392b' : (days >= 30 ? '#e67e22' : 'var(--color-text-secondary)');
                 ageBadge = ` <span style="font-size:11px;color:${color};">(${days} дн.)</span>`;
             }
-            return `<tr>
-                <td><code>${escapeHtml(u.unique_barcode)}</code></td>
+            return `<tr class="unit-row" data-barcode="${escapeHtml(bc)}" onclick="bcToggleHistory(this)" style="cursor:pointer;">
+                <td class="unit-toggle" style="width:24px;text-align:center;color:var(--color-text-secondary);">▸</td>
+                <td><code>${escapeHtml(bc)}</code></td>
                 <td>${escapeHtml(u.size_label)}</td>
                 <td>${escapeHtml(u.name)}</td>
                 <td>${escapeHtml(bcWhName(u.warehouse_id))}</td>
                 <td>${escapeHtml(statusLabel[u.status] || u.status || '—')}</td>
                 <td>${escapeHtml(date)}${ageBadge}</td>
+            </tr>
+            <tr class="unit-history-row" style="display:none;">
+                <td colspan="7" style="background:var(--color-bg-1,#f7f7f7);padding:10px 16px;">
+                    <div class="unit-history-body"></div>
+                </td>
             </tr>`;
         }).join('');
 
         listEl.innerHTML =
             `<table class="bc-units-table">
                 <thead><tr>
-                    <th>Штрихкод</th><th>Размер</th><th>Товар</th>
+                    <th></th><th>Штрихкод</th><th>Размер</th><th>Товар</th>
                     <th>Склад</th><th>Статус</th><th>Дата прихода</th>
                 </tr></thead>
                 <tbody>${body}</tbody>
@@ -7786,6 +7844,121 @@ async function loadUnitsTable() {
         listEl.innerHTML = '';
         if (errEl) { errEl.textContent = bcMissingTableMsg(e); errEl.style.display = 'block'; }
     }
+}
+
+// ── История экземпляра (раскрываемый дропдаун) ──────────────────
+// Формат даты для ленты истории: yyyy-mm-dd или «—»
+function bcFmtHistDate(d) {
+    return d ? String(d).slice(0, 10) : '—';
+}
+
+// Клик по строке экземпляра — раскрыть/свернуть ленту истории.
+// Историю грузим лениво при первом раскрытии и кешируем.
+function bcToggleHistory(rowEl) {
+    const histRow = rowEl.nextElementSibling;
+    if (!histRow || !histRow.classList.contains('unit-history-row')) return;
+    const toggle = rowEl.querySelector('.unit-toggle');
+    const hidden = histRow.style.display === 'none' || !histRow.style.display;
+    if (hidden) {
+        histRow.style.display = '';
+        if (toggle) toggle.textContent = '▾';
+        const bodyEl = histRow.querySelector('.unit-history-body');
+        if (bodyEl && !bodyEl.dataset.loaded) {
+            bcLoadUnitHistory(rowEl.dataset.barcode || '', bodyEl);
+        }
+    } else {
+        histRow.style.display = 'none';
+        if (toggle) toggle.textContent = '▸';
+    }
+}
+
+// Ленивая загрузка истории по штрихкоду: перемещения + продажи.
+async function bcLoadUnitHistory(barcode, bodyEl) {
+    if (!barcode) { bodyEl.innerHTML = '<span style="color:var(--color-text-secondary);">Нет штрихкода.</span>'; return; }
+    bodyEl.dataset.loaded = '1';
+    bodyEl.innerHTML = '<span style="color:var(--color-text-secondary);">Загрузка истории…</span>';
+
+    let movements, sales;
+    const cached = barcodesState.unitHistoryCache[barcode];
+    if (cached) {
+        movements = cached.movements;
+        sales = cached.sales;
+    } else {
+        try {
+            const [mvRes, saleRes] = await Promise.all([
+                // ВАЖНО: в stock_unit_movements нет created_at — сортируем по moved_at
+                ortobotClient.from('stock_unit_movements').select('*')
+                    .eq('unique_barcode', barcode).order('moved_at', { ascending: true }),
+                ortobotClient.from('stock_unit_sales').select('*')
+                    .eq('unique_barcode', barcode).order('sold_at', { ascending: true })
+            ]);
+            if (mvRes.error) throw mvRes.error;
+            if (saleRes.error) throw saleRes.error;
+            movements = mvRes.data || [];
+            sales = saleRes.data || [];
+            barcodesState.unitHistoryCache[barcode] = { movements, sales };
+        } catch (e) {
+            console.error('bcLoadUnitHistory:', e);
+            bodyEl.dataset.loaded = ''; // разрешаем повторную попытку
+            bodyEl.innerHTML = '<span style="color:#c0392b;">Не удалось загрузить историю: ' +
+                escapeHtml(e && e.message ? e.message : '') + '</span>';
+            return;
+        }
+    }
+
+    bodyEl.innerHTML = bcRenderUnitHistory(barcode, movements, sales);
+}
+
+// Сборка хронологической ленты жизни экземпляра
+function bcRenderUnitHistory(barcode, movements, sales) {
+    const rd = barcodesState.unitRowData[barcode] || {};
+    const items = [];
+
+    // 📦 Приход: дата, склад прихода (from первого перемещения, иначе текущий), документ
+    const arrivalDate = bcFmtHistDate(rd.received_at || rd.created_at);
+    const arrivalWhId = (movements && movements.length) ? movements[0].from_warehouse_id : rd.warehouse_id;
+    const arrivalWh = arrivalWhId != null ? bcWhName(arrivalWhId) : '';
+    let arrivalText = 'приход';
+    const parts = [];
+    if (arrivalWh) parts.push('склад ' + escapeHtml(arrivalWh));
+    if (rd.source_doc_1c) parts.push('док ' + escapeHtml(rd.source_doc_1c));
+    if (parts.length) arrivalText = parts.join(', ');
+    items.push({
+        icon: '📦', color: '#7f8c8d',
+        date: arrivalDate,
+        text: arrivalText
+    });
+
+    // 🔄 Перемещения
+    (movements || []).forEach(m => {
+        const fromWh = m.from_warehouse_id != null ? bcWhName(m.from_warehouse_id) : '—';
+        const toWh = m.to_warehouse_id != null ? bcWhName(m.to_warehouse_id) : '—';
+        let t = escapeHtml(fromWh) + ' → ' + escapeHtml(toWh);
+        if (m.doc_number) t += ', док №' + escapeHtml(m.doc_number);
+        items.push({ icon: '🔄', color: '#2980b9', date: bcFmtHistDate(m.moved_at), text: t });
+    });
+
+    // 💰 Продажа — только для проданных экземпляров
+    if (rd.status === 'sold') {
+        const sale = (sales && sales.length) ? sales[0] : {};
+        const soldDate = bcFmtHistDate(sale.sold_at || rd.sold_at);
+        const seller = sale.seller_name || rd.sold_seller || '';
+        const shop = sale.shop_name || rd.sold_shop || '';
+        const receipt = sale.receipt_number || rd.sold_receipt_1c || '';
+        const p = [];
+        if (seller) p.push('продал ' + escapeHtml(seller));
+        if (shop) p.push('магазин ' + escapeHtml(shop));
+        if (receipt) p.push('чек №' + escapeHtml(receipt));
+        items.push({ icon: '💰', color: '#27ae60', date: soldDate, text: p.length ? p.join(', ') : 'продан' });
+    }
+
+    return items.map(it =>
+        `<div style="display:flex;align-items:flex-start;gap:8px;padding:3px 0;font-size:13px;line-height:1.4;">
+            <span style="flex:0 0 auto;">${it.icon}</span>
+            <span style="flex:0 0 auto;color:var(--color-text-secondary);min-width:90px;">${escapeHtml(it.date)}</span>
+            <span style="color:${it.color};">${it.text}</span>
+        </div>`
+    ).join('');
 }
 
 // ── Ревизия (сканирование и сверка) ─────────────────────────────

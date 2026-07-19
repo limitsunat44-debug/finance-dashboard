@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260719q-series">
+    <link rel="stylesheet" href="style.css?v=20260719r-history">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1483,6 +1483,21 @@
                             <input type="text" id="bcUnitsSearch" class="form-control" placeholder="название товара…" style="min-width:220px;">
                         </div>
                         <div class="prod-filter-group">
+                            <label for="bcUnitsSizeSearch">Поиск по размеру</label>
+                            <input type="text" id="bcUnitsSizeSearch" class="form-control" placeholder="размер, напр. 42" style="min-width:150px;">
+                        </div>
+                        <div class="prod-filter-group">
+                            <label for="bcUnitsCategory">Категория</label>
+                            <select id="bcUnitsCategory" class="form-control" style="min-width:180px;">
+                                <option value="">Все категории</option>
+                                <option value="Мужская обувь">Мужская обувь</option>
+                                <option value="Женская обувь">Женская обувь</option>
+                                <option value="Обувь для мальчиков">Обувь для мальчиков</option>
+                                <option value="Обувь для девочек">Обувь для девочек</option>
+                                <option value="Товар">Товар</option>
+                            </select>
+                        </div>
+                        <div class="prod-filter-group">
                             <label for="bcUnitsWarehouse">Склад</label>
                             <select id="bcUnitsWarehouse" class="form-control" style="min-width:200px;"></select>
                         </div>
@@ -1791,7 +1806,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260719q-series"></script>
+    <script src="app.js?v=20260719r-history"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

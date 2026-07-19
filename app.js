@@ -7218,20 +7218,21 @@ async function generateAndPrint() {
         const prods = Object.keys(groups);
         if (!prods.length) { bcShowPrintError('Не удалось определить номенклатуру/характеристику выбранных размеров. Обновите остатки из 1С.'); return; }
 
-        // 2) генерация новых кодов (smart-plan) — ТОЛЬКО если СКЛАД НЕ ВЫБРАН.
-        //    При выбранном складе печатаем только СУЩЕСТВУЮЩИЕ коды этого склада,
-        //    ничего не генерируем (чтобы не плодить коды после наклейки).
+        // 2) генерация новых кодов (smart-plan) — ДЛЯ ВСЕХ КАТЕГОРИЙ.
+        //    Если склад ВЫБРАН — передаём warehouseId: цель = остаток этого склада,
+        //    коды генерируются на вариант именно этого склада (и не превышают остаток).
+        //    Если склад НЕ выбран — прежнее поведение (по всем складам).
         const bcWhIdEarly = document.getElementById('bcWarehouse')?.value || '';
         let totGen = 0, totReg = 0, totSkip = 0, totBalance = 0, totExisting = 0;
         const planRows = [];
         const c1errAll = [];
-        if (!bcWhIdEarly) {
+        {
             for (const prod of prods) {
                 const charRefs = Array.from(groups[prod]);
                 const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
-                    body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: false })
+                    body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: false, warehouseId: bcWhIdEarly || null })
                 });
                 const text = await r.text();
                 let jr; try { jr = JSON.parse(text); } catch { jr = { ok: false, error: text.slice(0, 200) }; }

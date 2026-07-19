@@ -6678,15 +6678,17 @@ function renderTransfers(transfers) {
                     + `title="Указан в документе 1С">${escapeHtml(b)}</span>`
                 ).join('');
             } else {
-                codesHtml = '<span style="color:var(--color-text-secondary);font-size:12px;">— коды не привязаны (перемещено по размеру/количеству)</span>';
+                codesHtml = '<span style="color:var(--color-text-secondary);font-size:12px;">— коды не указаны (перемещено по размеру/количеству)</span>';
             }
             // статус соответствия количества
             const cnt = moved.length || docBc.length;
             let badge;
             if (moved.length && moved.length >= (l.qty || 0)) {
-                badge = '<span style="color:#1e8449;">✓ привязано</span>';
+                badge = '<span style="color:#1e8449;">✓ перемещён</span>';
+            } else if (moved.length) {
+                badge = '<span style="color:#1e8449;">✓ перемещён частично</span>';
             } else if (docBc.length) {
-                badge = '<span style="color:#1c5fbf;">○ в док. 1С</span>';
+                badge = '<span style="color:#1c5fbf;" title="Коды указаны в 1С, автосинхронизация переместит их при следующем запуске">⏳ ожидает обработки</span>';
             } else {
                 badge = '<span style="color:#b8860b;">— без кода</span>';
             }
@@ -6699,9 +6701,13 @@ function renderTransfers(transfers) {
                 + `<td style="padding:8px 10px;text-align:center;vertical-align:top;white-space:nowrap;">${badge}</td>`
                 + `</tr>`;
         }
+        // есть ли в документе указанные коды (серии/штрихкод), которые ещё не переехали
+        const hasDocCodes = (t.lines || []).some(l => Array.isArray(l.docBarcodes) && l.docBarcodes.length);
         const movedBadge = t.hasMovements
             ? `<span style="background:#eafaf1;color:#1e8449;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">✓ кодов переехало: ${t.movedTotal}</span>`
-            : `<span style="background:#fef7e6;color:#b8860b;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">коды ещё не привязаны</span>`;
+            : (hasDocCodes
+                ? `<span style="background:#eef4fd;color:#1c5fbf;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;" title="Коды указаны в 1С, автосинхронизация переместит их при следующем запуске">⏳ коды указаны, ожидают перемещения</span>`
+                : `<span style="background:#fef7e6;color:#b8860b;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">коды не указаны</span>`);
         html += `<div class="card" style="margin-bottom:14px;">`
             + `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">`
             + `<div><b>№ ${escapeHtml(t.number || '')}</b> · <span style="color:var(--color-text-secondary);">${dt}</span>`

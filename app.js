@@ -7041,12 +7041,15 @@ async function generateAndPrint() {
                 .map(s => s.variantId);
         }
         if (!variantIdsForPrint.length) { bcShowPrintError('На выбранном складе нет вариантов для этих размеров.'); return; }
-        const { data: units, error: uErr } = await ortobotClient
+        let unitsQuery = ortobotClient
             .from('stock_units')
             .select('*')
             .in('variant_id', variantIdsForPrint)
             .eq('status', 'in_stock')
             .order('seq', { ascending: true });
+        // двойная подстраховка: если выбран склад — фильтр по warehouse_id самих кодов
+        if (bcWhId) unitsQuery = unitsQuery.eq('warehouse_id', bcWhId);
+        const { data: units, error: uErr } = await unitsQuery;
         if (uErr) throw uErr;
 
         // срез по остатку на каждый размер (charRef): печатаем не больше balance
@@ -7195,7 +7198,9 @@ async function reprintExisting() {
     const { w, h } = bcGetLabelSize();
 
     try {
-        // расширяем до всех вариантов, делящих выбранные характеристики (код мог лечь на соседний вариант)
+        // расширяем до всех вариантов, делящих выбранные характеристики (код мог лечь на соседний вариант).
+        //    НО: если выбран склад (#bcWarehouse) — только варианты этого склада.
+        const reWhId = document.getElementById('bcWarehouse')?.value || '';
         const selCharSet = new Set();
         for (const s of selected) {
             const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
@@ -7209,11 +7214,22 @@ async function reprintExisting() {
             }
             if (extra.length) variantIds = Array.from(new Set([...variantIds, ...extra]));
         }
-        const { data, error } = await ortobotClient
+        // фильтр по складу: оставляем только варианты выбранного склада
+        if (reWhId && barcodesState.variantInfo) {
+            variantIds = variantIds.filter(vid => {
+                const vi = barcodesState.variantInfo[vid] || {};
+                return String(vi.warehouseId || '') === String(reWhId);
+            });
+        }
+        if (!variantIds.length) { bcShowPrintError('На выбранном складе нет вариантов для этих размеров.'); return; }
+        let unitQuery = ortobotClient
             .from('stock_units')
             .select('*')
             .in('variant_id', variantIds)
             .eq('status', 'in_stock');
+        // двойная подстраховка: фильтр по warehouse_id самих кодов
+        if (reWhId) unitQuery = unitQuery.eq('warehouse_id', reWhId);
+        const { data, error } = await unitQuery;
         if (error) throw error;
 
         const units = (data || []).map(u => bcEnrichUnit(u));
@@ -7224,7 +7240,10 @@ async function reprintExisting() {
 
         await bcEnsurePricesForUnits(units);
         renderLabels(units, w, h);
-        if (info) info.textContent = `Повторная печать: ${units.length} шт. (размеров: ${selected.length})`;
+        if (info) {
+            const whTxt = reWhId ? ` по складу ${escapeHtml((barcodesState.whById[reWhId] || {}).name || '')}` : '';
+            info.textContent = `Повторная печать${whTxt}: ${units.length} шт. (размеров: ${selected.length})`;
+        }
         bcDoPrint(w, h);
     } catch (e) {
         console.error('reprintExisting:', e);

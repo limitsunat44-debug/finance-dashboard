@@ -6575,13 +6575,15 @@ function renderReceipts(receipts) {
         for (const l of (r.lines || [])) {
             const need = l.needsBarcodes;
             const rowStyle = need ? 'background:#fdf3f2;' : '';
+            const needN = (l.need != null) ? l.need : Math.max(0, (l.balance != null ? l.balance : (l.qty||0)) - (l.uniqueUnits||0));
             const badge = need
-                ? `<span style="color:#c0392b;font-weight:600;">⊕ нужно +${Math.max(0, (l.qty||0) - (l.uniqueUnits||0))}</span>`
+                ? `<span style="color:#c0392b;font-weight:600;">⊕ нужно +${needN}</span>`
                 : '<span style="color:#1e8449;">ок</span>';
             rows += `<tr style="${rowStyle}">`
                 + `<td style="padding:6px 10px;">${escapeHtml(l.productName || l.productC1Ref || '')}</td>`
                 + `<td style="padding:6px 10px;">${escapeHtml(l.sizeLabel || '')}</td>`
                 + `<td style="padding:6px 10px;text-align:center;">${l.qty || 0}</td>`
+                + `<td style="padding:6px 10px;text-align:center;">${l.balance != null ? l.balance : '—'}</td>`
                 + `<td style="padding:6px 10px;text-align:center;">${l.uniqueUnits || 0}</td>`
                 + `<td style="padding:6px 10px;text-align:center;">${badge}</td>`
                 + `</tr>`;
@@ -6615,6 +6617,7 @@ function renderReceipts(receipts) {
             + `<thead><tr style="text-align:left;color:var(--color-text-secondary);font-size:12px;">`
             + `<th style="padding:6px 10px;">Товар</th><th style="padding:6px 10px;">Размер</th>`
             + `<th style="padding:6px 10px;text-align:center;">Пришло</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Остаток 1С</th>`
             + `<th style="padding:6px 10px;text-align:center;">Штрихкодов</th>`
             + `<th style="padding:6px 10px;text-align:center;">Статус</th></tr></thead>`
             + `<tbody>${rows}</tbody></table></div></div>`;

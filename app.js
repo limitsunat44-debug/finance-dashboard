@@ -6586,12 +6586,21 @@ function renderReceipts(receipts) {
                 + `<td style="padding:6px 10px;text-align:center;">${badge}</td>`
                 + `</tr>`;
         }
+        // уникальные номенклатуры документа, у которых есть нехватка кодов
+        const needRefs = [...new Set((r.lines || [])
+            .filter(l => l.needsBarcodes && l.productC1Ref)
+            .map(l => l.productC1Ref))];
+        const genBtn = (r.needAny && needRefs.length)
+            ? `<button class="btn btn--primary" style="padding:6px 14px;font-size:13px;" `
+              + `onclick='bcGenReceiptCodes(this, "${encodeURIComponent(JSON.stringify(needRefs))}")'>`
+              + `➕ Сгенерировать штрихкоды</button>`
+            : '';
         html += `<div class="card" style="margin-bottom:14px;">`
             + `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">`
             + `<div><b>№ ${escapeHtml(r.number || '')}</b> · <span style="color:var(--color-text-secondary);">${dt}</span>`
             + (r.posted === false ? ' · <span style="color:#c0392b;">не проведён</span>' : '')
             + ` · <span style="color:var(--color-text-secondary);font-size:12px;">позиций: ${r.totalLines || 0}</span></div>`
-            + warn + `</div>`
+            + `<div style="display:flex;align-items:center;gap:10px;">` + warn + genBtn + `</div></div>`
             + `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">`
             + `<thead><tr style="text-align:left;color:var(--color-text-secondary);font-size:12px;">`
             + `<th style="padding:6px 10px;">Товар</th><th style="padding:6px 10px;">Размер</th>`
@@ -6601,6 +6610,46 @@ function renderReceipts(receipts) {
             + `<tbody>${rows}</tbody></table></div></div>`;
     }
     listEl.innerHTML = html;
+}
+
+// ── Генерация штрихкодов по документу прихода ───────────────────
+// Собирает уникальные номенклатуры документа (у которых не хватает кодов)
+// и для каждой запускает пораскладочную генерацию на сервисе 1c-sync-barcodes.
+// Сервис создаёт коды по остатку КАЖДОГО склада и СРАЗУ отправляет их в 1С.
+async function bcGenReceiptCodes(btn, refsJson) {
+    let refs = [];
+    try { refs = JSON.parse(decodeURIComponent(refsJson)); } catch (_) {}
+    refs = [...new Set((refs || []).filter(Boolean))];
+    if (!refs.length) { alert('Нет номенклатур для генерации.'); return; }
+
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Генерирую…';
+    let totalGen = 0, totalReg = 0, errors = [];
+    try {
+        for (const nom of refs) {
+            try {
+                const res = await fetch(`${BARCODE_SVC_URL}/api/auto-sync`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                    body: JSON.stringify({ provisionNom: nom, dryRun: false })
+                });
+                const d = await res.json();
+                if (!res.ok || !d.ok) { errors.push(d.error || `HTTP ${res.status}`); continue; }
+                totalGen += d.generated || 0;
+                totalReg += d.registeredIn1C || 0;
+            } catch (e) { errors.push(e.message); }
+        }
+        if (errors.length) {
+            alert(`Готово с замечаниями.\nСоздано кодов: ${totalGen}\nОтправлено в 1С: ${totalReg}\nОшибки: ${errors.join('; ')}`);
+        } else {
+            alert(`✅ Готово.\nСоздано новых кодов: ${totalGen}\nОтправлено в 1С: ${totalReg}`);
+        }
+        await loadReceipts(); // обновить статусы
+    } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+    }
 }
 
 // ── Размер этикетки (localStorage) ──────────────────────────────

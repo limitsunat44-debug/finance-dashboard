@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260719m-balance-based">
+    <link rel="stylesheet" href="style.css?v=20260719n-multiprint">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1534,7 +1534,7 @@
             <div class="card">
                 <h2 style="margin-top:0;">🧾 Распечатать ценник для витрины</h2>
                 <p style="color:var(--color-text-secondary);margin-top:4px;">
-                    Выберите склад, найдите товар, выберите размер и конкретный штрихкод — затем печать.
+                    Выберите склад и товар. Отметьте один или все размеры, для каждого укажите количество этикеток и выберите конкретный штрихкод или «все коды» — затем печать.
                 </p>
 
                 <div id="csError" class="error-message" style="display:none;margin-bottom:12px;"></div>
@@ -1570,26 +1570,25 @@
                     </div>
                 </div>
 
-                <!-- Размеры товара -->
+                <!-- Размеры товара (мультивыбор) -->
                 <div style="margin-top:16px;">
-                    <label style="font-weight:600;">Размер</label>
-                    <div id="csSizes" class="bc-variants-box" style="margin-top:6px;">
-                        <div class="bc-variants-empty">Сначала выберите товар выше.</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <label style="font-weight:600;">Размеры</label>
+                        <div id="csSizesToolbar" style="display:none;gap:8px;flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary btn-sm" id="csSelectAllSizes">☑️ Выбрать все размеры</button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="csClearAllSizes">☐ Снять выбор</button>
+                        </div>
                     </div>
-                </div>
-
-                <!-- Список штрихкодов размера -->
-                <div style="margin-top:16px;">
-                    <label style="font-weight:600;">Штрихкод размера</label>
-                    <div id="csBarcodes" style="margin-top:6px;">
-                        <div class="bc-variants-empty">Выберите размер.</div>
+                    <div id="csSizes" style="margin-top:8px;">
+                        <div class="bc-variants-empty">Сначала выберите товар выше.</div>
                     </div>
                 </div>
 
                 <div id="csInfo" style="margin-top:12px;color:var(--color-text-secondary);font-size:13px;"></div>
 
-                <div style="margin-top:16px;">
-                    <button class="btn btn-primary" id="csPrintBtn" onclick="csPrint()" disabled>🖨️ Напечатать ценник</button>
+                <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <button class="btn btn-primary" id="csPrintBtn" onclick="csPrint()" disabled>🖨️ Напечатать выбранное</button>
+                    <span id="csPrintSummary" style="color:var(--color-text-secondary);font-size:13px;"></span>
                 </div>
             </div>
         </section>
@@ -1771,7 +1770,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260719m-balance-based"></script>
+    <script src="app.js?v=20260719n-multiprint"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

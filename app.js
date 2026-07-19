@@ -7350,6 +7350,182 @@ async function generateAndPrint() {
     }
 }
 
+// ── Массовая печать по складу (пачками) ─────────────────────────
+// Берёт следующую пачку ещё НЕ напечатанных (printed_at IS NULL) экземпляров
+// in_stock выбранного склада. При нехватке — догенерирует коды до остатка 1С
+// (smart-plan по складу), затем формирует PDF (печать браузера) и помечает
+// экземпляры как напечатанные (printed_at). После этого они станут зелёными.
+async function bcFormBatchByWarehouse() {
+    const err = document.getElementById('bcPrintError');
+    const info = document.getElementById('bcBatchInfo');
+    if (err) err.style.display = 'none';
+
+    const whId = document.getElementById('bcWarehouse')?.value || '';
+    if (!whId) { bcShowPrintError('Сначала выберите склад / магазин вверху.'); return; }
+    const batchSize = Math.max(1, parseInt(document.getElementById('bcBatchSize')?.value, 10) || 100);
+    const { w, h } = bcGetLabelSize();
+    const whName = (barcodesState.whById[whId] || {}).name || 'склад';
+
+    try {
+        if (info) info.innerHTML = '⏳ Считаю доступные экземпляры…';
+
+        // 1) сколько уже есть НЕ напечатанных in_stock на складе
+        let ready = await bcFetchUnprintedUnits(whId, batchSize);
+
+        // 2) если не хватает на полную пачку — догенерируем коды до остатка 1С
+        let genMsg = '';
+        if (ready.length < batchSize) {
+            if (info) info.innerHTML = '⏳ Не хватает кодов — догенерирую до остатка 1С…';
+            const gen = await bcTopUpWarehouseCodes(whId);
+            genMsg = gen.generated > 0
+                ? ` Догенерировано и зарегистрировано в 1С: ${gen.generated} код(ов).`
+                : '';
+            if (gen.errors && gen.errors.length) {
+                genMsg += ` ⚠️ 1С-ошибки: ${gen.errors.slice(0, 2).join('; ')}`;
+            }
+            // повторно берём пачку
+            ready = await bcFetchUnprintedUnits(whId, batchSize);
+        }
+
+        if (!ready.length) {
+            if (info) info.innerHTML =
+                `На складе <b>${escapeHtml(whName)}</b> не осталось ненапечатанных экземпляров.` + genMsg;
+            return;
+        }
+
+        const batch = ready.slice(0, batchSize);
+        const batchIds = batch.map(u => u.id);
+
+        // 3) готовим этикетки (названия, размеры, цены) и рисуем
+        const units = batch.map(u => bcEnrichUnit(u));
+        await bcEnsurePricesForUnits(units);
+        renderLabels(units, w, h);
+
+        // 4) помечаем как напечатанные (printed_at) ДО открытия диалога печати,
+        //    чтобы при повторном нажатии пришла следующая пачка
+        const docTag = 'BATCH-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '');
+        const nowIso = new Date().toISOString();
+        const { error: upErr } = await ortobotClient
+            .from('stock_units')
+            .update({ printed_at: nowIso, printed_doc: docTag })
+            .in('id', batchIds);
+        if (upErr) throw upErr;
+
+        // 5) сколько ещё осталось после этой пачки
+        const remaining = await bcCountUnprinted(whId);
+
+        if (info) {
+            const byChar = {};
+            units.forEach(u => { const k = u.size_label || '?'; byChar[k] = (byChar[k] || 0) + 1; });
+            const detail = Object.keys(byChar).sort((a, b) => a.localeCompare(b, 'ru'))
+                .map(k => `${escapeHtml(k)}: ${byChar[k]} шт.`).join(' | ');
+            info.innerHTML =
+                `<div>✅ Пачка по складу <b>${escapeHtml(whName)}</b>: <b>${units.length}</b> этикет(ок) — сформирован PDF (в диалоге печати выберите «Сохранить как PDF»).${genMsg}</div>` +
+                `<div style="margin-top:4px;">Осталось ненапечатанных на этом складе: <b>${remaining}</b>${remaining > 0 ? ' — нажмите кнопку ещё раз для следующей пачки.' : ' — всё напечатано. 🎉'}</div>` +
+                `<div style="margin-top:4px;font-size:11px;color:var(--color-text-secondary);">По размерам — ${detail}</div>`;
+        }
+
+        // 6) открываем печать (пользователь сохраняет как PDF)
+        bcDoPrint(w, h);
+
+        // 7) обновим список экземпляров, если вкладка «Экземпляры» открыта (зелёная подсветка)
+        try {
+            const unitsTab = document.getElementById('bcUnitsTab');
+            if (unitsTab && unitsTab.classList.contains('active') && typeof loadUnitsTable === 'function') {
+                loadUnitsTable();
+            }
+        } catch (_) {}
+    } catch (e) {
+        console.error('bcFormBatchByWarehouse:', e);
+        bcShowPrintError(bcMissingTableMsg(e));
+    }
+}
+
+// Следующая пачка ненапечатанных in_stock экземпляров склада (по seq/created_at)
+async function bcFetchUnprintedUnits(whId, limit) {
+    const { data, error } = await ortobotClient
+        .from('stock_units')
+        .select('*')
+        .eq('warehouse_id', whId)
+        .eq('status', 'in_stock')
+        .is('printed_at', null)
+        .order('created_at', { ascending: true })
+        .order('seq', { ascending: true })
+        .limit(limit);
+    if (error) throw error;
+    return data || [];
+}
+
+// Сколько всего ненапечатанных in_stock на складе
+async function bcCountUnprinted(whId) {
+    const { count, error } = await ortobotClient
+        .from('stock_units')
+        .select('id', { count: 'exact', head: true })
+        .eq('warehouse_id', whId)
+        .eq('status', 'in_stock')
+        .is('printed_at', null);
+    if (error) throw error;
+    return count || 0;
+}
+
+// Догенерация кодов до остатка 1С для ВСЕХ товаров, у которых на этом складе
+// экземпляров меньше, чем остаток. Использует smart-plan (режим по складу).
+async function bcTopUpWarehouseCodes(whId) {
+    let generated = 0; const errors = [];
+    // товары, у которых на складе есть вариант с остатком > 0
+    const variantsOnWh = (barcodesState.variants || []).filter(v => String(v.warehouse_id || '') === String(whId) && (v.stock || 0) > 0);
+    // группируем по номенклатуре (productC1Ref), чтобы вызвать smart-plan один раз на товар
+    const nomByProduct = {}; // productId -> c1_ref
+    for (const v of variantsOnWh) {
+        const c1 = barcodesState.prodC1ById ? barcodesState.prodC1ById[v.product_id] : null;
+        if (c1) nomByProduct[v.product_id] = c1;
+    }
+    const noms = [...new Set(Object.values(nomByProduct))];
+    for (const nom of noms) {
+        try {
+            const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                body: JSON.stringify({ nomenclature: nom, dryRun: false, warehouseId: whId })
+            });
+            const text = await r.text();
+            let jr; try { jr = JSON.parse(text); } catch { jr = { ok: false, error: text.slice(0, 200) }; }
+            if (!r.ok || jr.ok === false) { errors.push(`${nom}: ${jr.error || ('HTTP ' + r.status)}`); continue; }
+            generated += jr.totals?.generated || 0;
+            if (Array.isArray(jr.c1?.errors)) errors.push(...jr.c1.errors);
+        } catch (e) {
+            errors.push(`${nom}: ${e.message || e}`);
+        }
+    }
+    return { generated, errors };
+}
+
+// Кнопка «Посчитать остаток»: показать, сколько ненапечатанных на складе
+async function bcRefreshBatchCounter() {
+    const err = document.getElementById('bcPrintError');
+    const info = document.getElementById('bcBatchInfo');
+    if (err) err.style.display = 'none';
+    const whId = document.getElementById('bcWarehouse')?.value || '';
+    if (!whId) { bcShowPrintError('Сначала выберите склад / магазин вверху.'); return; }
+    const whName = (barcodesState.whById[whId] || {}).name || 'склад';
+    try {
+        if (info) info.innerHTML = '⏳ Считаю…';
+        const remaining = await bcCountUnprinted(whId);
+        const { count: printedCount } = await ortobotClient
+            .from('stock_units')
+            .select('id', { count: 'exact', head: true })
+            .eq('warehouse_id', whId)
+            .eq('status', 'in_stock')
+            .not('printed_at', 'is', null);
+        if (info) info.innerHTML =
+            `Склад <b>${escapeHtml(whName)}</b>: ненапечатанных экземпляров — <b>${remaining}</b>, уже напечатано — <b>${printedCount || 0}</b>.` +
+            (remaining > 0 ? ' Нажмите «Сформировать пачку → PDF».' : ' Всё напечатано. 🎉');
+    } catch (e) {
+        console.error('bcRefreshBatchCounter:', e);
+        bcShowPrintError(bcMissingTableMsg(e));
+    }
+}
+
 // Ручной режим: генерирует до N этикеток на каждый выбранный вариант (как раньше),
 // переиспользуя существующие. НЕ ограничивается остатком 1С (осознанный выбор).
 async function generateAndPrintManual(selected, manualQty, w, h) {
@@ -7801,13 +7977,19 @@ async function loadUnitsTable() {
                 const color = days >= 90 ? '#c0392b' : (days >= 30 ? '#e67e22' : 'var(--color-text-secondary)');
                 ageBadge = ` <span style="font-size:11px;color:${color};">(${days} дн.)</span>`;
             }
-            return `<tr class="unit-row" data-barcode="${escapeHtml(bc)}" onclick="bcToggleHistory(this)" style="cursor:pointer;">
+            // напечатанные (в документе печати) — подсвечиваем зелёным
+            const isPrinted = !!r.printed_at;
+            const rowStyle = isPrinted ? 'cursor:pointer;background:#e8f7ec;' : 'cursor:pointer;';
+            const printedBadge = isPrinted
+                ? ` <span style="font-size:11px;color:#1e8e3e;" title="Напечатано ${escapeHtml(String(r.printed_at).slice(0, 16).replace('T', ' '))}">🖨️ в документе</span>`
+                : '';
+            return `<tr class="unit-row" data-barcode="${escapeHtml(bc)}" onclick="bcToggleHistory(this)" style="${rowStyle}">
                 <td class="unit-toggle" style="width:24px;text-align:center;color:var(--color-text-secondary);">▸</td>
                 <td><code>${escapeHtml(bc)}</code></td>
                 <td>${escapeHtml(u.size_label)}</td>
                 <td>${escapeHtml(u.name)}</td>
                 <td>${escapeHtml(bcWhName(u.warehouse_id))}</td>
-                <td>${escapeHtml(statusLabel[u.status] || u.status || '—')}</td>
+                <td>${escapeHtml(statusLabel[u.status] || u.status || '—')}${printedBadge}</td>
                 <td>${escapeHtml(date)}${ageBadge}</td>
             </tr>
             <tr class="unit-history-row" style="display:none;">

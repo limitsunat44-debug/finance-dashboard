@@ -6478,13 +6478,14 @@ function switchBarcodesSubtab(name) {
     document.querySelectorAll('#barcodesSubTabs .section-tab').forEach(b => {
         b.classList.toggle('active', b.dataset.btab === name);
     });
-    const map = { print: 'bcPrintTab', receipts: 'bcReceiptsTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
+    const map = { print: 'bcPrintTab', receipts: 'bcReceiptsTab', transfers: 'bcTransfersTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
     document.querySelectorAll('#barcodesSection .prod-tab-content').forEach(c => c.classList.remove('active'));
     const el = document.getElementById(map[name]);
     if (el) el.classList.add('active');
 
     if (name === 'units') loadUnitsTable();
     if (name === 'receipts') loadReceipts();
+    if (name === 'transfers') loadTransfers();
     if (name === 'revision') {
         const inp = document.getElementById('bcScanInput');
         if (inp) inp.focus();
@@ -6619,6 +6620,105 @@ function renderReceipts(receipts) {
             + `<th style="padding:6px 10px;text-align:center;">Пришло</th>`
             + `<th style="padding:6px 10px;text-align:center;">Остаток 1С</th>`
             + `<th style="padding:6px 10px;text-align:center;">Штрихкодов</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Статус</th></tr></thead>`
+            + `<tbody>${rows}</tbody></table></div></div>`;
+    }
+    listEl.innerHTML = html;
+}
+
+// ── Недавние перемещения ─────────────────────────
+async function loadTransfers() {
+    const listEl = document.getElementById('bcTransfersList');
+    const errEl = document.getElementById('bcTransfersError');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (listEl) listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Загружаю перемещения…</div>';
+    const limitSel = document.getElementById('bcTransfersLimit');
+    const limit = limitSel ? limitSel.value : 5;
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=transfers&limit=${encodeURIComponent(limit)}`, {
+            method: 'GET',
+            headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        renderTransfers(data.transfers || []);
+    } catch (e) {
+        if (listEl) listEl.innerHTML = '';
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = '❌ Не удалось загрузить перемещения: ' + e.message; }
+    }
+}
+
+function renderTransfers(transfers) {
+    const listEl = document.getElementById('bcTransfersList');
+    if (!listEl) return;
+    if (!transfers.length) {
+        listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">Нет документов перемещения.</div>';
+        return;
+    }
+    let html = '';
+    for (const t of transfers) {
+        const dt = t.date ? new Date(t.date).toLocaleDateString('ru-RU') : '';
+        let rows = '';
+        for (const l of (t.lines || [])) {
+            // Коды, которые реально переехали (из истории системы) или указанные в документе 1С.
+            const moved = Array.isArray(l.movedBarcodes) ? l.movedBarcodes : [];
+            const docBc = Array.isArray(l.docBarcodes) ? l.docBarcodes : [];
+            let codesHtml = '';
+            if (moved.length) {
+                codesHtml = moved.map(b =>
+                    `<span style="display:inline-block;background:#eafaf1;color:#1e8449;border:1px solid #cdeeda;`
+                    + `padding:2px 8px;border-radius:8px;font-size:12px;font-family:monospace;margin:2px 4px 2px 0;">${escapeHtml(b)}</span>`
+                ).join('');
+            } else if (docBc.length) {
+                // коды из самого документа 1С (ещё не обработано автосинхронизацией)
+                codesHtml = docBc.map(b =>
+                    `<span style="display:inline-block;background:#eef4fd;color:#1c5fbf;border:1px solid #cfe0f7;`
+                    + `padding:2px 8px;border-radius:8px;font-size:12px;font-family:monospace;margin:2px 4px 2px 0;" `
+                    + `title="Указан в документе 1С">${escapeHtml(b)}</span>`
+                ).join('');
+            } else {
+                codesHtml = '<span style="color:var(--color-text-secondary);font-size:12px;">— коды не привязаны (перемещено по размеру/количеству)</span>';
+            }
+            // статус соответствия количества
+            const cnt = moved.length || docBc.length;
+            let badge;
+            if (moved.length && moved.length >= (l.qty || 0)) {
+                badge = '<span style="color:#1e8449;">✓ привязано</span>';
+            } else if (docBc.length) {
+                badge = '<span style="color:#1c5fbf;">○ в док. 1С</span>';
+            } else {
+                badge = '<span style="color:#b8860b;">— без кода</span>';
+            }
+            rows += `<tr style="border-top:1px solid var(--color-border,#eee);">`
+                + `<td style="padding:8px 10px;vertical-align:top;">${escapeHtml(l.productName || l.productC1Ref || '')}</td>`
+                + `<td style="padding:8px 10px;text-align:center;vertical-align:top;white-space:nowrap;">${escapeHtml(l.sizeLabel || '—')}</td>`
+                + `<td style="padding:8px 10px;text-align:center;vertical-align:top;">${l.qty || 0}</td>`
+                + `<td style="padding:8px 10px;text-align:center;vertical-align:top;">${cnt}</td>`
+                + `<td style="padding:8px 10px;vertical-align:top;">${codesHtml}</td>`
+                + `<td style="padding:8px 10px;text-align:center;vertical-align:top;white-space:nowrap;">${badge}</td>`
+                + `</tr>`;
+        }
+        const movedBadge = t.hasMovements
+            ? `<span style="background:#eafaf1;color:#1e8449;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">✓ кодов переехало: ${t.movedTotal}</span>`
+            : `<span style="background:#fef7e6;color:#b8860b;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;">коды ещё не привязаны</span>`;
+        html += `<div class="card" style="margin-bottom:14px;">`
+            + `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">`
+            + `<div><b>№ ${escapeHtml(t.number || '')}</b> · <span style="color:var(--color-text-secondary);">${dt}</span>`
+            + (t.posted === false ? ' · <span style="color:#c0392b;">не проведён</span>' : '')
+            + `<div style="margin-top:4px;font-size:13px;">`
+            + `<span style="color:var(--color-text-secondary);">Склад:</span> `
+            + `<b>${escapeHtml(t.from || '—')}</b> `
+            + `<span style="color:#1c5fbf;">→</span> `
+            + `<b>${escapeHtml(t.to || '—')}</b></div></div>`
+            + `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">` + movedBadge + `</div></div>`
+            + `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">`
+            + `<thead><tr style="text-align:left;color:var(--color-text-secondary);font-size:12px;">`
+            + `<th style="padding:6px 10px;">Товар</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Размер</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Кол-во</th>`
+            + `<th style="padding:6px 10px;text-align:center;">Кодов</th>`
+            + `<th style="padding:6px 10px;">Штрихкоды (что переехало)</th>`
             + `<th style="padding:6px 10px;text-align:center;">Статус</th></tr></thead>`
             + `<tbody>${rows}</tbody></table></div></div>`;
     }

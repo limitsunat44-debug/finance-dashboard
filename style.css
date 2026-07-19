@@ -3618,13 +3618,13 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
 .label-tag .label-title {
   width: 100%;
   text-align: center;
-  font-size: 2.6mm;
+  font-size: 3.8mm;
   line-height: 1.15;
-  font-weight: 600;
-  max-height: 7mm;
+  font-weight: 700;
+  max-height: 14mm;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   word-break: break-word;
 }

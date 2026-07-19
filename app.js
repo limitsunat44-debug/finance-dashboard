@@ -6586,21 +6586,31 @@ function renderReceipts(receipts) {
                 + `<td style="padding:6px 10px;text-align:center;">${badge}</td>`
                 + `</tr>`;
         }
-        // уникальные номенклатуры документа, у которых есть нехватка кодов
+        // номенклатуры документа, у которых есть нехватка кодов (для генерации)
         const needRefs = [...new Set((r.lines || [])
             .filter(l => l.needsBarcodes && l.productC1Ref)
             .map(l => l.productC1Ref))];
+        // ВСЕ номенклатуры документа (для печати)
+        const allRefs = [...new Set((r.lines || [])
+            .filter(l => l.productC1Ref).map(l => l.productC1Ref))];
+        const needJson = encodeURIComponent(JSON.stringify(needRefs));
+        const allJson = encodeURIComponent(JSON.stringify(allRefs));
         const genBtn = (r.needAny && needRefs.length)
             ? `<button class="btn btn--primary" style="padding:6px 14px;font-size:13px;" `
-              + `onclick='bcGenReceiptCodes(this, "${encodeURIComponent(JSON.stringify(needRefs))}")'>`
+              + `onclick='bcGenReceiptCodes(this, "${needJson}")'>`
               + `➕ Сгенерировать штрихкоды</button>`
+            : '';
+        const printBtn = allRefs.length
+            ? `<button class="btn btn--outline" style="padding:6px 14px;font-size:13px;" `
+              + `onclick='bcPrintReceiptLabels(this, "${allJson}")'>`
+              + `🖨 Распечатать ценники</button>`
             : '';
         html += `<div class="card" style="margin-bottom:14px;">`
             + `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">`
             + `<div><b>№ ${escapeHtml(r.number || '')}</b> · <span style="color:var(--color-text-secondary);">${dt}</span>`
             + (r.posted === false ? ' · <span style="color:#c0392b;">не проведён</span>' : '')
             + ` · <span style="color:var(--color-text-secondary);font-size:12px;">позиций: ${r.totalLines || 0}</span></div>`
-            + `<div style="display:flex;align-items:center;gap:10px;">` + warn + genBtn + `</div></div>`
+            + `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">` + warn + genBtn + printBtn + `</div></div>`
             + `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;">`
             + `<thead><tr style="text-align:left;color:var(--color-text-secondary);font-size:12px;">`
             + `<th style="padding:6px 10px;">Товар</th><th style="padding:6px 10px;">Размер</th>`
@@ -6624,10 +6634,12 @@ async function bcGenReceiptCodes(btn, refsJson) {
 
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Генерирую…';
     let totalGen = 0, totalReg = 0, errors = [];
     try {
+        let i = 0;
         for (const nom of refs) {
+            i++;
+            btn.textContent = `⏳ Генерирую ${i}/${refs.length}…`;
             try {
                 const res = await fetch(`${BARCODE_SVC_URL}/api/auto-sync`, {
                     method: 'POST',
@@ -6646,6 +6658,64 @@ async function bcGenReceiptCodes(btn, refsJson) {
             alert(`✅ Готово.\nСоздано новых кодов: ${totalGen}\nОтправлено в 1С: ${totalReg}`);
         }
         await loadReceipts(); // обновить статусы
+    } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+    }
+}
+
+// ── Печать ценников по документу прихода ──────────────────────
+// Печатает ВСЕ существующие коды (in_stock) номенклатур документа.
+// Не генерирует ничего нового — только печать.
+async function bcPrintReceiptLabels(btn, refsJson) {
+    let refs = [];
+    try { refs = JSON.parse(decodeURIComponent(refsJson)); } catch (_) {}
+    refs = [...new Set((refs || []).filter(Boolean))];
+    if (!refs.length) { alert('Нет номенклатур для печати.'); return; }
+
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Готовлю печать…';
+    try {
+        const { w, h } = bcGetLabelSize();
+
+        // 1) коды на складе по этим номенклатурам
+        const { data: rows, error } = await ortobotClient
+            .from('stock_units')
+            .select('unique_barcode,size_label,c1_char_ref,c1_prod_ref,warehouse_id,status,created_at,received_at')
+            .in('c1_prod_ref', refs)
+            .eq('status', 'in_stock');
+        if (error) throw error;
+        if (!rows || !rows.length) { alert('Нет кодов для печати по этому документу.'); return; }
+
+        // 2) имена товаров (в stock_units имени нет)
+        const nameByRef = {};
+        try {
+            const { data: prods } = await ortobotClient
+                .from('products').select('c1_ref,name_ru').in('c1_ref', refs);
+            (prods || []).forEach(p => { nameByRef[p.c1_ref] = p.name_ru; });
+        } catch (_) {}
+
+        // 3) unit-объекты без зависимости от variantInfo
+        const units = rows.map(u => ({
+            unique_barcode: u.unique_barcode || '',
+            size_label: u.size_label || '',
+            name: nameByRef[u.c1_prod_ref] || '',
+            warehouse_id: u.warehouse_id,
+            status: u.status,
+            created_at: u.created_at || u.received_at,
+            charRef: u.c1_char_ref || null,
+            productC1Ref: u.c1_prod_ref || null,
+            priceOld: null, priceNew: null, currency: 'TJS'
+        }));
+
+        // 4) цены из 1С + рендер + печать
+        await bcEnsurePricesForUnits(units);
+        renderLabels(units, w, h);
+        bcDoPrint(w, h);
+    } catch (e) {
+        console.error('bcPrintReceiptLabels:', e);
+        alert('Ошибка печати: ' + (e && e.message ? e.message : e));
     } finally {
         btn.disabled = false;
         btn.textContent = orig;

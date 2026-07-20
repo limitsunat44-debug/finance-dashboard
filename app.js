@@ -7367,8 +7367,9 @@ async function generateAndPrint() {
 //     помечаем их printed_at, они становятся зелёными и «уже использованы».
 const bcBatchState = { units: [], whId: '', whName: '' };
 
-// Натуральная сортировка размеров (S/M/L/XL, числа 35..46, «стандарт» в конец)
-function bcSizeSortKey(size) {
+// Натуральная сортировка размеров (S/M/L/XL, числа 35..46, «стандарт» в конец).
+// ВНИМАНИЕ: имя специально отличается от глобального bcSizeSortKey (тот возвращает число).
+function bcBatchSizeKey(size) {
     const s = String(size || '').toLowerCase().replace(/^размер:?\s*/, '').trim();
     const order = { xs: 1, s: 2, m: 3, l: 4, xl: 5, xxl: 6, xxxl: 7 };
     if (order[s]) return [1, order[s], s];
@@ -7377,17 +7378,53 @@ function bcSizeSortKey(size) {
     if (s === 'стандарт' || s === '' || s === '—') return [4, 0, s];
     return [3, 0, s]; // прочие строковые размеры — по алфавиту
 }
+// Ключ номенклатуры-модели: код номенклатуры + характеристика (цвет/модель) из 1С
+function bcNomenKey(u) {
+    return String(u.c1_prod_ref || u.productC1Ref || '') + '|' + String(u.c1_char_ref || u.charRef || '');
+}
+// Сортировка размеров внутри одной модели
+function bcCmpSize(a, b) {
+    const ka = bcBatchSizeKey(a.size_label), kb = bcBatchSizeKey(b.size_label);
+    if (ka[0] !== kb[0]) return ka[0] - kb[0];
+    if (ka[0] === 2) return ka[1] - kb[1]; // числовые размеры
+    return String(ka[2]).localeCompare(String(kb[2]), 'ru');
+}
 // Сортировка экземпляров: сначала по названию номенклатуры, потом по размеру
 function bcSortUnits(units) {
     return units.slice().sort((a, b) => {
         const na = (a.name || '').toLowerCase();
         const nb = (b.name || '').toLowerCase();
         if (na !== nb) return na.localeCompare(nb, 'ru');
-        const ka = bcSizeSortKey(a.size_label), kb = bcSizeSortKey(b.size_label);
-        if (ka[0] !== kb[0]) return ka[0] - kb[0];
-        if (ka[0] === 2) return ka[1] - kb[1]; // числовые размеры
-        return String(ka[2]).localeCompare(String(kb[2]), 'ru');
+        return bcCmpSize(a, b);
     });
+}
+// Строгая упаковка пачки ЦЕЛЫМИ номенклатурами-моделями.
+// Группируем по (код номенклатуры + характеристика), сортируем группы по имени+характеристике,
+// внутри группы — по размеру. Добавляем целые группы пока не превысим batchSize
+// (первая группа входит всегда, даже если одна больше лимита — чтобы модель не резалась).
+function bcPackWholeNomenclatures(units, batchSize) {
+    const groups = new Map(); // key -> { name, units: [] }
+    for (const u of units) {
+        const key = bcNomenKey(u);
+        if (!groups.has(key)) groups.set(key, { key, name: u.name || '', units: [] });
+        groups.get(key).units.push(u);
+    }
+    const arr = Array.from(groups.values());
+    // сортировка групп: по имени номенклатуры, затем по ключу (характеристике) для стабильности
+    arr.sort((g1, g2) => {
+        const n1 = (g1.name || '').toLowerCase(), n2 = (g2.name || '').toLowerCase();
+        if (n1 !== n2) return n1.localeCompare(n2, 'ru');
+        return g1.key.localeCompare(g2.key);
+    });
+    // внутри каждой группы — размеры по порядку
+    arr.forEach(g => g.units.sort(bcCmpSize));
+    const packed = [];
+    for (const g of arr) {
+        if (packed.length === 0) { packed.push(...g.units); continue; } // первая всегда
+        if (packed.length + g.units.length > batchSize) break;          // не режем модель
+        packed.push(...g.units);
+    }
+    return packed;
 }
 
 // Шаг 1: загрузить пачку в предпросмотр
@@ -7404,10 +7441,13 @@ async function bcLoadBatchPreview() {
     try {
         if (info) info.innerHTML = '⏳ Считаю доступные экземпляры…';
 
-        // 1) сколько уже есть НЕ напечатанных in_stock на складе (без диагностики)
-        let ready = await bcFetchUnprintedUnits(whId, batchSize);
+        // берём расширенный пул (больше batchSize), чтобы можно было упаковать ЦЕЛЫМИ номенклатурами
+        const pool = Math.min(5000, Math.max(batchSize * 5, batchSize + 500));
 
-        // 2) если не хватает на полную пачку — догенерируем коды до остатка 1С
+        // 1) ненапечатанные in_stock на складе (без диагностики), сгруппировано по номенклатуре
+        let ready = await bcFetchUnprintedUnits(whId, pool);
+
+        // 2) если вообще мало кодов — догенерируем до остатка 1С
         let genMsg = '';
         if (ready.length < batchSize) {
             if (info) info.innerHTML = '⏳ Не хватает кодов — догенерирую до остатка 1С…';
@@ -7418,27 +7458,30 @@ async function bcLoadBatchPreview() {
             if (gen.errors && gen.errors.length) {
                 genMsg += ` ⚠️ 1С-ошибки: ${gen.errors.slice(0, 2).join('; ')}`;
             }
-            ready = await bcFetchUnprintedUnits(whId, batchSize);
+            ready = await bcFetchUnprintedUnits(whId, pool);
         }
 
-        // 3) обогащаем + сортируем по номенклатуре и размерам.
-        //    bcEnrichUnit не переносит id/printed_at — проставляем вручную
-        const enriched = ready.slice(0, batchSize).map(r => {
+        // 3) обогащаем (id/printed_at проставляем вручную, т.к. bcEnrichUnit их не переносит)
+        const enrichedPool = ready.map(r => {
             const e = bcEnrichUnit({ ...r });
             e.id = r.id;
+            e.c1_prod_ref = r.c1_prod_ref || null;
+            e.c1_char_ref = r.c1_char_ref || null;
             e.printed_at = r.printed_at || null;
             e.printed_doc = r.printed_doc || null;
             return e;
         });
-        const sorted = bcSortUnits(enriched);
-        bcBatchState.units = sorted;
+        // 4) СТРОГО упаковываем пачку целыми номенклатурами-моделями
+        const packed = bcPackWholeNomenclatures(enrichedPool, batchSize);
+        bcBatchState.units = packed;
         bcBatchState.whId = whId;
         bcBatchState.whName = whName;
 
         const remaining = await bcCountUnprinted(whId);
+        const nomenCount = new Set(packed.map(bcNomenKey)).size;
         if (info) {
             info.innerHTML =
-                `Склад <b>${escapeHtml(whName)}</b>: загружено <b>${sorted.length}</b> экземпляр(ов) в пачку.${genMsg}` +
+                `Склад <b>${escapeHtml(whName)}</b>: загружено <b>${packed.length}</b> экземпляр(ов) из <b>${nomenCount}</b> модел(ей) в пачку (целыми номенклатурами).${genMsg}` +
                 ` Всего ненапечатанных на складе: <b>${remaining}</b>.`;
         }
         bcRenderBatchPreview();
@@ -7457,21 +7500,24 @@ function bcRenderBatchPreview() {
         box.innerHTML = '<p style="color:var(--color-text-secondary);">Нет экземпляров для печати на этом складе.</p>';
         return;
     }
-    let lastName = null;
+    let lastKey = null;
     const rows = units.map((u, idx) => {
         const printed = !!u.printed_at;
         const rowStyle = printed ? 'background:#e8f7ec;' : '';
-        const nameCell = (u.name !== lastName)
+        // группируем визуально по модели (код+характеристика): имя показываем 1 раз
+        const key = bcNomenKey(u);
+        const newGroup = key !== lastKey;
+        const nameCell = newGroup
             ? `<td style="font-weight:600;">${escapeHtml(u.name || '—')}</td>`
             : '<td style="color:var(--color-text-secondary);"></td>';
-        lastName = u.name;
-        const chk = printed
-            ? '<span style="color:#1e8e3e;" title="Уже в документе">✅</span>'
-            : `<input type="checkbox" class="bc-batch-chk" data-idx="${idx}" checked onchange="bcUpdateBatchCount()">`;
+        const topBorder = (newGroup && idx > 0) ? 'border-top:2px solid var(--color-border,#d0d0d0);' : '';
+        lastKey = key;
+        // всегда рабочий чекбокс (даже у напечатанных) — можно перепечатать ту же пачку
+        const chk = `<input type="checkbox" class="bc-batch-chk" data-idx="${idx}" checked onchange="bcUpdateBatchCount()">`;
         const usedBadge = printed
-            ? ' <span style="font-size:11px;color:#1e8e3e;">🖨️ в документе</span>'
+            ? ' <span style="font-size:11px;color:#1e8e3e;" title="Уже было в документе — можно печатать повторно">🖨️ в документе</span>'
             : '';
-        return `<tr style="${rowStyle}">
+        return `<tr style="${rowStyle}${topBorder}">
             <td style="text-align:center;width:34px;">${chk}</td>
             ${nameCell}
             <td>${escapeHtml(u.size_label || '—')}</td>
@@ -7482,7 +7528,7 @@ function bcRenderBatchPreview() {
     box.innerHTML =
         `<div style="display:flex;align-items:center;gap:12px;margin:8px 0;flex-wrap:wrap;">
             <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-                <input type="checkbox" id="bcBatchAll" checked onchange="bcBatchToggleAll(this.checked)"> Выбрать все (непечатанные)
+                <input type="checkbox" id="bcBatchAll" checked onchange="bcBatchToggleAll(this.checked)"> Выбрать все
             </label>
             <span id="bcBatchSelCount" style="font-size:12px;color:var(--color-text-secondary);"></span>
             <button class="btn btn-primary" style="margin-left:auto;" onclick="bcPrintSelectedBatch()">🖨️ Печать выбранных → PDF</button>
@@ -7497,7 +7543,7 @@ function bcRenderBatchPreview() {
     bcUpdateBatchCount();
 }
 
-// Мастер-чекбокс: отметить/снять все непечатанные
+// Мастер-чекбокс: отметить/снять все строки
 function bcBatchToggleAll(checked) {
     document.querySelectorAll('.bc-batch-chk').forEach(c => { c.checked = checked; });
     bcUpdateBatchCount();
@@ -7526,8 +7572,8 @@ async function bcPrintSelectedBatch() {
     const batchIds = units.map(u => u.id).filter(Boolean);
 
     try {
-        // цены + рендер (уже отсортированы, т.к. берём из отсортированного bcBatchState.units)
-        const ordered = bcSortUnits(units);
+        // порядок уже правильный (целыми номенклатурами), берём как есть по возрастанию idx
+        const ordered = idxs.slice().sort((a, b) => a - b).map(i => bcBatchState.units[i]).filter(Boolean);
         await bcEnsurePricesForUnits(ordered);
         renderLabels(ordered, w, h);
 
@@ -7576,6 +7622,8 @@ async function bcFetchUnprintedUnits(whId, limit) {
         .eq('status', 'in_stock')
         .is('printed_at', null)
         .neq('c1_prod_ref', BC_DIAGNOSTIC_C1_REF)
+        .order('c1_prod_ref', { ascending: true })
+        .order('c1_char_ref', { ascending: true })
         .order('created_at', { ascending: true })
         .order('seq', { ascending: true })
         .limit(limit);

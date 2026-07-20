@@ -7653,8 +7653,8 @@ async function bcTopUpWarehouseCodes(whId) {
         const c1 = barcodesState.prodC1ById ? barcodesState.prodC1ById[v.product_id] : null;
         if (c1) nomByProduct[v.product_id] = c1;
     }
-    // исключаем услугу «Диагностика стоп» из догенерации
-    const noms = [...new Set(Object.values(nomByProduct))].filter(ref => ref !== BC_DIAGNOSTIC_C1_REF);
+    // исключаем сервисные позиции (Диагностика стоп, Пронация) из догенерации
+    const noms = [...new Set(Object.values(nomByProduct))].filter(ref => !BC_NO_GEN_REFS.has(ref));
     for (const nom of noms) {
         try {
             const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
@@ -8021,6 +8021,10 @@ const BC_UNITS_PAGE_SIZE = 100;
 let bcUnitsPage = 0; // 0-based
 // Услуга «Диагностика стоп» — не физический товар, скрываем из списка экземпляров
 const BC_DIAGNOSTIC_C1_REF = '7aca2288-3ade-11f0-8313-c018500f4abe';
+// «Пронация» — сервисная позиция, штрихкоды НЕ генерируем
+const BC_PRONATION_C1_REF = '5ae9087f-9163-11ef-87a7-d8c0a681cbca';
+// Номенклатуры, для которых НИКОГДА не генерируем штрихкоды (диагностика/услуги)
+const BC_NO_GEN_REFS = new Set([BC_DIAGNOSTIC_C1_REF, BC_PRONATION_C1_REF]);
 
 // Применить фильтры — сбрасывает на первую страницу
 function bcUnitsApplyFilters() {

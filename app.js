@@ -1589,6 +1589,8 @@ function switchTab(tabName) {
         if (typeof loadProducts === 'function') loadProducts();
     } else if (tabName === 'barcodes') {
         if (typeof loadBarcodes === 'function') loadBarcodes();
+    } else if (tabName === 'anomalies') {
+        if (typeof loadAnomalies === 'function') loadAnomalies();
     } else if (tabName === 'cashier') {
         if (typeof loadCashier === 'function') loadCashier();
     } else if (tabName === 'settings') {
@@ -8914,4 +8916,99 @@ async function csPrint() {
 
     renderLabels(units, w, h);
     bcDoPrint(w, h);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// АНОМАЛЬНЫЕ ПРОДАЖИ (двойное списание одного штрихкода)
+// ═══════════════════════════════════════════════════════════════
+async function loadAnomalies() {
+    const wrap = document.getElementById('anomTableWrap');
+    const errEl = document.getElementById('anomError');
+    const cntEl = document.getElementById('anomCount');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (wrap) wrap.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Загружаю…</div>';
+    const showResolved = !!(document.getElementById('anomShowResolved') && document.getElementById('anomShowResolved').checked);
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=anomalous-sales&resolved=${showResolved}`, {
+            method: 'GET',
+            headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        renderAnomalies(data.rows || []);
+        updateAnomaliesBadge(data.unresolved || 0);
+        if (cntEl) cntEl.textContent = `Неразобранных: ${data.unresolved || 0}`;
+    } catch (e) {
+        if (wrap) wrap.innerHTML = '';
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = '❌ Не удалось загрузить: ' + e.message; }
+    }
+}
+
+function updateAnomaliesBadge(n) {
+    const b = document.getElementById('anomaliesBadge');
+    if (!b) return;
+    if (n > 0) { b.textContent = n; b.style.display = 'inline-block'; }
+    else { b.style.display = 'none'; }
+}
+
+function renderAnomalies(rows) {
+    const wrap = document.getElementById('anomTableWrap');
+    if (!wrap) return;
+    if (!rows.length) {
+        wrap.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;padding:12px 0;">✅ Аномальных продаж нет.</div>';
+        return;
+    }
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const fmt = (d) => d ? new Date(d).toLocaleString('ru-RU') : '—';
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+    html += '<thead><tr style="text-align:left;border-bottom:2px solid var(--color-border, #ddd);">'
+        + '<th style="padding:8px;">Штрихкод</th>'
+        + '<th style="padding:8px;">Размер</th>'
+        + '<th style="padding:8px;">Магазин (чек)</th>'
+        + '<th style="padding:8px;">Продавец</th>'
+        + '<th style="padding:8px;">Чек №</th>'
+        + '<th style="padding:8px;">Дата продажи</th>'
+        + '<th style="padding:8px;">Уже был продан</th>'
+        + '<th style="padding:8px;"></th>'
+        + '</tr></thead><tbody>';
+    for (const r of rows) {
+        const prev = r.existing_status === 'sold'
+            ? `${esc(r.existing_shop || '—')} · ${fmt(r.existing_sold_at)}`
+            : esc(r.existing_status || '—');
+        const rowStyle = r.resolved ? 'opacity:0.55;' : '';
+        const btn = r.resolved
+            ? `<button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="resolveAnomaly('${r.id}', false)">Вернуть</button>`
+            : `<button class="btn btn-primary" style="padding:4px 10px;font-size:12px;" onclick="resolveAnomaly('${r.id}', true)">Разобрано</button>`;
+        html += `<tr style="border-bottom:1px solid var(--color-border, #eee);${rowStyle}">`
+            + `<td style="padding:8px;font-family:monospace;font-weight:600;">${esc(r.unique_barcode)}</td>`
+            + `<td style="padding:8px;">${esc(r.size_label || '—')}</td>`
+            + `<td style="padding:8px;">${esc(r.shop_name || '—')}</td>`
+            + `<td style="padding:8px;">${esc(r.seller_name || '—')}</td>`
+            + `<td style="padding:8px;">${esc(r.receipt_number || '—')}</td>`
+            + `<td style="padding:8px;">${fmt(r.sold_at)}</td>`
+            + `<td style="padding:8px;color:var(--color-text-secondary);">${prev}</td>`
+            + `<td style="padding:8px;text-align:right;">${btn}</td>`
+            + '</tr>';
+        if (r.note) {
+            html += `<tr style="${rowStyle}"><td colspan="8" style="padding:2px 8px 8px;color:var(--color-text-secondary);font-size:12px;">📝 ${esc(r.note)}</td></tr>`;
+        }
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+}
+
+async function resolveAnomaly(id, resolved) {
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=anomalous-resolve`, {
+            method: 'POST',
+            headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, resolved })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        loadAnomalies();
+    } catch (e) {
+        alert('Не удалось изменить статус: ' + e.message);
+    }
 }

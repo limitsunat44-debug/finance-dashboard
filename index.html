@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260720b-noblgen">
+    <link rel="stylesheet" href="style.css?v=20260723a-anom">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -60,6 +60,7 @@
             <button class="nav-tab" data-tab="aiInsights" onclick="switchTab('aiInsights')">🤖 ИИ-аналитика</button>
             <button class="nav-tab" data-tab="products" onclick="switchTab('products')">📦 Товары</button>
             <button class="nav-tab" data-tab="barcodes" onclick="switchTab('barcodes')">🏷️ Штрихкоды</button>
+            <button class="nav-tab" data-tab="anomalies" onclick="switchTab('anomalies')">⚠️ Аномальные продажи <span id="anomaliesBadge" style="display:none;background:#e11d48;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px;"></span></button>
             <button class="nav-tab" data-tab="cashier" onclick="switchTab('cashier')">🧾 Ценник для витрины</button>
         </nav>
 
@@ -1594,6 +1595,26 @@
         </section>
 
         <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- АНОМАЛЬНЫЕ ПРОДАЖИ: двойное списание одного штрихкода -->
+        <section id="anomaliesSection" class="section">
+            <div class="card">
+                <h2 style="margin-top:0;">⚠️ Аномальные продажи (двойное списание штрихкода)</h2>
+                <p style="color:var(--color-text-secondary);margin-top:4px;">
+                    Сюда попадают чеки, где касса пробила штрихкод, по которому в системе уже нет свободного экземпляра (все экземпляры с этим кодом уже проданы).
+                    Такое бывает, пока один и тот же код временно встречается в разных магазинах. Выручка НЕ задваивается — случай попадает сюда для разбора.
+                </p>
+                <div style="display:flex;gap:12px;align-items:center;margin:12px 0;flex-wrap:wrap;">
+                    <button class="btn btn-secondary" onclick="loadAnomalies()">↻ Обновить</button>
+                    <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">
+                        <input type="checkbox" id="anomShowResolved" onchange="loadAnomalies()"> показать разобранные
+                    </label>
+                    <span id="anomCount" style="font-size:13px;font-weight:600;"></span>
+                </div>
+                <div id="anomError" class="error-message" style="display:none;margin:12px 0;"></div>
+                <div id="anomTableWrap" style="overflow-x:auto;"></div>
+            </div>
+        </section>
+
         <!-- КАССИР: Распечатать ценник для витрины -->
         <!-- ═══════════════════════════════════════════════════════════════ -->
         <section id="cashierSection" class="section">
@@ -1836,7 +1857,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260720b-noblgen"></script>
+    <script src="app.js?v=20260723a-anom"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

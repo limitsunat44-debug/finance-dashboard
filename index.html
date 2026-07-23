@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260723a-anom">
+    <link rel="stylesheet" href="style.css?v=20260723b-vsync">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1504,6 +1504,21 @@
                     </div>
                     <div id="bcTransfersError" class="error-message" style="display:none;margin:12px 0;"></div>
                     <div id="bcTransfersList" style="margin-top:12px;"></div>
+
+                    <!-- Авто-починка рассинхрона variant_id -->
+                    <div style="margin-top:20px;padding-top:16px;border-top:1px dashed var(--color-border,#ddd);">
+                        <h4 style="margin:0 0 6px 0;">🔧 Починка штрихкодов после перемещений</h4>
+                        <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 10px 0;">
+                            Если после перемещения штрихкоды не отображаются на новом складе (количество переехало, а коды “пустые”) —
+                            нажмите «Найти рассинхрон», проверьте список и нажмите «Исправить». Штрихкоды не меняются — просто привязываются к своему складу.
+                        </p>
+                        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                            <button class="btn btn-secondary" onclick="scanVariantSync()">🔍 Найти рассинхрон</button>
+                            <button class="btn btn-primary" id="btnFixVariantSync" onclick="applyVariantSync()" style="display:none;">✅ Исправить всё</button>
+                        </div>
+                        <div id="varSyncError" class="error-message" style="display:none;margin:12px 0;"></div>
+                        <div id="varSyncResult" style="margin-top:12px;"></div>
+                    </div>
                 </div>
 
                 <!-- ── Экземпляры ───────────────────── -->
@@ -1857,7 +1872,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260723a-anom"></script>
+    <script src="app.js?v=20260723b-vsync"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

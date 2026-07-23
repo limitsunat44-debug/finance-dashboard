@@ -9012,3 +9012,83 @@ async function resolveAnomaly(id, resolved) {
         alert('Не удалось изменить статус: ' + e.message);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ПОЧИНКА РАССИНХРОНА variant_id (после перемещений)
+// ═══════════════════════════════════════════════════════════════
+async function scanVariantSync() {
+    const errEl = document.getElementById('varSyncError');
+    const resEl = document.getElementById('varSyncResult');
+    const fixBtn = document.getElementById('btnFixVariantSync');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (fixBtn) fixBtn.style.display = 'none';
+    if (resEl) resEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Проверяю базу…</div>';
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=variant-sync`, {
+            method: 'GET',
+            headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        renderVariantSync(data);
+    } catch (e) {
+        if (resEl) resEl.innerHTML = '';
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = '❌ Не удалось проверить: ' + e.message; }
+    }
+}
+
+function renderVariantSync(data) {
+    const resEl = document.getElementById('varSyncResult');
+    const fixBtn = document.getElementById('btnFixVariantSync');
+    if (!resEl) return;
+    const groups = data.groups || [];
+    if (!data.total) {
+        resEl.innerHTML = '<div style="color:#16a34a;font-size:13px;font-weight:600;padding:8px 0;">✅ Рассинхрона нет — все штрихкоды привязаны к своим складам.</div>';
+        if (fixBtn) fixBtn.style.display = 'none';
+        return;
+    }
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    let html = `<div style="font-weight:600;margin-bottom:8px;">Найдено экземпляров с рассинхроном: ${data.total} (в ${groups.length} позициях)</div>`;
+    html += '<div style="max-height:320px;overflow-y:auto;border:1px solid var(--color-border,#eee);border-radius:8px;">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;">';
+    html += '<thead><tr style="text-align:left;position:sticky;top:0;background:var(--color-bg,#fff);">'
+        + '<th style="padding:6px 8px;">Товар</th><th style="padding:6px 8px;">Размер</th>'
+        + '<th style="padding:6px 8px;">Склад (факт)</th><th style="padding:6px 8px;">Сейчас привязан к</th>'
+        + '<th style="padding:6px 8px;text-align:right;">Шт.</th></tr></thead><tbody>';
+    for (const g of groups) {
+        html += '<tr style="border-top:1px solid var(--color-border,#f0f0f0);">'
+            + `<td style="padding:6px 8px;">${esc(g.product_name)}</td>`
+            + `<td style="padding:6px 8px;">${esc(g.size_label)}</td>`
+            + `<td style="padding:6px 8px;color:#16a34a;">${esc(g.su_warehouse_name)}</td>`
+            + `<td style="padding:6px 8px;color:#e11d48;">${esc(g.variant_warehouse_name)}</td>`
+            + `<td style="padding:6px 8px;text-align:right;font-weight:600;">${g.count}</td></tr>`;
+    }
+    html += '</tbody></table></div>';
+    resEl.innerHTML = html;
+    if (fixBtn) { fixBtn.style.display = 'inline-block'; fixBtn.textContent = `✅ Исправить всё (${data.total})`; }
+}
+
+async function applyVariantSync() {
+    if (!confirm('Перепривязать штрихкоды к их фактическим складам? Сами коды не меняются.')) return;
+    const errEl = document.getElementById('varSyncError');
+    const resEl = document.getElementById('varSyncResult');
+    const fixBtn = document.getElementById('btnFixVariantSync');
+    if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
+    if (fixBtn) { fixBtn.disabled = true; fixBtn.textContent = '⏳ Исправляю…'; }
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=variant-sync`, {
+            method: 'POST',
+            headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ apply: true })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (resEl) resEl.innerHTML = `<div style="color:#16a34a;font-size:13px;font-weight:600;padding:8px 0;">✅ Исправлено экземпляров: ${data.fixed}. Обновите ценник для витрины (Ctrl+F5).</div>`;
+        if (fixBtn) fixBtn.style.display = 'none';
+    } catch (e) {
+        if (errEl) { errEl.style.display = 'block'; errEl.textContent = '❌ Не удалось исправить: ' + e.message; }
+    } finally {
+        if (fixBtn) { fixBtn.disabled = false; }
+    }
+}

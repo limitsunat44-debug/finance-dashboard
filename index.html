@@ -4,11 +4,83 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260728b-autobalance">
+    <link rel="stylesheet" href="style.css?v=20260728c-pos">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <style>
+    /* ===== КАССА / РМК — самодостаточные адаптивные стили ===== */
+    .pos-root{max-width:640px;margin:0 auto;padding:0 4px;box-sizing:border-box;}
+    .pos-root *{box-sizing:border-box;}
+    .pos-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
+    .pos-topbar-title{font-size:22px;font-weight:700;}
+    .pos-topbar-status{font-size:13px;color:var(--color-text-secondary,#667);}
+    .pos-card{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e3e6ea);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
+    .pos-step-head{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;margin:0 0 10px;}
+    .pos-step-num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#2563eb;color:#fff;font-size:14px;font-weight:700;flex:0 0 auto;}
+    .pos-hint{font-size:13px;color:var(--color-text-secondary,#667);margin:4px 0 12px;line-height:1.4;}
+    .pos-alert{border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:14px;line-height:1.4;}
+    .pos-alert-error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
+    .pos-loading{padding:18px;text-align:center;color:var(--color-text-secondary,#667);font-size:14px;}
+    /* список касс */
+    .pos-kassa-list{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px;}
+    .pos-kassa-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 16px;border:2px solid var(--color-border,#e3e6ea);border-radius:12px;background:var(--color-surface,#fff);cursor:pointer;font-size:16px;font-weight:600;color:inherit;transition:all .12s;min-height:56px;}
+    .pos-kassa-item:hover{border-color:#93c5fd;}
+    .pos-kassa-item.active{border-color:#2563eb;background:#eff6ff;}
+    .pos-kassa-item .pos-kassa-emoji{font-size:22px;flex:0 0 auto;}
+    .pos-kassa-item .pos-kassa-sub{display:block;font-size:12px;font-weight:400;color:var(--color-text-secondary,#778);margin-top:2px;}
+    .pos-confirm{display:flex;align-items:flex-start;gap:10px;font-size:15px;line-height:1.4;padding:12px;background:#f8fafc;border:1px solid var(--color-border,#e3e6ea);border-radius:12px;margin-bottom:14px;cursor:pointer;}
+    .pos-confirm input{width:22px;height:22px;flex:0 0 auto;margin-top:1px;}
+    /* поля */
+    .pos-field{margin-bottom:14px;}
+    .pos-field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--color-text-secondary,#556);}
+    .pos-select,.pos-input{width:100%;padding:13px 14px;font-size:16px;border:2px solid var(--color-border,#e3e6ea);border-radius:12px;background:var(--color-surface,#fff);color:inherit;min-height:50px;}
+    .pos-input-scan{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;}
+    .pos-select:focus,.pos-input:focus{outline:none;border-color:#2563eb;}
+    .pos-kassa-badge{display:inline-block;font-size:15px;font-weight:700;padding:8px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:14px;color:#1e40af;}
+    /* кнопки */
+    .pos-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:14px 18px;font-size:16px;font-weight:600;border-radius:12px;border:none;cursor:pointer;min-height:52px;transition:all .12s;}
+    .pos-btn:disabled{opacity:.45;cursor:not-allowed;}
+    .pos-btn-primary{background:#2563eb;color:#fff;}
+    .pos-btn-primary:not(:disabled):hover{background:#1d4ed8;}
+    .pos-btn-ghost{background:var(--color-surface,#f1f5f9);color:inherit;border:2px solid var(--color-border,#e3e6ea);}
+    .pos-btn-danger{background:#dc2626;color:#fff;}
+    .pos-btn-danger:hover{background:#b91c1c;}
+    .pos-btn-block{width:100%;}
+    .pos-btn-sm{padding:9px 14px;font-size:14px;min-height:auto;}
+    .pos-row-btns{display:flex;gap:10px;}
+    .pos-row-btns .pos-btn{flex:1;}
+    /* смена / сканер */
+    .pos-shift-card{background:#f0fdf4;border-color:#bbf7d0;}
+    .pos-shift-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+    .pos-shift-open{font-size:16px;font-weight:700;color:#15803d;}
+    .pos-shift-meta{font-size:13px;color:var(--color-text-secondary,#556);margin-top:3px;line-height:1.4;}
+    .pos-scan-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
+    .pos-mode-badge{font-size:12px;font-weight:600;padding:5px 10px;border-radius:20px;background:#e0e7ff;color:#3730a3;}
+    .pos-camera-wrap{margin-bottom:14px;}
+    .pos-reader{width:100%;border-radius:12px;overflow:hidden;margin-bottom:10px;}
+    .pos-reader video{width:100%!important;height:auto!important;border-radius:12px;}
+    .pos-cart-empty{padding:16px;text-align:center;color:var(--color-text-secondary,#889);font-size:14px;}
+    .pos-cart-total{display:flex;align-items:center;justify-content:space-between;font-size:18px;font-weight:700;padding-top:12px;margin-top:8px;border-top:1px solid var(--color-border,#e3e6ea);}
+    /* мобайл */
+    @media (max-width:560px){
+      .pos-root{padding:0 2px;}
+      .pos-topbar-title{font-size:20px;}
+      .pos-card{padding:14px;border-radius:12px;}
+      .pos-kassa-item{font-size:15px;padding:13px 14px;}
+      .pos-btn{font-size:15px;padding:13px 14px;}
+      .pos-row-btns{flex-direction:column;}
+    }
+    @media (prefers-color-scheme:dark){
+      .pos-confirm{background:#1e293b;}
+      .pos-kassa-item.active{background:#1e3a5f;}
+      .pos-kassa-badge{background:#1e3a5f;color:#bfdbfe;border-color:#1e40af;}
+      .pos-shift-card{background:#0f2417;border-color:#166534;}
+      .pos-alert-error{background:#450a0a;color:#fca5a5;border-color:#7f1d1d;}
+    }
+    </style>
 </head>
 <body>
     <!-- Login Screen -->
@@ -62,6 +134,7 @@
             <button class="nav-tab" data-tab="barcodes" onclick="switchTab('barcodes')">🏷️ Штрихкоды</button>
             <button class="nav-tab" data-tab="anomalies" onclick="switchTab('anomalies')">⚠️ Аномальные продажи <span id="anomaliesBadge" style="display:none;background:#e11d48;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px;"></span></button>
             <button class="nav-tab" data-tab="cashier" onclick="switchTab('cashier')">🧾 Ценник для витрины</button>
+            <button class="nav-tab" data-tab="pos" onclick="switchTab('pos')">🛒 Касса</button>
         </nav>
 
         <!-- Loading Indicator -->
@@ -1805,6 +1878,103 @@
             </div>
         </section>
 
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <!-- КАССА / РМК (мобильный + десктоп) -->
+        <!-- ═══════════════════════════════════════════════════════════════ -->
+        <section id="posSection" class="section">
+          <div class="pos-root" id="posRoot">
+
+            <!-- Заголовок + статус смены -->
+            <div class="pos-topbar">
+              <div class="pos-topbar-title">🛒 Касса</div>
+              <div class="pos-topbar-status" id="posTopStatus"></div>
+            </div>
+
+            <div id="posError" class="pos-alert pos-alert-error" style="display:none;"></div>
+
+            <!-- ШАГ 1: выбор кассы -->
+            <div class="pos-step" id="posStep1">
+              <div class="pos-card">
+                <div class="pos-step-head"><span class="pos-step-num">1</span> Выберите кассу</div>
+                <p class="pos-hint">Выберите магазин/кассу, за которой вы работаете.</p>
+                <div id="posKassaList" class="pos-kassa-list">
+                  <div class="pos-loading">⏳ Загружаю кассы…</div>
+                </div>
+                <label class="pos-confirm" id="posConfirmWrap" style="display:none;">
+                  <input type="checkbox" id="posConfirmKassa">
+                  <span>Подтверждаю, что это <b id="posConfirmName">—</b> — моя касса</span>
+                </label>
+                <button class="pos-btn pos-btn-primary pos-btn-block" id="posToStep2" disabled>Продолжить →</button>
+              </div>
+            </div>
+
+            <!-- ШАГ 2: открытие смены + продавец -->
+            <div class="pos-step" id="posStep2" style="display:none;">
+              <div class="pos-card">
+                <div class="pos-step-head"><span class="pos-step-num">2</span> Открыть кассовую смену</div>
+                <div class="pos-kassa-badge" id="posChosenKassa">—</div>
+
+                <div class="pos-field">
+                  <label for="posSeller">Продавец</label>
+                  <select id="posSeller" class="pos-select"><option value="">— выберите продавца —</option></select>
+                </div>
+
+                <div class="pos-row-btns">
+                  <button class="pos-btn pos-btn-ghost" id="posBackToStep1">← Назад</button>
+                  <button class="pos-btn pos-btn-primary" id="posOpenShift" disabled>Открыть смену</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ШАГ 3: область продаж (РМК) -->
+            <div class="pos-step" id="posStep3" style="display:none;">
+              <div class="pos-card pos-shift-card">
+                <div class="pos-shift-head">
+                  <div>
+                    <div class="pos-shift-open">🟢 Смена открыта</div>
+                    <div class="pos-shift-meta" id="posShiftMeta">—</div>
+                  </div>
+                  <button class="pos-btn pos-btn-danger pos-btn-sm" id="posCloseShift">Закрыть смену</button>
+                </div>
+              </div>
+
+              <!-- Сканер / ввод штрихкода -->
+              <div class="pos-card">
+                <div class="pos-scan-head">
+                  <div class="pos-step-head" style="margin:0;">Сканирование товара</div>
+                  <span class="pos-mode-badge" id="posModeBadge">—</span>
+                </div>
+
+                <!-- Мобайл: камера -->
+                <div id="posCameraWrap" class="pos-camera-wrap" style="display:none;">
+                  <div id="posReader" class="pos-reader"></div>
+                  <button class="pos-btn pos-btn-ghost pos-btn-block" id="posCamToggle">📷 Включить камеру</button>
+                </div>
+
+                <!-- Десктоп: аппаратный сканер (клавиатурный ввод) -->
+                <div class="pos-field">
+                  <label for="posScanInput">Штрихкод (EAN-13)</label>
+                  <input type="text" id="posScanInput" class="pos-input pos-input-scan" inputmode="numeric"
+                         placeholder="Наведите сканер или введите код…" autocomplete="off">
+                  <p class="pos-hint" id="posScanHint">Ожидание сканирования…</p>
+                </div>
+              </div>
+
+              <!-- Корзина (заготовка) -->
+              <div class="pos-card">
+                <div class="pos-step-head" style="margin:0 0 8px;">Чек</div>
+                <div id="posCart" class="pos-cart">
+                  <div class="pos-cart-empty">Корзина пуста. Отсканируйте товар.</div>
+                </div>
+                <div class="pos-cart-total" id="posCartTotal" style="display:none;">
+                  <span>Итого:</span><b id="posCartTotalVal">0</b>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
     </div>
 
     <!-- Скрытая область печати этикеток -->
@@ -1982,7 +2152,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728b-autobalance"></script>
+    <script src="app.js?v=20260728c-pos"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

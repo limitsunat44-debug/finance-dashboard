@@ -60,6 +60,8 @@ const ADMIN_ACCOUNTS = {
 let currentAllowedTabs = '*';
 
 function isTabAllowed(tabName) {
+    // Вкладка «Касса» (РМК) видна ВСЕМ пользователям без исключения.
+    if (tabName === 'pos') return true;
     return currentAllowedTabs === '*' || currentAllowedTabs.includes(tabName);
 }
 
@@ -1593,6 +1595,8 @@ function switchTab(tabName) {
         if (typeof loadAnomalies === 'function') loadAnomalies();
     } else if (tabName === 'cashier') {
         if (typeof loadCashier === 'function') loadCashier();
+    } else if (tabName === 'pos') {
+        if (typeof loadPos === 'function') loadPos();
     } else if (tabName === 'settings') {
         if (typeof loadSyncStatus === 'function') loadSyncStatus();
     }
@@ -9657,4 +9661,391 @@ async function applyVariantSync() {
     } finally {
         if (fixBtn) { fixBtn.disabled = false; }
     }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// КАССА / РМК  (этап 1: вход до области продаж)
+//   Поток: выбор кассы → подтверждение → открытие смены → выбор продавца
+//          → область регистрации продаж (сканер: mobile-камера / desktop-сканер)
+// ═══════════════════════════════════════════════════════════════════════
+const POS = {
+    loaded: false,
+    kassas: [],
+    sellers: [],
+    chosen: null,      // выбранная касса {ref,name,shopRef,shopName,...}
+    shift: null,       // открытая смена из Supabase
+    isMobile: null,    // определяется при инициализации
+    scanBuffer: '',    // буфер аппаратного сканера (desktop)
+    scanTimer: null,
+    html5qr: null,     // экземпляр html5-qrcode
+    camOn: false,
+    keyHandler: null,
+};
+
+function posDetectMobile() {
+    const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    const ua = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+    const narrow = window.innerWidth <= 820;
+    return (coarse && narrow) || (ua && narrow);
+}
+
+function posError(msg) {
+    const el = document.getElementById('posError');
+    if (!el) return;
+    if (!msg) { el.style.display = 'none'; el.textContent = ''; return; }
+    el.style.display = 'block';
+    el.textContent = '⚠️ ' + msg;
+}
+
+function posShowStep(n) {
+    [1, 2, 3].forEach(i => {
+        const s = document.getElementById('posStep' + i);
+        if (s) s.style.display = (i === n) ? '' : 'none';
+    });
+}
+
+async function posApi(path, opts) {
+    const res = await fetch(`${BARCODE_SVC_URL}/api/pos${path}`, {
+        ...(opts || {}),
+        headers: {
+            'Content-Type': 'application/json',
+            'X-Provision-Secret': BARCODE_SVC_SECRET,
+            ...((opts && opts.headers) || {}),
+        },
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+}
+
+// Эмодзи для магазина
+function posKassaEmoji(name) {
+    const n = (name || '').toLowerCase();
+    if (n.includes('интернет')) return '🌐';
+    if (n.includes('сити') || n.includes('молл')) return '🏬';
+    if (n.includes('сиём') || n.includes('сием')) return '🏪';
+    if (n.includes('баракат')) return '🏪';
+    if (n.includes('айни')) return '🏪';
+    return '🛒';
+}
+
+async function loadPos() {
+    POS.isMobile = posDetectMobile();
+    posError('');
+
+    // Если уже загружено и есть выбранная касса с открытой сменой — показываем её
+    if (POS.loaded && POS.shift) { posShowStep(3); return; }
+    if (POS.loaded && POS.chosen) { return; } // сохраняем текущее состояние
+
+    posShowStep(1);
+    const listEl = document.getElementById('posKassaList');
+    if (listEl) listEl.innerHTML = '<div class="pos-loading">⏳ Загружаю кассы…</div>';
+
+    try {
+        const r = await posApi('', { method: 'GET' });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        POS.kassas = r.data.kassas || [];
+        POS.sellers = r.data.sellers || [];
+        POS.loaded = true;
+        posRenderKassas();
+        posPopulateSellers();
+    } catch (e) {
+        if (listEl) listEl.innerHTML = '';
+        posError('Не удалось загрузить кассы: ' + e.message);
+    }
+}
+
+function posRenderKassas() {
+    const listEl = document.getElementById('posKassaList');
+    if (!listEl) return;
+    if (!POS.kassas.length) { listEl.innerHTML = '<div class="pos-loading">Кассы не найдены.</div>'; return; }
+    listEl.innerHTML = '';
+    POS.kassas.forEach(k => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pos-kassa-item';
+        btn.dataset.ref = k.ref;
+        const sub = k.type ? (k.offline ? 'Автономная ККМ' : 'Фискальный регистратор') : '';
+        btn.innerHTML = `<span class="pos-kassa-emoji">${posKassaEmoji(k.name)}</span>
+            <span><span>${posEsc(k.name)}</span>${sub ? `<span class="pos-kassa-sub">${sub}</span>` : ''}</span>`;
+        btn.onclick = () => posSelectKassa(k);
+        listEl.appendChild(btn);
+    });
+}
+
+function posEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+}
+
+function posSelectKassa(k) {
+    POS.chosen = k;
+    document.querySelectorAll('#posKassaList .pos-kassa-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.ref === k.ref);
+    });
+    // показать подтверждение
+    const wrap = document.getElementById('posConfirmWrap');
+    const nameEl = document.getElementById('posConfirmName');
+    const chk = document.getElementById('posConfirmKassa');
+    if (nameEl) nameEl.textContent = k.name;
+    if (chk) chk.checked = false;
+    if (wrap) wrap.style.display = 'flex';
+    posUpdateStep1Btn();
+}
+
+function posUpdateStep1Btn() {
+    const chk = document.getElementById('posConfirmKassa');
+    const btn = document.getElementById('posToStep2');
+    if (btn) btn.disabled = !(POS.chosen && chk && chk.checked);
+}
+
+function posPopulateSellers() {
+    const sel = document.getElementById('posSeller');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">— выберите продавца —</option>';
+    let addedDivider = false;
+    POS.sellers.forEach(s => {
+        // разделитель между «реально продававшими» и остальными
+        if (!s.recent && !addedDivider && POS.sellers.some(x => x.recent)) {
+            const opt = document.createElement('option');
+            opt.disabled = true; opt.textContent = '──────────';
+            sel.appendChild(opt); addedDivider = true;
+        }
+        const opt = document.createElement('option');
+        opt.value = s.ref;
+        opt.textContent = (s.recent ? '⭐ ' : '') + s.name;
+        opt.dataset.name = s.name;
+        sel.appendChild(opt);
+    });
+}
+
+// ── Шаг 2 ──
+async function posGoStep2() {
+    if (!POS.chosen) return;
+    posError('');
+    const badge = document.getElementById('posChosenKassa');
+    if (badge) badge.textContent = posKassaEmoji(POS.chosen.name) + ' ' + POS.chosen.name;
+
+    // Проверим, нет ли уже открытой смены по этой кассе
+    try {
+        const r = await posApi(`?action=shift&kassa=${encodeURIComponent(POS.chosen.ref)}`, { method: 'GET' });
+        if (r.ok && r.data.ok && r.data.shift) {
+            POS.shift = r.data.shift;
+            posEnterSalesArea();
+            return;
+        }
+    } catch (_) { /* игнор — просто откроем шаг 2 */ }
+
+    posShowStep(2);
+}
+
+function posUpdateOpenBtn() {
+    const sel = document.getElementById('posSeller');
+    const btn = document.getElementById('posOpenShift');
+    if (btn) btn.disabled = !(sel && sel.value);
+}
+
+async function posOpenShift() {
+    const sel = document.getElementById('posSeller');
+    if (!POS.chosen || !sel || !sel.value) return;
+    const sellerRef = sel.value;
+    const sellerName = sel.options[sel.selectedIndex]?.dataset.name || sel.options[sel.selectedIndex]?.textContent || '';
+    const btn = document.getElementById('posOpenShift');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Открываю…'; }
+    posError('');
+    try {
+        const r = await posApi('?action=open-shift', {
+            method: 'POST',
+            body: JSON.stringify({
+                kassaC1Ref: POS.chosen.ref,
+                kassaName: POS.chosen.name,
+                shopC1Ref: POS.chosen.shopRef,
+                shopName: POS.chosen.shopName || POS.chosen.name,
+                sellerC1Ref: sellerRef,
+                sellerName: sellerName.replace(/^⭐ /, ''),
+                openedBy: currentUser || 'unknown',
+                device: POS.isMobile ? 'mobile' : 'desktop',
+            }),
+        });
+        if (r.status === 409 && r.data.shift) {
+            // уже открыта — входим в неё
+            POS.shift = r.data.shift;
+            posEnterSalesArea();
+            return;
+        }
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        POS.shift = r.data.shift;
+        posEnterSalesArea();
+    } catch (e) {
+        posError('Не удалось открыть смену: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Открыть смену'; }
+    }
+}
+
+// ── Шаг 3: область продаж ──
+function posEnterSalesArea() {
+    posShowStep(3);
+    const sh = POS.shift || {};
+    const meta = document.getElementById('posShiftMeta');
+    if (meta) {
+        const opened = sh.opened_at ? new Date(sh.opened_at).toLocaleString('ru-RU') : '';
+        meta.innerHTML = `${posEsc(sh.kassa_name || '')} · Продавец: <b>${posEsc(sh.seller_name || '—')}</b><br>Открыта: ${opened}`;
+    }
+    const top = document.getElementById('posTopStatus');
+    if (top) top.textContent = '🟢 Смена открыта · ' + (sh.kassa_name || '');
+
+    // Режим сканирования
+    const badge = document.getElementById('posModeBadge');
+    const camWrap = document.getElementById('posCameraWrap');
+    const hint = document.getElementById('posScanHint');
+    if (POS.isMobile) {
+        if (badge) badge.textContent = '📷 Камера телефона';
+        if (camWrap) camWrap.style.display = '';
+        if (hint) hint.textContent = 'Можно навести камеру или ввести код вручную.';
+    } else {
+        if (badge) badge.textContent = '🖥️ Аппаратный сканер';
+        if (camWrap) camWrap.style.display = 'none';
+        if (hint) hint.textContent = 'Отсканируйте товар аппаратным сканером — код появится здесь.';
+        // фокус на поле ввода, чтобы сканер-«клавиатура» попадал сюда
+        setTimeout(() => { const inp = document.getElementById('posScanInput'); if (inp) inp.focus(); }, 100);
+    }
+    posSetupHardwareScanner();
+}
+
+// Desktop: аппаратный сканер работает как клавиатура — ловим быстрый ввод + Enter
+function posSetupHardwareScanner() {
+    if (POS.keyHandler) return; // уже установлен
+    POS.keyHandler = function (e) {
+        // работаем только когда открыта вкладка POS и есть смена
+        const posSection = document.getElementById('posSection');
+        if (!posSection || !posSection.classList.contains('active') || !POS.shift) return;
+        const inp = document.getElementById('posScanInput');
+        const activeIsScan = document.activeElement === inp;
+        // если фокус в другом текстовом поле — не перехватываем
+        const ae = document.activeElement;
+        if (!activeIsScan && ae && (ae.tagName === 'INPUT' || ae.tagName === 'SELECT' || ae.tagName === 'TEXTAREA')) return;
+
+        if (e.key === 'Enter') {
+            if (POS.scanBuffer.length >= 6) {
+                const code = POS.scanBuffer;
+                posHandleScannedCode(code);
+            }
+            POS.scanBuffer = '';
+            return;
+        }
+        if (/^[0-9]$/.test(e.key)) {
+            POS.scanBuffer += e.key;
+            clearTimeout(POS.scanTimer);
+            POS.scanTimer = setTimeout(() => { POS.scanBuffer = ''; }, 120); // сканер печатает быстро
+        }
+    };
+    document.addEventListener('keydown', POS.keyHandler);
+}
+
+// Ручной ввод в поле (десктоп-сканер тоже сюда пишет + Enter)
+function posScanInputHandler(e) {
+    if (e.key === 'Enter') {
+        const inp = e.target;
+        const code = (inp.value || '').trim();
+        if (code.length >= 6) posHandleScannedCode(code);
+        inp.value = '';
+        e.preventDefault();
+    }
+}
+
+// Заглушка обработки кода (сам РМК допилим на этапе 2)
+function posHandleScannedCode(code) {
+    const hint = document.getElementById('posScanHint');
+    if (hint) hint.innerHTML = `✅ Отсканирован код: <b>${posEsc(code)}</b> <span style="color:#889;">(регистрация продажи — этап 2)</span>`;
+    const inp = document.getElementById('posScanInput');
+    if (inp) inp.value = '';
+    // TODO этап 2: поиск экземпляра по штрихкоду, добавление в чек, оплата, отправка Чека ККМ в 1С
+}
+
+// Mobile: камера через html5-qrcode
+async function posToggleCamera() {
+    const btn = document.getElementById('posCamToggle');
+    if (!window.Html5Qrcode) { posError('Библиотека сканера не загрузилась. Обновите страницу.'); return; }
+    if (POS.camOn) { await posStopCamera(); return; }
+    try {
+        POS.html5qr = new Html5Qrcode('posReader', { verbose: false });
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 150 },
+            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+        };
+        await POS.html5qr.start(
+            { facingMode: 'environment' },
+            config,
+            (decodedText) => { posHandleScannedCode(decodedText); },
+            () => {}
+        );
+        POS.camOn = true;
+        if (btn) btn.textContent = '⏹ Выключить камеру';
+    } catch (e) {
+        posError('Не удалось запустить камеру: ' + (e.message || e));
+    }
+}
+
+async function posStopCamera() {
+    const btn = document.getElementById('posCamToggle');
+    try {
+        if (POS.html5qr) { await POS.html5qr.stop(); await POS.html5qr.clear(); }
+    } catch (_) {}
+    POS.html5qr = null;
+    POS.camOn = false;
+    if (btn) btn.textContent = '📷 Включить камеру';
+}
+
+async function posCloseShift() {
+    if (!POS.shift) return;
+    if (!confirm('Закрыть кассовую смену?')) return;
+    posError('');
+    try {
+        await posStopCamera();
+        const r = await posApi('?action=close-shift', {
+            method: 'POST',
+            body: JSON.stringify({ shiftId: POS.shift.id }),
+        });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        POS.shift = null;
+        POS.chosen = null;
+        const top = document.getElementById('posTopStatus');
+        if (top) top.textContent = '';
+        const chk = document.getElementById('posConfirmKassa');
+        if (chk) chk.checked = false;
+        const wrap = document.getElementById('posConfirmWrap');
+        if (wrap) wrap.style.display = 'none';
+        posUpdateStep1Btn();
+        posShowStep(1);
+    } catch (e) {
+        posError('Не удалось закрыть смену: ' + e.message);
+    }
+}
+
+// Навешиваем обработчики один раз при загрузке DOM
+function posBindEvents() {
+    const chk = document.getElementById('posConfirmKassa');
+    if (chk) chk.addEventListener('change', posUpdateStep1Btn);
+    const toStep2 = document.getElementById('posToStep2');
+    if (toStep2) toStep2.addEventListener('click', posGoStep2);
+    const back = document.getElementById('posBackToStep1');
+    if (back) back.addEventListener('click', () => posShowStep(1));
+    const sellerSel = document.getElementById('posSeller');
+    if (sellerSel) sellerSel.addEventListener('change', posUpdateOpenBtn);
+    const openBtn = document.getElementById('posOpenShift');
+    if (openBtn) openBtn.addEventListener('click', posOpenShift);
+    const closeBtn = document.getElementById('posCloseShift');
+    if (closeBtn) closeBtn.addEventListener('click', posCloseShift);
+    const camToggle = document.getElementById('posCamToggle');
+    if (camToggle) camToggle.addEventListener('click', posToggleCamera);
+    const scanInp = document.getElementById('posScanInput');
+    if (scanInp) scanInp.addEventListener('keydown', posScanInputHandler);
+}
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', posBindEvents);
+} else {
+    posBindEvents();
 }

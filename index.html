@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260723b-vsync">
+    <link rel="stylesheet" href="style.css?v=20260727-receipt">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1323,6 +1323,7 @@
                 </p>
 
                 <div class="section-tabs" id="barcodesSubTabs">
+                    <button class="section-tab" data-btab="receipt">➕ Приход</button>
                     <button class="section-tab active" data-btab="print">🖨️ Печать</button>
                     <button class="section-tab" data-btab="receipts">📦 Поступления</button>
                     <button class="section-tab" data-btab="transfers">🚚 Перемещения</button>
@@ -1466,7 +1467,61 @@
                     </div>
                 </div>
 
-                <!-- ── Экземпляры ─────────────────────────────────────── -->
+                <!-- ── Приход товара (создание документа поступления в 1С) ── -->
+                <div id="bcReceiptTab" class="prod-tab-content">
+                    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
+                        Приём товара на склад. Найдите товар, укажите размеры и количество,
+                        цену прихода и розничные цены. По кнопке «Оприходовать»
+                        создаётся документ Поступления в 1С, а штрихкоды потом печатаются
+                        во вкладке «Печать».
+                    </p>
+
+                    <!-- Склад + поиск товара -->
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
+                        <div style="min-width:200px;">
+                            <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Склад прихода</label>
+                            <select id="rcpWarehouse" class="form-control" style="min-width:200px;"></select>
+                        </div>
+                        <div style="flex:1;min-width:260px;position:relative;">
+                            <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Товар (поиск по названию)</label>
+                            <input type="text" id="rcpProductSearch" class="form-control" placeholder="Начните вводить название…" autocomplete="off">
+                        </div>
+                    </div>
+
+                    <!-- Выбранный товар + размеры с количеством -->
+                    <div id="rcpProductBox" style="display:none;margin-top:8px;"></div>
+
+                    <!-- Цены -->
+                    <div id="rcpPricesBox" style="display:none;margin-top:16px;padding:14px;border:1px solid var(--color-border,#ddd);border-radius:8px;background:var(--color-surface,#faf9f7);">
+                        <div style="font-weight:600;margin-bottom:10px;">Цены</div>
+                        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                            <div>
+                                <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Цена прихода (закупка)</label>
+                                <input type="number" id="rcpPurchasePrice" class="form-control" style="width:150px;" min="0" step="0.01" placeholder="0">
+                            </div>
+                            <div>
+                                <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Старая цена (зачёркнутая)</label>
+                                <input type="number" id="rcpPriceOld" class="form-control" style="width:150px;" min="0" step="0.01" placeholder="—">
+                            </div>
+                            <div>
+                                <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Новая цена (розница)</label>
+                                <input type="number" id="rcpPriceNew" class="form-control" style="width:150px;" min="0" step="0.01" placeholder="0">
+                            </div>
+                        </div>
+                        <p style="font-size:11px;color:var(--color-text-secondary);margin:10px 0 0 0;">
+                            Старая цена хранится только для ценника (зачёркнутая). В 1С уйдёт только новая розничная цена.
+                        </p>
+                    </div>
+
+                    <div id="rcpError" class="error-message" style="display:none;margin:12px 0;"></div>
+                    <div id="rcpInfo" style="margin:12px 0;font-size:13px;"></div>
+
+                    <div style="margin-top:16px;">
+                        <button class="btn btn-primary" id="rcpSubmitBtn" onclick="rcpSubmit()" disabled>✅ Оприходовать</button>
+                        <button class="btn" onclick="rcpReset()">Очистить</button>
+                    </div>
+                </div>
+
                 <div id="bcReceiptsTab" class="prod-tab-content">
                     <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px 0;">
                         Последние документы «Поступление товаров» из 1С. Если у позиции уникальных
@@ -1872,7 +1927,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260723b-vsync"></script>
+    <script src="app.js?v=20260727-receipt"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

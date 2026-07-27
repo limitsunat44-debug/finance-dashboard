@@ -6494,11 +6494,12 @@ function switchBarcodesSubtab(name) {
     document.querySelectorAll('#barcodesSubTabs .section-tab').forEach(b => {
         b.classList.toggle('active', b.dataset.btab === name);
     });
-    const map = { print: 'bcPrintTab', receipts: 'bcReceiptsTab', transfers: 'bcTransfersTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
+    const map = { receipt: 'bcReceiptTab', print: 'bcPrintTab', receipts: 'bcReceiptsTab', transfers: 'bcTransfersTab', units: 'bcUnitsTab', revision: 'bcRevisionTab' };
     document.querySelectorAll('#barcodesSection .prod-tab-content').forEach(c => c.classList.remove('active'));
     const el = document.getElementById(map[name]);
     if (el) el.classList.add('active');
 
+    if (name === 'receipt') initReceiptTab();
     if (name === 'units') loadUnitsTable();
     if (name === 'receipts') loadReceipts();
     if (name === 'transfers') loadTransfers();
@@ -7026,7 +7027,258 @@ function bcSelectedVariants() {
     }));
 }
 
-// ── Список номенклатур к печати (корзина) ───────────────────────
+// ================================================================
+// ПРИХОД ТОВАРА (подвкладка «➕ Приход»)
+// Создаёт документ Поступления в 1С через create-receipt.
+// Размеры — рекомендация из существующих вариантов товара (не создаём заново).
+// ================================================================
+const receiptState = { selectedProductId: null };
+
+function initReceiptTab() {
+    const whSel = document.getElementById('rcpWarehouse');
+    if (whSel && !whSel.dataset.filled) {
+        const opts = (barcodesState.warehouses || [])
+            .map(w => `<option value="${escapeHtml(w.c1_ref || '')}" data-id="${escapeHtml(w.id)}">${escapeHtml(w.name || w.c1_code || w.id)}</option>`)
+            .join('');
+        whSel.innerHTML = opts || '<option value="">Нет складов</option>';
+        whSel.dataset.filled = '1';
+        whSel.addEventListener('change', function () {
+            if (receiptState.selectedProductId) rcpSelectProduct(receiptState.selectedProductId);
+        });
+    }
+    const searchEl = document.getElementById('rcpProductSearch');
+    if (searchEl && !searchEl.dataset.bound) {
+        let t = null;
+        searchEl.addEventListener('input', function () {
+            clearTimeout(t);
+            const q = this.value;
+            t = setTimeout(() => rcpSearchProducts(q), 250);
+        });
+        searchEl.dataset.bound = '1';
+    }
+}
+
+function rcpEnsureSearchBox() {
+    let box = document.getElementById('rcpSearchResults');
+    if (!box) {
+        const inp = document.getElementById('rcpProductSearch');
+        box = document.createElement('div');
+        box.id = 'rcpSearchResults';
+        box.style.cssText = 'position:absolute;top:100%;left:0;right:0;z-index:60;background:#fff;' +
+            'border:1px solid #ccc;border-radius:6px;max-height:260px;overflow-y:auto;' +
+            'box-shadow:0 6px 18px rgba(0,0,0,.14);display:none;';
+        inp.parentElement.style.position = 'relative';
+        inp.parentElement.appendChild(box);
+    }
+    return box;
+}
+
+function rcpSearchProducts(query) {
+    const box = rcpEnsureSearchBox();
+    const q = String(query || '').trim().toLowerCase();
+    if (q.length < 2) { box.style.display = 'none'; return; }
+    const matches = (barcodesState.products || [])
+        .filter(p => (p.name_ru || '').toLowerCase().includes(q))
+        .slice(0, 30);
+    if (!matches.length) {
+        box.innerHTML = '<div style="padding:8px 10px;color:#888;">Ничего не найдено</div>';
+        box.style.display = 'block';
+        return;
+    }
+    box.innerHTML = matches.map(p =>
+        `<div class="rcp-search-item" data-pid="${escapeHtml(p.id)}" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #eee;">
+            ${escapeHtml(p.name_ru)}${p.category ? ` <span style="color:#999;">· ${escapeHtml(p.category)}</span>` : ''}
+        </div>`
+    ).join('');
+    box.style.display = 'block';
+    box.querySelectorAll('.rcp-search-item').forEach(item => {
+        item.addEventListener('mouseenter', function () { this.style.background = '#f0f0f0'; });
+        item.addEventListener('mouseleave', function () { this.style.background = ''; });
+        item.addEventListener('click', function () {
+            rcpSelectProduct(this.dataset.pid);
+            box.style.display = 'none';
+        });
+    });
+}
+
+function rcpSelectProduct(pid) {
+    receiptState.selectedProductId = pid;
+    const prod = (barcodesState.products || []).find(p => String(p.id) === String(pid));
+    const inp = document.getElementById('rcpProductSearch');
+    if (inp && prod) inp.value = prod.name_ru || '';
+
+    const box = document.getElementById('rcpProductBox');
+    const pricesBox = document.getElementById('rcpPricesBox');
+    const submitBtn = document.getElementById('rcpSubmitBtn');
+    if (!box || !prod) return;
+
+    const whSel = document.getElementById('rcpWarehouse');
+    const whId = whSel?.selectedOptions?.[0]?.dataset?.id || '';
+
+    let vs = (barcodesState.variants || []).filter(v => String(v.product_id) === String(pid));
+    const byChar = {};
+    vs.forEach(v => {
+        const key = v.c1_char_ref || v.size_label || v.id;
+        if (!byChar[key]) {
+            byChar[key] = { charRef: v.c1_char_ref || '', size: v.size_label || '(без размера)', variantIdOnWh: null, stockOnWh: 0 };
+        }
+        if (whId && String(v.warehouse_id) === String(whId)) {
+            byChar[key].variantIdOnWh = v.id;
+            byChar[key].stockOnWh = Number(v.stock) || 0;
+        }
+    });
+    let sizes = Object.values(byChar);
+    sizes.sort((a, b) => {
+        const ka = bcSizeSortKey(a.size), kb = bcSizeSortKey(b.size);
+        if (ka !== kb) return ka - kb;
+        return String(a.size).localeCompare(String(b.size));
+    });
+
+    if (!sizes.length) {
+        box.innerHTML = '<div style="padding:10px;color:#888;">У товара нет размеров в базе. (Создание новых размеров — позже.)</div>';
+        box.style.display = 'block';
+        if (pricesBox) pricesBox.style.display = 'none';
+        if (submitBtn) submitBtn.disabled = true;
+        return;
+    }
+
+    const rows = sizes.map((s, i) => `
+        <tr>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" class="rcp-size-cb" data-idx="${i}"
+                        data-charref="${escapeHtml(s.charRef)}"
+                        data-size="${escapeHtml(s.size)}"
+                        data-variantid="${escapeHtml(s.variantIdOnWh || '')}">
+                    <b>${escapeHtml(s.size)}</b>
+                </label>
+            </td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#888;font-size:12px;">остаток: ${s.stockOnWh}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid #eee;">
+                <input type="number" class="rcp-size-qty form-control" data-idx="${i}" min="0" step="1" value="0" style="width:80px;">
+            </td>
+        </tr>`).join('');
+
+    box.innerHTML = `
+        <div style="font-weight:600;margin:4px 0 8px;">${escapeHtml(prod.name_ru)} — размеры</div>
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">Отметьте размеры и укажите количество пар. Размеры — из существующей номенклатуры.</div>
+        <table style="border-collapse:collapse;width:100%;max-width:460px;">
+            <thead><tr>
+                <th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;font-size:12px;">Размер</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;font-size:12px;">Склад</th>
+                <th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;font-size:12px;">Кол-во</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>`;
+    box.style.display = 'block';
+    box.querySelectorAll('.rcp-size-qty').forEach(q => {
+        q.addEventListener('input', function () {
+            const cb = box.querySelector(`.rcp-size-cb[data-idx="${this.dataset.idx}"]`);
+            if (cb) cb.checked = (Number(this.value) || 0) > 0;
+        });
+    });
+    if (pricesBox) pricesBox.style.display = 'block';
+    if (submitBtn) submitBtn.disabled = false;
+}
+
+function rcpReset() {
+    receiptState.selectedProductId = null;
+    ['rcpProductSearch', 'rcpPurchasePrice', 'rcpPriceOld', 'rcpPriceNew'].forEach(id => {
+        const el = document.getElementById(id); if (el) el.value = '';
+    });
+    const box = document.getElementById('rcpProductBox'); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    const pricesBox = document.getElementById('rcpPricesBox'); if (pricesBox) pricesBox.style.display = 'none';
+    const err = document.getElementById('rcpError'); if (err) err.style.display = 'none';
+    const info = document.getElementById('rcpInfo'); if (info) info.innerHTML = '';
+    const submitBtn = document.getElementById('rcpSubmitBtn'); if (submitBtn) submitBtn.disabled = true;
+}
+
+async function rcpSubmit() {
+    const err = document.getElementById('rcpError');
+    const info = document.getElementById('rcpInfo');
+    const submitBtn = document.getElementById('rcpSubmitBtn');
+    if (err) err.style.display = 'none';
+    if (info) info.innerHTML = '';
+
+    const prod = (barcodesState.products || []).find(p => String(p.id) === String(receiptState.selectedProductId));
+    if (!prod || !prod.c1_ref) {
+        if (err) { err.textContent = 'Выберите товар (у него должен быть c1_ref).'; err.style.display = 'block'; }
+        return;
+    }
+    const whSel = document.getElementById('rcpWarehouse');
+    const warehouseC1Ref = whSel?.value || '';
+    if (!warehouseC1Ref) {
+        if (err) { err.textContent = 'Выберите склад прихода.'; err.style.display = 'block'; }
+        return;
+    }
+
+    const box = document.getElementById('rcpProductBox');
+    const purchasePrice = Number(document.getElementById('rcpPurchasePrice')?.value) || 0;
+    const priceOldRaw = document.getElementById('rcpPriceOld')?.value;
+    const priceNewRaw = document.getElementById('rcpPriceNew')?.value;
+    const priceOld = priceOldRaw === '' ? null : Number(priceOldRaw);
+    const priceNew = priceNewRaw === '' ? null : Number(priceNewRaw);
+
+    const items = [];
+    box.querySelectorAll('.rcp-size-cb').forEach(cb => {
+        const idx = cb.dataset.idx;
+        const qtyEl = box.querySelector(`.rcp-size-qty[data-idx="${idx}"]`);
+        const qty = Number(qtyEl?.value) || 0;
+        if (cb.checked && qty > 0) {
+            items.push({
+                productC1Ref: prod.c1_ref,
+                charC1Ref: cb.dataset.charref || null,
+                qty,
+                purchasePrice,
+                priceNew,
+                priceOld,
+                variantId: cb.dataset.variantid || null
+            });
+        }
+    });
+
+    if (!items.length) {
+        if (err) { err.textContent = 'Отметьте хотя бы один размер с количеством > 0.'; err.style.display = 'block'; }
+        return;
+    }
+
+    const totalPairs = items.reduce((s, it) => s + it.qty, 0);
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.dataset._t = submitBtn.textContent; submitBtn.textContent = '⏳ Оприходую…'; }
+    if (info) info.innerHTML = `Отправляю в 1С: ${items.length} размер(ов), всего ${totalPairs} пар…`;
+
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/create-receipt`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            body: JSON.stringify({ warehouseC1Ref, items, post: true, writePrice: true, comment: `Приход из дашборда: ${prod.name_ru}` }),
+            cache: 'no-store'
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+        let html = `✅ Документ поступления создан: <b>${escapeHtml(data.docNumber || data.docRef || '')}</b>`;
+        if (data.posted) html += ' (проведён)';
+        if (data.priceDoc && data.priceDoc.ok && !data.priceDoc.skipped) {
+            html += `<br>💰 Новая розничная цена записана в 1С (док. ${escapeHtml(data.priceDoc.docNumber || '')})`;
+        }
+        if (data.priceResult && data.priceResult.updatedVariants) {
+            html += `<br>🏷️ Обновлены цены для ${data.priceResult.updatedVariants} вариант(ов) в базе`;
+        }
+        if (Array.isArray(data.warnings) && data.warnings.length) {
+            html += `<br><span style="color:#b26a00;">⚠️ ${data.warnings.map(escapeHtml).join('; ')}</span>`;
+        }
+        html += `<br><br>Штрихкоды для этих пар сгенерируйте и распечатайте во вкладке <a href="#" onclick="switchBarcodesSubtab('print');return false;"><b>Печать</b></a>.`;
+        if (info) info.innerHTML = html;
+
+        if (typeof loadReceipts === 'function') { try { loadReceipts(); } catch (_) {} }
+    } catch (e) {
+        if (err) { err.textContent = '❌ ' + e.message; err.style.display = 'block'; }
+        if (info) info.innerHTML = '';
+    } finally {
+        if (submitBtn) { submitBtn.disabled = false; if (submitBtn.dataset._t) submitBtn.textContent = submitBtn.dataset._t; }
+    }
+}
+
 // Добавить текущий выбранный товар с отмеченными размерами в список
 function bcAddToCart() {
     const err = document.getElementById('bcPrintError');

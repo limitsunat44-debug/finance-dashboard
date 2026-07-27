@@ -6610,20 +6610,23 @@ function renderReceipts(receipts) {
         const needRefs = [...new Set((r.lines || [])
             .filter(l => l.needsBarcodes && l.productC1Ref)
             .map(l => l.productC1Ref))];
-        // ВСЕ номенклатуры документа (для печати)
-        const allRefs = [...new Set((r.lines || [])
-            .filter(l => l.productC1Ref).map(l => l.productC1Ref))];
+        // ПОЗИЦИИ документа для печати: печатаем ровно qty по каждой характеристике (размеру),
+        // а НЕ весь остаток по номенклатуре.
+        const printLines = (r.lines || [])
+            .filter(l => l.charC1Ref && (l.qty || 0) > 0)
+            .map(l => ({ productC1Ref: l.productC1Ref, charC1Ref: l.charC1Ref, qty: Number(l.qty) || 0 }));
         const needJson = encodeURIComponent(JSON.stringify(needRefs));
-        const allJson = encodeURIComponent(JSON.stringify(allRefs));
+        const allJson = encodeURIComponent(JSON.stringify(printLines));
         const genBtn = (r.needAny && needRefs.length)
             ? `<button class="btn btn--primary" style="padding:6px 14px;font-size:13px;" `
               + `onclick='bcGenReceiptCodes(this, "${needJson}")'>`
               + `➕ Сгенерировать штрихкоды</button>`
             : '';
-        const printBtn = allRefs.length
+        const printTotal = printLines.reduce((s, l) => s + l.qty, 0);
+        const printBtn = printLines.length
             ? `<button class="btn btn--outline" style="padding:6px 14px;font-size:13px;" `
               + `onclick='bcPrintReceiptLabels(this, "${allJson}")'>`
-              + `🖨 Распечатать ценники</button>`
+              + `🖨 Распечатать ценники (${printTotal})</button>`
             : '';
         html += `<div class="card" style="margin-bottom:14px;">`
             + `<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">`
@@ -6791,13 +6794,25 @@ async function bcGenReceiptCodes(btn, refsJson) {
 }
 
 // ── Печать ценников по документу прихода ──────────────────────
-// Печатает ВСЕ существующие коды (in_stock) номенклатур документа.
+// Печатает РОВНО столько этикеток, сколько ПРИШЛО в документе,
+// по каждой характеристике (размеру) — а НЕ весь остаток по номенклатуре.
 // Не генерирует ничего нового — только печать.
-async function bcPrintReceiptLabels(btn, refsJson) {
-    let refs = [];
-    try { refs = JSON.parse(decodeURIComponent(refsJson)); } catch (_) {}
-    refs = [...new Set((refs || []).filter(Boolean))];
-    if (!refs.length) { alert('Нет номенклатур для печати.'); return; }
+// Аргумент: JSON-массив позиций [{productC1Ref, charC1Ref, qty}].
+async function bcPrintReceiptLabels(btn, linesJson) {
+    let plines = [];
+    try { plines = JSON.parse(decodeURIComponent(linesJson)); } catch (_) {}
+    plines = (plines || []).filter(l => l && l.charC1Ref && (l.qty || 0) > 0);
+    if (!plines.length) { alert('Нет позиций для печати.'); return; }
+
+    // сворачиваем дубли характеристик: если один размер встречается дважды — суммируем qty
+    const qtyByChar = new Map();     // charRef -> сколько печатать
+    const prodByChar = new Map();    // charRef -> productC1Ref
+    for (const l of plines) {
+        qtyByChar.set(l.charC1Ref, (qtyByChar.get(l.charC1Ref) || 0) + (Number(l.qty) || 0));
+        if (l.productC1Ref) prodByChar.set(l.charC1Ref, l.productC1Ref);
+    }
+    const charRefs = [...qtyByChar.keys()];
+    const prodRefs = [...new Set([...prodByChar.values()].filter(Boolean))];
 
     const orig = btn.textContent;
     btn.disabled = true;
@@ -6805,25 +6820,50 @@ async function bcPrintReceiptLabels(btn, refsJson) {
     try {
         const { w, h } = bcGetLabelSize();
 
-        // 1) коды на складе по этим номенклатурам
+        // 1) коды на складе ТОЛЬКО по нужным характеристикам (размерам)
+        // сортируем: сначала ненапечатанные (printed_at NULL), затем по seq
         const { data: rows, error } = await ortobotClient
             .from('stock_units')
-            .select('unique_barcode,size_label,c1_char_ref,c1_prod_ref,warehouse_id,status,created_at,received_at')
-            .in('c1_prod_ref', refs)
-            .eq('status', 'in_stock');
+            .select('unique_barcode,size_label,c1_char_ref,c1_prod_ref,warehouse_id,status,created_at,received_at,seq,printed_at')
+            .in('c1_char_ref', charRefs)
+            .eq('status', 'in_stock')
+            .order('printed_at', { ascending: true, nullsFirst: true })
+            .order('seq', { ascending: true });
         if (error) throw error;
         if (!rows || !rows.length) { alert('Нет кодов для печати по этому документу.'); return; }
 
-        // 2) имена товаров (в stock_units имени нет)
-        const nameByRef = {};
-        try {
-            const { data: prods } = await ortobotClient
-                .from('products').select('c1_ref,name_ru').in('c1_ref', refs);
-            (prods || []).forEach(p => { nameByRef[p.c1_ref] = p.name_ru; });
-        } catch (_) {}
+        // 2) отбираем РОВНО qty по каждой характеристике
+        const takenByChar = new Map();
+        const picked = [];
+        for (const u of rows) {
+            const ch = u.c1_char_ref;
+            const limit = qtyByChar.get(ch) || 0;
+            const taken = takenByChar.get(ch) || 0;
+            if (taken >= limit) continue;
+            picked.push(u);
+            takenByChar.set(ch, taken + 1);
+        }
+        if (!picked.length) { alert('Не нашлось кодов для печати.'); return; }
 
-        // 3) unit-объекты без зависимости от variantInfo
-        const units = rows.map(u => ({
+        // предупреждение, если кодов меньше, чем нужно напечатать
+        const shorted = [];
+        for (const [ch, limit] of qtyByChar.entries()) {
+            const got = takenByChar.get(ch) || 0;
+            if (got < limit) shorted.push(`${got}/${limit}`);
+        }
+
+        // 3) имена товаров (в stock_units имени нет)
+        const nameByRef = {};
+        if (prodRefs.length) {
+            try {
+                const { data: prods } = await ortobotClient
+                    .from('products').select('c1_ref,name_ru').in('c1_ref', prodRefs);
+                (prods || []).forEach(p => { nameByRef[p.c1_ref] = p.name_ru; });
+            } catch (_) {}
+        }
+
+        // 4) unit-объекты
+        const units = picked.map(u => ({
             unique_barcode: u.unique_barcode || '',
             size_label: u.size_label || '',
             name: nameByRef[u.c1_prod_ref] || '',
@@ -6835,10 +6875,24 @@ async function bcPrintReceiptLabels(btn, refsJson) {
             priceOld: null, priceNew: null, currency: 'TJS'
         }));
 
-        // 4) цены из 1С + рендер + печать
+        // 5) цены из 1С + рендер + печать
         await bcEnsurePricesForUnits(units);
+        if (shorted.length) {
+            alert('⚠️ Кодов на складе меньше, чем пришло по документу (напечатаю ' + picked.length + ' шт.). '
+                + 'Сначала сгенерируйте недостающие штрихкоды.');
+        }
         renderLabels(units, w, h);
         bcDoPrint(w, h);
+
+        // 6) отмечаем напечатанные (чтобы повторная печать брала другие коды)
+        try {
+            const bcs = picked.map(u => u.unique_barcode).filter(Boolean);
+            if (bcs.length) {
+                await ortobotClient.from('stock_units')
+                    .update({ printed_at: new Date().toISOString() })
+                    .in('unique_barcode', bcs);
+            }
+        } catch (_) { /* не критично для печати */ }
     } catch (e) {
         console.error('bcPrintReceiptLabels:', e);
         alert('Ошибка печати: ' + (e && e.message ? e.message : e));

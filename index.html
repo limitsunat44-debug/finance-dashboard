@@ -64,6 +64,52 @@
     .pos-reader video{width:100%!important;height:auto!important;border-radius:12px;}
     .pos-cart-empty{padding:16px;text-align:center;color:var(--color-text-secondary,#889);font-size:14px;}
     .pos-cart-total{display:flex;align-items:center;justify-content:space-between;font-size:18px;font-weight:700;padding-top:12px;margin-top:8px;border-top:1px solid var(--color-border,#e3e6ea);}
+    /* позиции чека */
+    .pos-line{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--color-border,#eef0f3);}
+    .pos-line:last-child{border-bottom:none;}
+    .pos-line.active{background:#eff6ff;border-radius:10px;padding:12px 10px;margin:0 -10px;border-bottom:1px solid transparent;}
+    .pos-line-info{flex:1;min-width:0;}
+    .pos-line-name{font-size:14px;font-weight:600;line-height:1.3;}
+    .pos-line-sub{font-size:12px;color:var(--color-text-secondary,#889);margin-top:2px;}
+    .pos-line-sub .pos-disc-tag{color:#b45309;font-weight:600;}
+    .pos-line-warn{font-size:12px;color:#b91c1c;margin-top:2px;}
+    .pos-qty{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
+    .pos-qty button{width:30px;height:30px;border-radius:8px;border:1px solid var(--color-border,#cdd3da);background:var(--color-surface,#fff);font-size:17px;font-weight:700;cursor:pointer;color:inherit;line-height:1;}
+    .pos-qty span{min-width:22px;text-align:center;font-weight:700;font-size:15px;}
+    .pos-line-sum{flex:0 0 auto;font-weight:700;font-size:14px;text-align:right;min-width:64px;}
+    .pos-line-rm{flex:0 0 auto;width:28px;height:28px;border:none;background:none;color:#c0392b;font-size:18px;cursor:pointer;line-height:1;}
+    /* карты/скидки */
+    .pos-card-results{margin-top:6px;display:flex;flex-direction:column;gap:4px;}
+    .pos-card-res-item{text-align:left;padding:9px 12px;border:1px solid var(--color-border,#e3e6ea);border-radius:9px;background:var(--color-surface,#fff);cursor:pointer;font-size:14px;color:inherit;}
+    .pos-card-res-item:hover{border-color:#93c5fd;background:#f0f7ff;}
+    .pos-card-chosen{margin-top:8px;padding:10px 12px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    .pos-card-chosen .pos-chosen-rm{border:none;background:none;color:#c0392b;font-size:16px;cursor:pointer;}
+    /* итоги */
+    .pos-totals{display:flex;flex-direction:column;gap:6px;}
+    .pos-totals-row{display:flex;align-items:center;justify-content:space-between;font-size:15px;}
+    .pos-totals-disc{color:#b45309;}
+    .pos-totals-grand{font-size:19px;font-weight:800;padding-top:8px;margin-top:2px;border-top:1px solid var(--color-border,#e3e6ea);}
+    /* модальные окна кассы */
+    .pos-modal{position:fixed;inset:0;z-index:2000;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:0;}
+    .pos-modal-box{background:var(--color-surface,#fff);width:100%;max-width:560px;border-radius:18px 18px 0 0;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 -4px 24px rgba(0,0,0,.2);}
+    .pos-modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--color-border,#e3e6ea);font-size:18px;font-weight:700;}
+    .pos-modal-x{border:none;background:none;font-size:22px;cursor:pointer;color:var(--color-text-secondary,#778);line-height:1;}
+    .pos-modal-body{padding:16px 18px 22px;overflow-y:auto;}
+    .pos-paygrand{font-size:20px;font-weight:800;margin-bottom:14px;padding:12px 14px;background:#eff6ff;border-radius:12px;color:#1e40af;}
+    .pos-paymode-btns{display:flex;gap:8px;}
+    .pos-paymode-btns .pos-btn{flex:1;}
+    .pos-paymode.active{border-color:#2563eb;background:#eff6ff;color:#1e40af;}
+    .pos-change{font-size:17px;font-weight:700;color:#15803d;padding:10px 12px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;}
+    .pos-change.neg{color:#b91c1c;background:#fef2f2;border-color:#fecaca;}
+    /* чек-сверка */
+    .pos-receipt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed var(--color-border,#cdd3da);border-radius:12px;padding:16px;background:#fcfcfd;line-height:1.55;}
+    .pos-receipt .pr-title{text-align:center;font-weight:800;font-size:15px;margin-bottom:2px;}
+    .pos-receipt .pr-sub{text-align:center;color:#667;margin-bottom:10px;}
+    .pos-receipt .pr-line{display:flex;justify-content:space-between;gap:8px;}
+    .pos-receipt .pr-item{margin:6px 0;}
+    .pos-receipt .pr-hr{border-top:1px dashed #cbd5e1;margin:10px 0;}
+    .pos-receipt .pr-grand{font-size:16px;font-weight:800;}
+    .pos-receipt .pr-disc{color:#b45309;}
     /* мобайл */
     @media (max-width:560px){
       .pos-root{padding:0 2px;}
@@ -1960,14 +2006,126 @@
                 </div>
               </div>
 
-              <!-- Корзина (заготовка) -->
+              <!-- Корзина / чек -->
               <div class="pos-card">
-                <div class="pos-step-head" style="margin:0 0 8px;">Чек</div>
+                <div class="pos-scan-head">
+                  <div class="pos-step-head" style="margin:0;">Чек</div>
+                  <button class="pos-btn pos-btn-primary pos-btn-sm" id="posScanNext" type="button">📷 Отсканировать товар</button>
+                </div>
                 <div id="posCart" class="pos-cart">
                   <div class="pos-cart-empty">Корзина пуста. Отсканируйте товар.</div>
                 </div>
-                <div class="pos-cart-total" id="posCartTotal" style="display:none;">
-                  <span>Итого:</span><b id="posCartTotalVal">0</b>
+              </div>
+
+              <!-- Скидки и карты -->
+              <div class="pos-card" id="posDiscountCard" style="display:none;">
+                <div class="pos-step-head" style="margin:0 0 10px;">Скидки и карты</div>
+
+                <!-- Карта врача (ВР) -->
+                <div class="pos-field">
+                  <label>🩺 Карта врача (ВР) — код, имя или фамилия</label>
+                  <input type="text" id="posDoctorInput" class="pos-input" placeholder="Напр.: 823 или Курбанова" autocomplete="off">
+                  <div id="posDoctorResults" class="pos-card-results"></div>
+                  <div id="posDoctorChosen" class="pos-card-chosen" style="display:none;"></div>
+                </div>
+
+                <!-- Карта клиента (10%) -->
+                <div class="pos-field">
+                  <label>🏷️ Дисконтная карта клиента (10% на чек)</label>
+                  <input type="text" id="posClientInput" class="pos-input pos-input-scan" inputmode="numeric" placeholder="Отсканируйте штрихкод карты…" autocomplete="off">
+                  <div id="posClientChosen" class="pos-card-chosen" style="display:none;"></div>
+                </div>
+
+                <!-- Быстрые скидки -->
+                <div class="pos-field" style="margin-bottom:0;">
+                  <label>Быстрые скидки</label>
+                  <div class="pos-row-btns">
+                    <button class="pos-btn pos-btn-ghost pos-btn-sm" id="posDisc5Item" type="button">−5% на позицию</button>
+                    <button class="pos-btn pos-btn-ghost pos-btn-sm" id="posDisc5Cart" type="button">−5% на чек</button>
+                  </div>
+                  <p class="pos-hint" style="margin:6px 0 0;">«На позицию» применяет 5% к последней отсканированной позиции.</p>
+                </div>
+              </div>
+
+              <!-- Итоги -->
+              <div class="pos-card" id="posTotalsCard" style="display:none;">
+                <div class="pos-totals">
+                  <div class="pos-totals-row"><span>Сумма</span><b id="posSumGross">0</b></div>
+                  <div class="pos-totals-row pos-totals-disc" id="posSumDiscRow" style="display:none;"><span>Скидка</span><b id="posSumDisc">0</b></div>
+                  <div class="pos-totals-row pos-totals-grand"><span>Итого к оплате</span><b id="posSumGrand">0</b></div>
+                </div>
+                <button class="pos-btn pos-btn-primary pos-btn-block" id="posToPayment" type="button" style="margin-top:12px;">К оплате →</button>
+              </div>
+            </div>
+
+            <!-- МОДАЛЬ: оплата -->
+            <div id="posPayModal" class="pos-modal" style="display:none;">
+              <div class="pos-modal-box">
+                <div class="pos-modal-head">
+                  <span>Оплата</span>
+                  <button class="pos-modal-x" id="posPayClose" type="button">✕</button>
+                </div>
+                <div class="pos-modal-body">
+                  <div class="pos-paygrand">К оплате: <b id="posPayGrand">0</b></div>
+                  <div class="pos-field">
+                    <label>Способ оплаты</label>
+                    <div class="pos-paymode-btns">
+                      <button class="pos-btn pos-btn-ghost pos-btn-sm pos-paymode active" data-mode="cash" type="button">💵 Наличные</button>
+                      <button class="pos-btn pos-btn-ghost pos-btn-sm pos-paymode" data-mode="card" type="button">💳 Электронные</button>
+                      <button class="pos-btn pos-btn-ghost pos-btn-sm pos-paymode" data-mode="mixed" type="button">🔀 Смешанный</button>
+                    </div>
+                  </div>
+
+                  <!-- Наличные -->
+                  <div id="posPayCash" class="pos-pay-block">
+                    <div class="pos-field">
+                      <label>Внесено наличными</label>
+                      <input type="number" id="posCashGiven" class="pos-input" inputmode="decimal" placeholder="0" min="0" step="any">
+                    </div>
+                    <div class="pos-change" id="posChangeRow" style="display:none;">Сдача: <b id="posChangeVal">0</b></div>
+                  </div>
+
+                  <!-- Электронные -->
+                  <div id="posPayCard" class="pos-pay-block" style="display:none;">
+                    <div class="pos-field">
+                      <label>Платёжная карта (из 1С)</label>
+                      <select id="posCardType" class="pos-select"></select>
+                    </div>
+                  </div>
+
+                  <!-- Смешанный -->
+                  <div id="posPayMixed" class="pos-pay-block" style="display:none;">
+                    <div class="pos-field">
+                      <label>Наличными</label>
+                      <input type="number" id="posMixCash" class="pos-input" inputmode="decimal" placeholder="0" min="0" step="any">
+                    </div>
+                    <div class="pos-field">
+                      <label>Электронными (остаток)</label>
+                      <select id="posMixCardType" class="pos-select"></select>
+                      <div class="pos-change" id="posMixCardRow" style="margin-top:8px;">С карты: <b id="posMixCardVal">0</b></div>
+                    </div>
+                  </div>
+
+                  <button class="pos-btn pos-btn-primary pos-btn-block" id="posToReceipt" type="button" style="margin-top:6px;">Проверить чек →</button>
+                  <div class="pos-alert pos-alert-error" id="posPayError" style="display:none;margin-top:10px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- МОДАЛЬ: чек-сверка -->
+            <div id="posReceiptModal" class="pos-modal" style="display:none;">
+              <div class="pos-modal-box">
+                <div class="pos-modal-head">
+                  <span>Сверка чека</span>
+                  <button class="pos-modal-x" id="posReceiptClose" type="button">✕</button>
+                </div>
+                <div class="pos-modal-body">
+                  <div id="posReceiptPreview" class="pos-receipt"></div>
+                  <div class="pos-row-btns" style="margin-top:14px;">
+                    <button class="pos-btn pos-btn-ghost" id="posReceiptBack" type="button">← Назад</button>
+                    <button class="pos-btn pos-btn-primary" id="posReceiptConfirm" type="button">✅ Провести продажу</button>
+                  </div>
+                  <div class="pos-alert pos-alert-error" id="posReceiptError" style="display:none;margin-top:10px;"></div>
                 </div>
               </div>
             </div>
@@ -2152,7 +2310,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728c-pos"></script>
+    <script src="app.js?v=20260728d-pos2"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

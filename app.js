@@ -9681,7 +9681,23 @@ const POS = {
     html5qr: null,     // экземпляр html5-qrcode
     camOn: false,
     keyHandler: null,
+    // ── ЭТАП 2: чек ──
+    cart: [],          // позиции: {key,barcode,uniqueBarcode,name,sizeLabel,price,qty,discountPct,productC1Ref,charC1Ref,warehouseC1Ref,kind}
+    activeKey: null,   // последняя отсканированная/выбранная позиция
+    doctor: null,      // {c1_ref,full_name,card_code}
+    client: null,      // {c1_ref,full_name,card_code,discount_pct}
+    cartDiscountPct: 0,// ручная «5% на чек» (не считая клиентской карты)
+    paytypes: null,    // {cash:[...],cards:[...],terminals:[...],defaultTerminal}
+    payMode: 'cash',
+    keySeq: 1,
+    docTypeSearchT: null,
+    busy: false,
 };
+
+// Целочисленные суммы (сомоны без копеек) — форматирование
+function posMoney(n) {
+    return Math.round(Number(n) || 0).toLocaleString('ru-RU');
+}
 
 function posDetectMobile() {
     const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
@@ -9955,13 +9971,451 @@ function posScanInputHandler(e) {
     }
 }
 
-// Заглушка обработки кода (сам РМК допилим на этапе 2)
-function posHandleScannedCode(code) {
-    const hint = document.getElementById('posScanHint');
-    if (hint) hint.innerHTML = `✅ Отсканирован код: <b>${posEsc(code)}</b> <span style="color:#889;">(регистрация продажи — этап 2)</span>`;
+// ───────────── ЭТАП 2: регистрация продажи ─────────────
+function posShopWh() {
+    // склад продажи: сперва из открытой смены (резолвится на бэкенде при open-shift),
+    // затем из метаданных выбранной кассы (фолбэк).
+    const sh = POS.shift || {};
+    return sh.sale_warehouse_c1_ref
+        || (POS.chosen && (POS.chosen.warehouseRef || POS.chosen.whRef || POS.chosen.saleWarehouseRef))
+        || null;
+}
+
+// Скан товара → автоподстановка в корзину
+async function posHandleScannedCode(code) {
+    code = String(code || '').trim();
+    if (!code) return;
     const inp = document.getElementById('posScanInput');
     if (inp) inp.value = '';
-    // TODO этап 2: поиск экземпляра по штрихкоду, добавление в чек, оплата, отправка Чека ККМ в 1С
+    const hint = document.getElementById('posScanHint');
+    if (hint) hint.innerHTML = `⏳ Ищу товар <b>${posEsc(code)}</b>…`;
+    try {
+        const wh = encodeURIComponent(posShopWh() || '');
+        const r = await posApi(`?action=scan&barcode=${encodeURIComponent(code)}&wh=${wh}`, { method: 'GET' });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        const it = r.data.item;
+        if (!it || !it.found) {
+            if (hint) hint.innerHTML = `❌ Штрихкод <b>${posEsc(code)}</b> не найден в базе.`;
+            return;
+        }
+        posAddToCart(it);
+        if (hint) hint.innerHTML = `✅ Добавлено: <b>${posEsc(it.name)}</b>${it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : ''}`;
+    } catch (e) {
+        if (hint) hint.innerHTML = `⚠️ Ошибка поиска: ${posEsc(e.message)}`;
+    }
+}
+
+function posAddToCart(it) {
+    // экземплярный штрихкод — уникален, нельзя добавить дважды
+    if (it.uniqueBarcode) {
+        const exist = POS.cart.find(l => l.uniqueBarcode === it.uniqueBarcode);
+        if (exist) { POS.activeKey = exist.key; posRenderCart(); return; }
+    }
+    // групповой EAN — наращиваем количество
+    if (!it.uniqueBarcode) {
+        const exist = POS.cart.find(l => !l.uniqueBarcode && l.barcode === it.barcode && l.charC1Ref === it.charC1Ref);
+        if (exist) { exist.qty += 1; POS.activeKey = exist.key; posRenderCart(); return; }
+    }
+    const line = {
+        key: 'L' + (POS.keySeq++),
+        kind: it.kind,
+        barcode: it.barcode,
+        uniqueBarcode: it.uniqueBarcode || null,
+        name: it.name, sizeLabel: it.sizeLabel || null,
+        price: Number(it.price) || 0,
+        qty: 1,
+        discountPct: 0,
+        productC1Ref: it.productC1Ref,
+        charC1Ref: it.charC1Ref || null,
+        warehouseC1Ref: it.warehouseC1Ref || posShopWh() || null,
+        warning: it.warning || null,
+    };
+    POS.cart.push(line);
+    POS.activeKey = line.key;
+    posRenderCart();
+}
+
+function posLineNet(l) {
+    const gross = l.price * l.qty;
+    return Math.max(0, gross * (1 - (l.discountPct || 0) / 100));
+}
+
+// Скидка на чек = клиентская карта (10%) + ручные 5%, ограничено 100%
+function posCartDiscPct() {
+    const client = POS.client ? (Number(POS.client.discount_pct) || 0) : 0;
+    return Math.min(100, client + (POS.cartDiscountPct || 0));
+}
+
+function posTotals() {
+    let gross = 0, lineNet = 0;
+    POS.cart.forEach(l => { gross += l.price * l.qty; lineNet += posLineNet(l); });
+    const cartPct = posCartDiscPct();
+    const grand = Math.round(lineNet * (1 - cartPct / 100));
+    const disc = Math.round(gross) - grand;
+    return { gross: Math.round(gross), grand, disc, cartPct };
+}
+
+function posRenderCart() {
+    const box = document.getElementById('posCart');
+    if (!box) return;
+    if (!POS.cart.length) {
+        box.innerHTML = '<div class="pos-cart-empty">Корзина пуста. Отсканируйте товар.</div>';
+        posToggleSaleBlocks(false);
+        return;
+    }
+    box.innerHTML = '';
+    POS.cart.forEach(l => {
+        const net = posLineNet(l);
+        const div = document.createElement('div');
+        div.className = 'pos-line' + (l.key === POS.activeKey ? ' active' : '');
+        div.onclick = () => { POS.activeKey = l.key; posRenderCart(); };
+        const discTag = l.discountPct ? ` <span class="pos-disc-tag">−${l.discountPct}%</span>` : '';
+        const priceInfo = `${posMoney(l.price)}${l.qty > 1 ? ' × ' + l.qty : ''}${discTag}`;
+        div.innerHTML = `
+            <div class="pos-line-info">
+              <div class="pos-line-name">${posEsc(l.name)}</div>
+              <div class="pos-line-sub">${l.sizeLabel ? posEsc(l.sizeLabel) + ' · ' : ''}${priceInfo}</div>
+              ${l.warning ? `<div class="pos-line-warn">⚠️ ${posEsc(l.warning)}</div>` : ''}
+            </div>
+            <div class="pos-qty">
+              <button type="button" data-act="minus">−</button>
+              <span>${l.qty}</span>
+              <button type="button" data-act="plus">+</button>
+            </div>
+            <div class="pos-line-sum">${posMoney(net)}</div>
+            <button class="pos-line-rm" type="button" data-act="rm" title="Удалить">×</button>`;
+        div.querySelectorAll('[data-act]').forEach(b => {
+            b.onclick = (ev) => {
+                ev.stopPropagation();
+                POS.activeKey = l.key;
+                const act = b.dataset.act;
+                if (act === 'plus') l.qty += 1;
+                else if (act === 'minus') { l.qty -= 1; if (l.qty < 1) posRemoveLine(l.key); }
+                else if (act === 'rm') { posRemoveLine(l.key); return; }
+                posRenderCart();
+            };
+        });
+        box.appendChild(div);
+    });
+    posToggleSaleBlocks(true);
+    posRenderTotals();
+}
+
+function posRemoveLine(key) {
+    POS.cart = POS.cart.filter(l => l.key !== key);
+    if (POS.activeKey === key) POS.activeKey = POS.cart.length ? POS.cart[POS.cart.length - 1].key : null;
+    posRenderCart();
+}
+
+function posToggleSaleBlocks(show) {
+    const disc = document.getElementById('posDiscountCard');
+    const tot = document.getElementById('posTotalsCard');
+    if (disc) disc.style.display = show ? '' : 'none';
+    if (tot) tot.style.display = show ? '' : 'none';
+}
+
+function posRenderTotals() {
+    const t = posTotals();
+    const g = document.getElementById('posSumGross');
+    const dRow = document.getElementById('posSumDiscRow');
+    const d = document.getElementById('posSumDisc');
+    const grand = document.getElementById('posSumGrand');
+    if (g) g.textContent = posMoney(t.gross);
+    if (d) d.textContent = '−' + posMoney(t.disc);
+    if (dRow) dRow.style.display = t.disc > 0 ? '' : 'none';
+    if (grand) grand.textContent = posMoney(t.grand);
+}
+
+// ── Быстрые скидки ──
+function posApply5Item() {
+    const l = POS.cart.find(x => x.key === POS.activeKey) || POS.cart[POS.cart.length - 1];
+    if (!l) { posError('Сначала отсканируйте товар.'); return; }
+    l.discountPct = l.discountPct >= 5 ? 0 : 5; // повторное нажатие снимает
+    posRenderCart();
+}
+function posApply5Cart() {
+    POS.cartDiscountPct = POS.cartDiscountPct >= 5 ? 0 : 5;
+    posRenderTotals();
+}
+
+// ── Карта врача (ВР) ──
+let posDoctorSearchT = null;
+function posDoctorInputHandler(e) {
+    const q = (e.target.value || '').trim();
+    clearTimeout(posDoctorSearchT);
+    const box = document.getElementById('posDoctorResults');
+    if (q.length < 2) { if (box) box.innerHTML = ''; return; }
+    posDoctorSearchT = setTimeout(() => posSearchCard('doctor', q, box), 280);
+}
+
+async function posSearchCard(type, q, box) {
+    try {
+        const r = await posApi(`?action=card&type=${type}&q=${encodeURIComponent(q)}`, { method: 'GET' });
+        if (!r.ok || !r.data.ok) return;
+        const cards = r.data.cards || [];
+        if (!box) return;
+        if (!cards.length) { box.innerHTML = '<div class="pos-hint" style="margin:4px 0;">Ничего не найдено.</div>'; return; }
+        box.innerHTML = '';
+        cards.forEach(c => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'pos-card-res-item';
+            b.innerHTML = `<b>${posEsc(c.full_name)}</b> <span style="color:#889;">· код ${posEsc(c.card_code || '—')}</span>`;
+            b.onclick = () => posChooseDoctor(c);
+            box.appendChild(b);
+        });
+    } catch (_) { /* — */ }
+}
+
+function posChooseDoctor(c) {
+    POS.doctor = c;
+    const box = document.getElementById('posDoctorResults');
+    const chosen = document.getElementById('posDoctorChosen');
+    const inp = document.getElementById('posDoctorInput');
+    if (box) box.innerHTML = '';
+    if (inp) inp.value = '';
+    if (chosen) {
+        chosen.style.display = 'flex';
+        chosen.innerHTML = `<span>🩺 Врач: <b>${posEsc(c.full_name)}</b> (код ${posEsc(c.card_code || '—')})</span>
+            <button class="pos-chosen-rm" type="button" title="Убрать">×</button>`;
+        chosen.querySelector('.pos-chosen-rm').onclick = () => { POS.doctor = null; chosen.style.display = 'none'; };
+    }
+}
+
+// ── Карта клиента (10% на чек) ──
+function posClientInputHandler(e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const code = (e.target.value || '').trim();
+    if (code.length < 3) return;
+    posLookupClient(code);
+}
+async function posLookupClient(code) {
+    const chosen = document.getElementById('posClientChosen');
+    try {
+        const r = await posApi(`?action=card&type=client&q=${encodeURIComponent(code)}`, { method: 'GET' });
+        const cards = (r.data && r.data.cards) || [];
+        const inp = document.getElementById('posClientInput');
+        if (!cards.length) {
+            if (chosen) { chosen.style.display = 'flex'; chosen.style.background = '#fef2f2'; chosen.style.borderColor = '#fecaca';
+                chosen.innerHTML = `<span style="color:#b91c1c;">❌ Карта <b>${posEsc(code)}</b> не найдена</span>`; }
+            return;
+        }
+        const c = cards[0];
+        POS.client = c;
+        if (inp) inp.value = '';
+        if (chosen) {
+            chosen.style.display = 'flex'; chosen.style.background = '#ecfdf5'; chosen.style.borderColor = '#a7f3d0';
+            chosen.innerHTML = `<span>🏷️ Клиент: <b>${posEsc(c.full_name)}</b> · скидка ${Number(c.discount_pct) || 10}%</span>
+                <button class="pos-chosen-rm" type="button" title="Убрать">×</button>`;
+            chosen.querySelector('.pos-chosen-rm').onclick = () => { POS.client = null; chosen.style.display = 'none'; posRenderTotals(); };
+        }
+        posRenderTotals();
+    } catch (_) { /* — */ }
+}
+
+// ── Оплата ──
+async function posOpenPayment() {
+    if (!POS.cart.length) return;
+    posError('');
+    // подгружаем виды оплат, если ещё нет
+    if (!POS.paytypes) {
+        try {
+            const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
+            const r = await posApi(`?action=paytypes&shop=${shop}`, { method: 'GET' });
+            if (r.ok && r.data.ok) POS.paytypes = r.data.paytypes;
+        } catch (_) { /* — */ }
+    }
+    posPopulateCardSelects();
+    const t = posTotals();
+    const grandEl = document.getElementById('posPayGrand');
+    if (grandEl) grandEl.textContent = posMoney(t.grand) + ' сом';
+    posSetPayMode('cash');
+    const cg = document.getElementById('posCashGiven'); if (cg) cg.value = '';
+    const mc = document.getElementById('posMixCash'); if (mc) mc.value = '';
+    document.getElementById('posChangeRow').style.display = 'none';
+    const modal = document.getElementById('posPayModal'); if (modal) modal.style.display = 'flex';
+}
+
+function posPopulateCardSelects() {
+    const cards = (POS.paytypes && POS.paytypes.cards) || [];
+    ['posCardType', 'posMixCardType'].forEach(id => {
+        const sel = document.getElementById(id);
+        if (!sel) return;
+        sel.innerHTML = '';
+        cards.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.ref; o.textContent = c.name;
+            sel.appendChild(o);
+        });
+    });
+}
+
+function posSetPayMode(mode) {
+    POS.payMode = mode;
+    document.querySelectorAll('.pos-paymode').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    document.getElementById('posPayCash').style.display = mode === 'cash' ? '' : 'none';
+    document.getElementById('posPayCard').style.display = mode === 'card' ? '' : 'none';
+    document.getElementById('posPayMixed').style.display = mode === 'mixed' ? '' : 'none';
+    posRecalcChange();
+}
+
+function posRecalcChange() {
+    const t = posTotals();
+    if (POS.payMode === 'cash') {
+        const given = Number(document.getElementById('posCashGiven').value) || 0;
+        const row = document.getElementById('posChangeRow');
+        const val = document.getElementById('posChangeVal');
+        const change = given - t.grand;
+        if (given > 0) {
+            row.style.display = '';
+            row.classList.toggle('neg', change < 0);
+            val.textContent = (change < 0 ? 'не хватает ' + posMoney(-change) : posMoney(change)) + ' сом';
+        } else { row.style.display = 'none'; }
+    } else if (POS.payMode === 'mixed') {
+        const cash = Number(document.getElementById('posMixCash').value) || 0;
+        const rest = Math.max(0, t.grand - cash);
+        document.getElementById('posMixCardVal').textContent = posMoney(rest) + ' сом';
+    }
+}
+
+function posBuildPayments() {
+    const t = posTotals();
+    const pt = POS.paytypes || {};
+    const cashRef = (pt.cash && pt.cash[0] && pt.cash[0].ref) || null;
+    const term = (pt.defaultTerminal) || null;
+    if (POS.payMode === 'cash') {
+        return { payments: [{ payTypeC1Ref: cashRef, amount: t.grand }], error: cashRef ? null : 'Нет вида оплаты «Наличные»' };
+    }
+    if (POS.payMode === 'card') {
+        const ref = document.getElementById('posCardType').value;
+        if (!ref) return { error: 'Выберите платёжную карту' };
+        return { payments: [{ payTypeC1Ref: ref, amount: t.grand, terminalC1Ref: term }] };
+    }
+    // mixed
+    const cash = Math.round(Number(document.getElementById('posMixCash').value) || 0);
+    const ref = document.getElementById('posMixCardType').value;
+    const rest = t.grand - cash;
+    if (cash <= 0) return { error: 'Укажите сумму наличными' };
+    if (cash >= t.grand) return { error: 'Наличные покрывают весь чек — выберите «Наличные»' };
+    if (!ref) return { error: 'Выберите платёжную карту для остатка' };
+    return { payments: [
+        { payTypeC1Ref: cashRef, amount: cash },
+        { payTypeC1Ref: ref, amount: rest, terminalC1Ref: term },
+    ], error: cashRef ? null : 'Нет вида оплаты «Наличные»' };
+}
+
+// ── Чек-сверка ──
+function posShowReceipt() {
+    const perr = document.getElementById('posPayError');
+    const pb = posBuildPayments();
+    if (pb.error) { if (perr) { perr.style.display = 'block'; perr.textContent = '⚠️ ' + pb.error; } return; }
+    if (perr) perr.style.display = 'none';
+    POS._payments = pb.payments;
+    const t = posTotals();
+    const sh = POS.shift || {};
+    const now = new Date();
+    const cashRow = pb.payments.find(p => p.payTypeC1Ref === ((POS.paytypes.cash[0] || {}).ref));
+    const payModeName = POS.payMode === 'cash' ? 'Наличные'
+        : POS.payMode === 'card' ? ('Электронные · ' + (document.getElementById('posCardType').selectedOptions[0]||{}).textContent)
+        : 'Смешанный';
+    let itemsHtml = '';
+    POS.cart.forEach((l, i) => {
+        const net = posLineNet(l);
+        itemsHtml += `<div class="pr-item">
+            <div class="pr-line"><span>${i + 1}. ${posEsc(l.name)}</span></div>
+            <div class="pr-line"><span>&nbsp;&nbsp;${posMoney(l.price)} × ${l.qty}${l.discountPct ? ' <span class="pr-disc">(−' + l.discountPct + '%)</span>' : ''}</span><span>${posMoney(net)}</span></div>
+        </div>`;
+    });
+    let payHtml = '';
+    pb.payments.forEach(p => {
+        const nm = (POS.paytypes.cash.concat(POS.paytypes.cards).find(x => x.ref === p.payTypeC1Ref) || {}).name || 'Оплата';
+        payHtml += `<div class="pr-line"><span>${posEsc(nm)}</span><span>${posMoney(p.amount)}</span></div>`;
+    });
+    let changeHtml = '';
+    if (POS.payMode === 'cash') {
+        const given = Number(document.getElementById('posCashGiven').value) || 0;
+        if (given > 0) changeHtml = `<div class="pr-line"><span>Внесено</span><span>${posMoney(given)}</span></div>
+            <div class="pr-line"><span>Сдача</span><span>${posMoney(given - t.grand)}</span></div>`;
+    }
+    const prev = document.getElementById('posReceiptPreview');
+    prev.innerHTML = `
+        <div class="pr-title">${posEsc(sh.kassa_name || 'Касса')}</div>
+        <div class="pr-sub">Чек к проведению · ${now.toLocaleString('ru-RU')}</div>
+        <div class="pr-line"><span>Продавец</span><span>${posEsc(sh.seller_name || '—')}</span></div>
+        ${POS.doctor ? `<div class="pr-line"><span>Врач (ВР)</span><span>${posEsc(POS.doctor.full_name)}</span></div>` : ''}
+        ${POS.client ? `<div class="pr-line"><span>Клиент</span><span>${posEsc(POS.client.full_name)}</span></div>` : ''}
+        <div class="pr-hr"></div>
+        ${itemsHtml}
+        <div class="pr-hr"></div>
+        <div class="pr-line"><span>Сумма</span><span>${posMoney(t.gross)}</span></div>
+        ${t.disc > 0 ? `<div class="pr-line pr-disc"><span>Скидка${t.cartPct ? ' (чек −' + t.cartPct + '%)' : ''}</span><span>−${posMoney(t.disc)}</span></div>` : ''}
+        <div class="pr-line pr-grand"><span>ИТОГО</span><span>${posMoney(t.grand)} сом</span></div>
+        <div class="pr-hr"></div>
+        ${payHtml}
+        ${changeHtml}`;
+    document.getElementById('posPayModal').style.display = 'none';
+    document.getElementById('posReceiptModal').style.display = 'flex';
+    const rerr = document.getElementById('posReceiptError'); if (rerr) rerr.style.display = 'none';
+}
+
+// ── Проведение продажи ──
+async function posConfirmSale() {
+    if (POS.busy) return;
+    const rerr = document.getElementById('posReceiptError');
+    const btn = document.getElementById('posReceiptConfirm');
+    POS.busy = true;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Провожу…'; }
+    if (rerr) rerr.style.display = 'none';
+    try {
+        const items = POS.cart.map(l => ({
+            productC1Ref: l.productC1Ref, charC1Ref: l.charC1Ref,
+            warehouseC1Ref: l.warehouseC1Ref || posShopWh(),
+            qty: l.qty, price: l.price, discountPct: l.discountPct || 0,
+            uniqueBarcode: l.uniqueBarcode, barcode: l.barcode,
+        }));
+        // скидка на чек (клиент + ручные 5%) — размазываем по позициям как доп. %
+        const cartPct = posCartDiscPct();
+        if (cartPct > 0) {
+            items.forEach(it => {
+                const combined = 1 - (1 - (it.discountPct || 0) / 100) * (1 - cartPct / 100);
+                it.discountPct = Math.round(combined * 10000) / 100; // до 2 знаков
+            });
+        }
+        const sh = POS.shift || {};
+        const body = {
+            kassaC1Ref: POS.chosen.ref,
+            sellerC1Ref: sh.seller_c1_ref || sh.seller_ref || sh.sellerC1Ref,
+            sellerName: sh.seller_name,
+            shiftId: sh.id,
+            warehouseC1Ref: posShopWh(),
+            discountCardC1Ref: (POS.client && POS.client.c1_ref) || (POS.doctor && POS.doctor.c1_ref) || null,
+            items,
+            payments: POS._payments || [],
+        };
+        const r = await posApi('?action=sell', { method: 'POST', body: JSON.stringify(body) });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        // успех
+        document.getElementById('posReceiptModal').style.display = 'none';
+        const num = r.data.docNumber || '';
+        const posted = r.data.posted;
+        posResetSale();
+        const hint = document.getElementById('posScanHint');
+        if (hint) hint.innerHTML = `✅ Продажа проведена! Чек <b>${posEsc(num)}</b>${posted ? '' : ' <span style="color:#b45309;">(создан, проведённость проверьте в 1С)</span>'}`;
+    } catch (e) {
+        if (rerr) { rerr.style.display = 'block'; rerr.textContent = '⚠️ ' + e.message; }
+    } finally {
+        POS.busy = false;
+        if (btn) { btn.disabled = false; btn.textContent = '✅ Провести продажу'; }
+    }
+}
+
+function posResetSale() {
+    POS.cart = []; POS.activeKey = null; POS.doctor = null; POS.client = null;
+    POS.cartDiscountPct = 0; POS._payments = null;
+    const dc = document.getElementById('posDoctorChosen'); if (dc) dc.style.display = 'none';
+    const cc = document.getElementById('posClientChosen'); if (cc) cc.style.display = 'none';
+    const dr = document.getElementById('posDoctorResults'); if (dr) dr.innerHTML = '';
+    posRenderCart();
 }
 
 // Mobile: камера через html5-qrcode
@@ -10043,6 +10497,66 @@ function posBindEvents() {
     if (camToggle) camToggle.addEventListener('click', posToggleCamera);
     const scanInp = document.getElementById('posScanInput');
     if (scanInp) scanInp.addEventListener('keydown', posScanInputHandler);
+
+    // ——— ЭТАП 2: корзина / скидки / карты / оплата / чек ———
+    // Кнопка «Отсканировать товар» — фокус на поле скана (или камера на мобильном).
+    const scanNext = document.getElementById('posScanNext');
+    if (scanNext) scanNext.addEventListener('click', () => {
+        const inp = document.getElementById('posScanInput');
+        if (inp) { inp.focus(); inp.select && inp.select(); }
+    });
+    // Быстрые скидки 5%
+    const d5i = document.getElementById('posDisc5Item');
+    if (d5i) d5i.addEventListener('click', posApply5Item);
+    const d5c = document.getElementById('posDisc5Cart');
+    if (d5c) d5c.addEventListener('click', posApply5Cart);
+    // Карта врача (поиск по коду/имени) и дисконтная карта клиента (скан)
+    const docInp = document.getElementById('posDoctorInput');
+    if (docInp) docInp.addEventListener('input', posDoctorInputHandler);
+    const cliInp = document.getElementById('posClientInput');
+    if (cliInp) cliInp.addEventListener('keydown', posClientInputHandler);
+    // Переход к оплате
+    const toPay = document.getElementById('posToPayment');
+    if (toPay) toPay.addEventListener('click', posOpenPayment);
+    // Выбор режима оплаты
+    document.querySelectorAll('.pos-paymode').forEach(btn => {
+        btn.addEventListener('click', () => posSetPayMode(btn.getAttribute('data-mode')));
+    });
+    // Пересчёт сдачи
+    const cashGiven = document.getElementById('posCashGiven');
+    if (cashGiven) cashGiven.addEventListener('input', posRecalcChange);
+    const mixCash = document.getElementById('posMixCash');
+    if (mixCash) mixCash.addEventListener('input', posRecalcChange);
+    // Переход к экрану-чеку (сверка)
+    const toReceipt = document.getElementById('posToReceipt');
+    if (toReceipt) toReceipt.addEventListener('click', posShowReceipt);
+    // Назад из чека к оплате
+    const rcptBack = document.getElementById('posReceiptBack');
+    if (rcptBack) rcptBack.addEventListener('click', () => {
+        const rm = document.getElementById('posReceiptModal');
+        if (rm) rm.style.display = 'none';
+        const pm = document.getElementById('posPayModal');
+        if (pm) pm.style.display = 'flex';
+    });
+    // Подтверждение продажи
+    const rcptConfirm = document.getElementById('posReceiptConfirm');
+    if (rcptConfirm) rcptConfirm.addEventListener('click', posConfirmSale);
+    // Закрытие модалок
+    const payClose = document.getElementById('posPayClose');
+    if (payClose) payClose.addEventListener('click', () => {
+        const pm = document.getElementById('posPayModal');
+        if (pm) pm.style.display = 'none';
+    });
+    const rcptClose = document.getElementById('posReceiptClose');
+    if (rcptClose) rcptClose.addEventListener('click', () => {
+        const rm = document.getElementById('posReceiptModal');
+        if (rm) rm.style.display = 'none';
+    });
+    // Клик по фону модалки — закрыть
+    const payModal = document.getElementById('posPayModal');
+    if (payModal) payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.style.display = 'none'; });
+    const rcptModal = document.getElementById('posReceiptModal');
+    if (rcptModal) rcptModal.addEventListener('click', (e) => { if (e.target === rcptModal) rcptModal.style.display = 'none'; });
 }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', posBindEvents);

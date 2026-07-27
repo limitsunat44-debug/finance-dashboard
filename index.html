@@ -48,9 +48,14 @@
     /* поля */
     .pos-field{margin-bottom:14px;}
     .pos-field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;color:var(--pos-teal-2);}
-    .pos-select,.pos-input{width:100%;padding:13px 14px;font-size:16px;border:2px solid var(--pos-line);border-radius:14px;background:var(--pos-white);color:var(--pos-ink);min-height:50px;}
+    .pos-select,.pos-input{width:100%;padding:13px 14px;font-size:16px;border:2px solid var(--pos-line);border-radius:14px;background:var(--pos-white)!important;color:var(--pos-ink)!important;min-height:50px;-webkit-text-fill-color:var(--pos-ink);}
+    .pos-input::placeholder{color:var(--pos-muted);opacity:1;-webkit-text-fill-color:var(--pos-muted);}
     .pos-input-scan{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;}
     .pos-select:focus,.pos-input:focus{outline:none;border-color:var(--pos-teal);box-shadow:0 0 0 3px rgba(15,139,145,.15);}
+    /* строка input + кнопка скана карты */
+    .pos-input-row{display:flex;gap:8px;align-items:stretch;}
+    .pos-input-row .pos-input{flex:1;min-width:0;}
+    .pos-scan-card-btn{flex:0 0 auto;min-height:50px;width:54px;padding:0;font-size:20px;border-radius:14px;}
     .pos-kassa-badge{display:inline-block;font-size:15px;font-weight:800;padding:8px 15px;background:#e9f6f6;border:1px solid #bfe3e4;border-radius:12px;margin-bottom:14px;color:var(--pos-teal-2);}
     /* кнопки */
     .pos-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:14px 18px;font-size:16px;font-weight:700;border-radius:14px;border:none;cursor:pointer;min-height:52px;transition:all .14s;}
@@ -92,7 +97,9 @@
     .pos-line-name{font-size:14px;font-weight:700;line-height:1.3;}
     .pos-line-sub{font-size:12px;color:var(--pos-muted);margin-top:2px;}
     .pos-line-sub .pos-disc-tag{color:var(--pos-orange-2);font-weight:700;}
-    .pos-line-warn{font-size:12px;color:#a12c3b;margin-top:2px;}
+    .pos-line-warn{font-size:12px;color:#a12c3b;margin-top:2px;font-weight:600;}
+    .pos-line.oos{background:#fdecef;border-radius:12px;padding:12px 10px;margin:0 -10px;border-bottom:1px solid transparent;}
+    .pos-line.oos .pos-line-name{color:#a12c3b;}
     .pos-qty{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
     .pos-qty button{width:32px;height:32px;border-radius:10px;border:1px solid var(--pos-line);background:var(--pos-cream);font-size:17px;font-weight:800;cursor:pointer;color:var(--pos-teal-2);line-height:1;}
     .pos-qty button:hover{border-color:var(--pos-teal-3);}
@@ -151,6 +158,53 @@
       .pos-confirm{background:#182726;}
       .pos-line.active{background:#123433;}
       .pos-change{background:#12331f;border-color:#1c5033;color:#7fd6a2;}
+      .rep-kpi{background:#1d2c2b;border-color:#2c3d3c;}
+      .rep-kpi-val{color:#e8f0ef;}
+      .rep-th{background:#123433;color:#7fd6d8;}
+      .rep-td{color:#e8f0ef;border-color:#2c3d3c;}
+      .rep-tr-total{background:#123433;}
+      .rep-shift{background:#1d2c2b;border-color:#2c3d3c;}
+      .rep-shift b,.rep-shift .rep-shift-name{color:#e8f0ef;}
+      .rep-filter{background:#182726;border-color:#2c3d3c;}
+    }
+
+    /* ─── Отчёты и кассы (админ-дашборд) + История продаж ─── */
+    .rep-filter{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;background:var(--pos-cream-2);border:1px solid var(--pos-line);border-radius:16px;padding:14px;margin-bottom:14px;}
+    .rep-filter .pos-field{margin:0;flex:0 1 auto;}
+    .rep-filter .pos-input{min-height:46px;padding:11px 12px;font-size:15px;}
+    .rep-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px;}
+    .rep-kpi{background:var(--pos-white);border:1px solid var(--pos-line);border-radius:16px;padding:15px 16px;box-shadow:0 4px 14px rgba(31,58,60,.05);}
+    .rep-kpi-label{font-size:12px;font-weight:700;color:var(--pos-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;}
+    .rep-kpi-val{font-size:24px;font-weight:800;color:var(--pos-teal-2);line-height:1.1;font-variant-numeric:tabular-nums;}
+    .rep-kpi-sub{font-size:12px;color:var(--pos-muted);margin-top:3px;}
+    .rep-kpi.accent .rep-kpi-val{color:var(--pos-orange-2);}
+    .rep-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;border:1px solid var(--pos-line);border-radius:16px;background:var(--pos-white);}
+    table.rep-table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px;}
+    .rep-th{position:sticky;top:0;background:#e9f6f6;color:var(--pos-teal-2);font-weight:800;text-align:right;padding:11px 12px;white-space:nowrap;border-bottom:2px solid var(--pos-line);}
+    .rep-th.l{text-align:left;}
+    .rep-td{padding:10px 12px;text-align:right;color:var(--pos-ink);border-bottom:1px solid var(--pos-line);white-space:nowrap;font-variant-numeric:tabular-nums;}
+    .rep-td.l{text-align:left;font-weight:600;}
+    .rep-td.muted{color:var(--pos-muted);}
+    .rep-tr-total .rep-td{font-weight:800;background:#f2faf9;border-top:2px solid var(--pos-teal-3);}
+    .rep-shifts{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;}
+    .rep-shift{background:var(--pos-white);border:1px solid var(--pos-line);border-radius:16px;padding:14px 15px;box-shadow:0 4px 14px rgba(31,58,60,.05);}
+    .rep-shift-top{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+    .rep-dot{width:12px;height:12px;border-radius:50%;flex:0 0 auto;box-shadow:0 0 0 3px rgba(0,0,0,.04);}
+    .rep-dot.on{background:#22c55e;box-shadow:0 0 0 3px rgba(34,197,94,.18);}
+    .rep-dot.off{background:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.15);}
+    .rep-shift-name{font-weight:800;color:var(--pos-teal-2);font-size:15px;}
+    .rep-shift-row{font-size:13px;color:var(--pos-ink);margin:3px 0;}
+    .rep-shift-row .k{color:var(--pos-muted);}
+    .rep-badge{display:inline-block;font-size:11px;font-weight:800;padding:3px 9px;border-radius:10px;margin-left:auto;}
+    .rep-badge.on{background:#dcfce7;color:#15803d;}
+    .rep-badge.off{background:#fee2e2;color:#b91c1c;}
+    .rep-empty{padding:22px;text-align:center;color:var(--pos-muted);font-size:14px;}
+    .rep-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:6px 2px 12px;}
+    .rep-section-head h3{margin:0;font-size:17px;font-weight:800;color:var(--pos-teal-2);}
+    .rep-actions{display:flex;gap:8px;flex-wrap:wrap;}
+    @media (max-width:560px){
+      .rep-kpi-val{font-size:20px;}
+      .rep-filter .pos-field{flex:1 1 100%;}
     }
     </style>
 </head>
@@ -207,6 +261,8 @@
             <button class="nav-tab" data-tab="anomalies" onclick="switchTab('anomalies')">⚠️ Аномальные продажи <span id="anomaliesBadge" style="display:none;background:#e11d48;color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;font-weight:700;margin-left:4px;"></span></button>
             <button class="nav-tab" data-tab="cashier" onclick="switchTab('cashier')">🧾 Ценник для витрины</button>
             <button class="nav-tab" data-tab="pos" onclick="switchTab('pos')">🛒 Касса</button>
+            <button class="nav-tab" data-tab="posHistory" onclick="switchTab('posHistory')">🧾 История продаж</button>
+            <button class="nav-tab" data-tab="salesReports" onclick="switchTab('salesReports')">📊 Отчёты и кассы</button>
         </nav>
 
         <!-- Loading Indicator -->
@@ -2058,7 +2114,14 @@
                 <!-- Карта клиента (10%) -->
                 <div class="pos-field">
                   <label>🏷️ Дисконтная карта клиента (10% на чек)</label>
-                  <input type="text" id="posClientInput" class="pos-input pos-input-scan" inputmode="numeric" placeholder="Отсканируйте штрихкод карты…" autocomplete="off">
+                  <div class="pos-input-row">
+                    <input type="text" id="posClientInput" class="pos-input pos-input-scan" inputmode="numeric" placeholder="Отсканируйте штрихкод карты…" autocomplete="off">
+                    <button class="pos-btn pos-btn-accent pos-btn-sm pos-scan-card-btn" id="posClientScanBtn" type="button" title="Отсканировать карту камерой">📷</button>
+                  </div>
+                  <div id="posClientCamWrap" class="pos-camera-wrap" style="display:none;">
+                    <div id="posClientReader" class="pos-reader"></div>
+                    <button class="pos-btn pos-btn-ghost pos-btn-sm pos-btn-block" id="posClientCamClose" type="button">✕ Закрыть камеру</button>
+                  </div>
                   <div id="posClientChosen" class="pos-card-chosen" style="display:none;"></div>
                 </div>
 
@@ -2156,6 +2219,125 @@
               </div>
             </div>
 
+          </div>
+        </section>
+
+        <!-- ═══ ИСТОРИЯ ПРОДАЖ (кассир) ═══ -->
+        <section id="posHistorySection" class="section">
+          <div class="pos-root">
+            <div class="pos-topbar">
+              <div class="pos-topbar-title">🧾 История продаж</div>
+              <div class="pos-topbar-status" id="posHistStatus"></div>
+            </div>
+            <div id="posHistError" class="pos-alert pos-alert-error" style="display:none;"></div>
+
+            <div class="rep-filter">
+              <div class="pos-field">
+                <label>С даты</label>
+                <input type="date" id="posHistFrom" class="pos-input">
+              </div>
+              <div class="pos-field">
+                <label>По дату</label>
+                <input type="date" id="posHistTo" class="pos-input">
+              </div>
+              <div class="pos-field">
+                <label>&nbsp;</label>
+                <button class="pos-btn pos-btn-primary pos-btn-sm" id="posHistApply">🔍 Показать</button>
+              </div>
+              <div class="pos-field">
+                <label>&nbsp;</label>
+                <button class="pos-btn pos-btn-ghost pos-btn-sm" id="posHistToday">Сегодня</button>
+              </div>
+            </div>
+
+            <div class="rep-kpis" id="posHistKpis"></div>
+
+            <div class="rep-table-wrap">
+              <table class="rep-table">
+                <thead>
+                  <tr>
+                    <th class="rep-th l">№ чека</th>
+                    <th class="rep-th l">Время</th>
+                    <th class="rep-th l">Магазин</th>
+                    <th class="rep-th l">Продавец</th>
+                    <th class="rep-th">Сумма, сом</th>
+                  </tr>
+                </thead>
+                <tbody id="posHistRows">
+                  <tr><td class="rep-empty" colspan="5">⬇️ Выберите период и нажмите «Показать»</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══ ОТЧЁТЫ И КАССЫ (админ-дашборд) ═══ -->
+        <section id="salesReportsSection" class="section">
+          <div class="pos-root">
+            <div class="pos-topbar">
+              <div class="pos-topbar-title">📊 Отчёты и кассы</div>
+              <div class="pos-topbar-status" id="repStatus"></div>
+            </div>
+            <div id="repError" class="pos-alert pos-alert-error" style="display:none;"></div>
+
+            <!-- Активные смены -->
+            <div class="pos-card">
+              <div class="rep-section-head">
+                <h3>⏱️ Кассовые смены на сегодня</h3>
+                <button class="pos-btn pos-btn-ghost pos-btn-sm" id="repShiftsRefresh">↻ Обновить</button>
+              </div>
+              <p class="pos-hint">Зелёная точка — смена открыта, красная — закрыта. Время по Душанбе (+05).</p>
+              <div class="rep-shifts" id="repShifts">
+                <div class="rep-empty">⏳ Загружаю смены…</div>
+              </div>
+            </div>
+
+            <!-- Отчёт по продажам -->
+            <div class="pos-card">
+              <div class="rep-section-head">
+                <h3>💰 Отчёт по продажам (для снятия денег)</h3>
+              </div>
+              <div class="rep-filter">
+                <div class="pos-field">
+                  <label>С даты</label>
+                  <input type="date" id="repFrom" class="pos-input">
+                </div>
+                <div class="pos-field">
+                  <label>По дату</label>
+                  <input type="date" id="repTo" class="pos-input">
+                </div>
+                <div class="pos-field">
+                  <label>&nbsp;</label>
+                  <button class="pos-btn pos-btn-primary pos-btn-sm" id="repBuild">📊 Сформировать отчёт</button>
+                </div>
+              </div>
+
+              <div class="rep-kpis" id="repKpis"></div>
+
+              <div class="rep-table-wrap" id="repTableWrap" style="display:none;">
+                <table class="rep-table">
+                  <thead>
+                    <tr>
+                      <th class="rep-th l">Магазин</th>
+                      <th class="rep-th">Наличные</th>
+                      <th class="rep-th">Alif QR</th>
+                      <th class="rep-th">Alif кошелёк</th>
+                      <th class="rep-th">DC кошелёк</th>
+                      <th class="rep-th">DC QR</th>
+                      <th class="rep-th">Прочее</th>
+                      <th class="rep-th">Итого</th>
+                      <th class="rep-th">Чеков</th>
+                    </tr>
+                  </thead>
+                  <tbody id="repRows"></tbody>
+                </table>
+              </div>
+
+              <div class="rep-actions" id="repExport" style="display:none;margin-top:14px;">
+                <button class="pos-btn pos-btn-primary pos-btn-sm" id="repExportPdf">📄 Скачать PDF</button>
+                <button class="pos-btn pos-btn-accent pos-btn-sm" id="repExportXlsx">📗 Скачать Excel</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -2336,7 +2518,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728e-posdesign"></script>
+    <script src="app.js?v=20260728f-reports"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

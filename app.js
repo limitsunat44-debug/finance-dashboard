@@ -60,8 +60,10 @@ const ADMIN_ACCOUNTS = {
 let currentAllowedTabs = '*';
 
 function isTabAllowed(tabName) {
-    // Вкладка «Касса» (РМК) видна ВСЕМ пользователям без исключения.
-    if (tabName === 'pos') return true;
+    // Вкладки «Касса» (РМК) и «История продаж» видны ВСЕМ пользователям.
+    if (tabName === 'pos' || tabName === 'posHistory') return true;
+    // «Отчёты и кассы» (админ-дашборд) — только админам с полным доступом.
+    if (tabName === 'salesReports') return currentAllowedTabs === '*';
     return currentAllowedTabs === '*' || currentAllowedTabs.includes(tabName);
 }
 
@@ -1597,6 +1599,10 @@ function switchTab(tabName) {
         if (typeof loadCashier === 'function') loadCashier();
     } else if (tabName === 'pos') {
         if (typeof loadPos === 'function') loadPos();
+    } else if (tabName === 'posHistory') {
+        if (typeof loadPosHistory === 'function') loadPosHistory();
+    } else if (tabName === 'salesReports') {
+        if (typeof loadSalesReports === 'function') loadSalesReports();
     } else if (tabName === 'settings') {
         if (typeof loadSyncStatus === 'function') loadSyncStatus();
     }
@@ -10029,6 +10035,8 @@ function posAddToCart(it) {
         charC1Ref: it.charC1Ref || null,
         warehouseC1Ref: it.warehouseC1Ref || posShopWh() || null,
         warning: it.warning || null,
+        availableAtShop: (it.availableAtShop != null ? Number(it.availableAtShop) : null),
+        status: it.status || null,
     };
     POS.cart.push(line);
     POS.activeKey = line.key;
@@ -10038,6 +10046,17 @@ function posAddToCart(it) {
 function posLineNet(l) {
     const gross = l.price * l.qty;
     return Math.max(0, gross * (1 - (l.discountPct || 0) / 100));
+}
+
+// Позиция «не в наличии на складе кассы»: экземпляр не in_stock, или на складе кассы 0 шт.
+function posLineOutOfStock(l) {
+    if (l.status && l.status !== 'in_stock') return true;
+    if (l.availableAtShop != null && Number(l.availableAtShop) <= 0) return true;
+    return false;
+}
+// Есть ли в корзине хоть одна позиция не в наличии на складе кассы
+function posCartHasOutOfStock() {
+    return POS.cart.some(posLineOutOfStock);
 }
 
 // Скидка на чек = клиентская карта (10%) + ручные 5%, ограничено 100%
@@ -10067,15 +10086,17 @@ function posRenderCart() {
     POS.cart.forEach(l => {
         const net = posLineNet(l);
         const div = document.createElement('div');
-        div.className = 'pos-line' + (l.key === POS.activeKey ? ' active' : '');
+        const oos = posLineOutOfStock(l);
+        div.className = 'pos-line' + (l.key === POS.activeKey ? ' active' : '') + (oos ? ' oos' : '');
         div.onclick = () => { POS.activeKey = l.key; posRenderCart(); };
         const discTag = l.discountPct ? ` <span class="pos-disc-tag">−${l.discountPct}%</span>` : '';
         const priceInfo = `${posMoney(l.price)}${l.qty > 1 ? ' × ' + l.qty : ''}${discTag}`;
+        const warnText = l.warning || (oos ? 'Не числится на складе этой кассы' : null);
         div.innerHTML = `
             <div class="pos-line-info">
               <div class="pos-line-name">${posEsc(l.name)}</div>
               <div class="pos-line-sub">${l.sizeLabel ? posEsc(l.sizeLabel) + ' · ' : ''}${priceInfo}</div>
-              ${l.warning ? `<div class="pos-line-warn">⚠️ ${posEsc(l.warning)}</div>` : ''}
+              ${warnText ? `<div class="pos-line-warn">⚠️ ${posEsc(warnText)}</div>` : ''}
             </div>
             <div class="pos-qty">
               <button type="button" data-act="minus">−</button>
@@ -10124,6 +10145,26 @@ function posRenderTotals() {
     if (d) d.textContent = '−' + posMoney(t.disc);
     if (dRow) dRow.style.display = t.disc > 0 ? '' : 'none';
     if (grand) grand.textContent = posMoney(t.grand);
+    // блокировка «К оплате», если есть позиция не в наличии на складе кассы
+    const toPay = document.getElementById('posToPayment');
+    if (toPay) {
+        const blocked = !POS.cart.length || posCartHasOutOfStock();
+        toPay.disabled = blocked;
+        let warn = document.getElementById('posStockWarn');
+        if (posCartHasOutOfStock()) {
+            if (!warn) {
+                warn = document.createElement('div');
+                warn.id = 'posStockWarn';
+                warn.className = 'pos-alert pos-alert-error';
+                warn.style.cssText = 'margin:10px 0 0;';
+                toPay.parentNode.insertBefore(warn, toPay);
+            }
+            warn.innerHTML = '⛔ В чеке есть товар, который не числится на складе этой кассы. Продажа невозможна — удалите такую позицию.';
+            warn.style.display = '';
+        } else if (warn) {
+            warn.style.display = 'none';
+        }
+    }
 }
 
 // ── Быстрые скидки ──
@@ -10211,6 +10252,39 @@ async function posLookupClient(code) {
         }
         posRenderTotals();
     } catch (_) { /* — */ }
+}
+
+// Камера для скана штрихкода дисконтной карты клиента
+async function posToggleClientCamera() {
+    const wrap = document.getElementById('posClientCamWrap');
+    if (!window.Html5Qrcode) { posError('Библиотека сканера не загрузилась. Обновите страницу.'); return; }
+    if (POS.clientCamOn) { await posStopClientCamera(); return; }
+    try {
+        if (wrap) wrap.style.display = '';
+        POS.clientQr = new Html5Qrcode('posClientReader', { verbose: false });
+        const cfg = {
+            fps: 10, qrbox: { width: 250, height: 140 },
+            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+        };
+        await POS.clientQr.start(
+            { facingMode: 'environment' }, cfg,
+            async (decoded) => {
+                await posStopClientCamera();
+                posLookupClient(String(decoded || '').trim());
+            },
+            () => {}
+        );
+        POS.clientCamOn = true;
+    } catch (e) {
+        posError('Не удалось включить камеру: ' + (e && e.message || e));
+        if (wrap) wrap.style.display = 'none';
+    }
+}
+async function posStopClientCamera() {
+    const wrap = document.getElementById('posClientCamWrap');
+    try { if (POS.clientQr) { await POS.clientQr.stop(); await POS.clientQr.clear(); } } catch (_) {}
+    POS.clientQr = null; POS.clientCamOn = false;
+    if (wrap) wrap.style.display = 'none';
 }
 
 // ── Оплата ──
@@ -10515,6 +10589,11 @@ function posBindEvents() {
     if (docInp) docInp.addEventListener('input', posDoctorInputHandler);
     const cliInp = document.getElementById('posClientInput');
     if (cliInp) cliInp.addEventListener('keydown', posClientInputHandler);
+    // Кнопка скана карты клиента камерой
+    const cliScan = document.getElementById('posClientScanBtn');
+    if (cliScan) cliScan.addEventListener('click', posToggleClientCamera);
+    const cliCamClose = document.getElementById('posClientCamClose');
+    if (cliCamClose) cliCamClose.addEventListener('click', posStopClientCamera);
     // Переход к оплате
     const toPay = document.getElementById('posToPayment');
     if (toPay) toPay.addEventListener('click', posOpenPayment);
@@ -10562,4 +10641,293 @@ if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', posBindEvents);
 } else {
     posBindEvents();
+}
+
+// ============================================================
+//  ИСТОРИЯ ПРОДАЖ (кассир) + ОТЧЁТЫ И КАССЫ (админ-дашборд)
+// ============================================================
+
+// --- утилиты ---
+function repFmtNum(n) {
+  n = Number(n) || 0;
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+function repToday() {
+  // сегодня в TZ Душанбе (+05) как YYYY-MM-DD
+  const d = new Date();
+  const dush = new Date(d.getTime() + (5 * 60 - d.getTimezoneOffset()) * 60000);
+  return dush.toISOString().slice(0, 10);
+}
+// ISO-строка → 'ДД.ММ HH:MM' по Душанбе (+05)
+function repDushTime(iso, withDate) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const dush = new Date(d.getTime() + (5 * 60 - (-0)) * 60000 - (0));
+  // Приводим к +05 явно: берём UTC и добавляем 5ч
+  const u = new Date(d.getTime() + 5 * 3600000);
+  const hh = String(u.getUTCHours()).padStart(2, '0');
+  const mm = String(u.getUTCMinutes()).padStart(2, '0');
+  const dd = String(u.getUTCDate()).padStart(2, '0');
+  const mo = String(u.getUTCMonth() + 1).padStart(2, '0');
+  return withDate ? `${dd}.${mo} ${hh}:${mm}` : `${hh}:${mm}`;
+}
+function repErr(elId, msg) {
+  const e = document.getElementById(elId);
+  if (!e) return;
+  if (!msg) { e.style.display = 'none'; e.textContent = ''; return; }
+  e.style.display = ''; e.textContent = msg;
+}
+
+// ─────────────── ИСТОРИЯ ПРОДАЖ (кассир) ───────────────
+let posHistLoaded = false;
+function loadPosHistory() {
+  const f = document.getElementById('posHistFrom');
+  const t = document.getElementById('posHistTo');
+  if (f && !f.value) f.value = repToday();
+  if (t && !t.value) t.value = repToday();
+  if (!posHistLoaded) { posHistFetch(); posHistLoaded = true; }
+}
+async function posHistFetch() {
+  const from = (document.getElementById('posHistFrom') || {}).value || repToday();
+  const to = (document.getElementById('posHistTo') || {}).value || from;
+  const status = document.getElementById('posHistStatus');
+  const rows = document.getElementById('posHistRows');
+  repErr('posHistError', '');
+  if (status) status.textContent = '⏳ Загружаю…';
+  if (rows) rows.innerHTML = `<tr><td class="rep-empty" colspan="5">⏳ Загружаю чеки…</td></tr>`;
+  try {
+    const r = await posApi(`?action=history&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { method: 'GET' });
+    if (!r.ok || !r.data.ok) throw new Error((r.data && r.data.error) || 'Ошибка загрузки');
+    const list = r.data.receipts || [];
+    // KPI
+    const kpis = document.getElementById('posHistKpis');
+    if (kpis) kpis.innerHTML = `
+      <div class="rep-kpi"><div class="rep-kpi-label">Чеков</div><div class="rep-kpi-val">${list.length}</div></div>
+      <div class="rep-kpi accent"><div class="rep-kpi-label">Сумма продаж</div><div class="rep-kpi-val">${repFmtNum(r.data.total)} <span style="font-size:14px;">сом</span></div></div>`;
+    if (!list.length) {
+      if (rows) rows.innerHTML = `<tr><td class="rep-empty" colspan="5">За выбранный период чеков нет</td></tr>`;
+    } else if (rows) {
+      rows.innerHTML = list.map(x => `
+        <tr>
+          <td class="rep-td l">${posEsc(x.number)}</td>
+          <td class="rep-td l muted">${repDushTime(x.date, false)}</td>
+          <td class="rep-td l">${posEsc(x.shop)}</td>
+          <td class="rep-td l">${posEsc(x.seller)}</td>
+          <td class="rep-td">${repFmtNum(x.total)}</td>
+        </tr>`).join('');
+    }
+    if (status) status.textContent = `${from === to ? from : from + ' — ' + to} · ${list.length} чек(ов)`;
+  } catch (e) {
+    repErr('posHistError', 'Ошибка: ' + (e.message || e));
+    if (status) status.textContent = '';
+    if (rows) rows.innerHTML = `<tr><td class="rep-empty" colspan="5">Не удалось загрузить</td></tr>`;
+  }
+}
+
+// ─────────────── ОТЧЁТЫ И КАССЫ (админ) ───────────────
+let repLoaded = false;
+let repLastReport = null;
+function loadSalesReports() {
+  const f = document.getElementById('repFrom');
+  const t = document.getElementById('repTo');
+  if (f && !f.value) f.value = repToday();
+  if (t && !t.value) t.value = repToday();
+  if (!repLoaded) { repFetchShifts(); repLoaded = true; }
+}
+
+async function repFetchShifts() {
+  const box = document.getElementById('repShifts');
+  repErr('repError', '');
+  if (box) box.innerHTML = `<div class="rep-empty">⏳ Загружаю смены…</div>`;
+  try {
+    const r = await posApi(`?action=shifts-active`, { method: 'GET' });
+    if (!r.ok || !r.data.ok) throw new Error((r.data && r.data.error) || 'Ошибка');
+    const shifts = r.data.shifts || [];
+    if (!shifts.length) { if (box) box.innerHTML = `<div class="rep-empty">На сегодня смен нет</div>`; return; }
+    if (box) box.innerHTML = shifts.map(s => {
+      const on = s.status === 'open';
+      return `<div class="rep-shift">
+        <div class="rep-shift-top">
+          <span class="rep-dot ${on ? 'on' : 'off'}"></span>
+          <span class="rep-shift-name">${posEsc(s.shopName || s.kassaName || '—')}</span>
+          <span class="rep-badge ${on ? 'on' : 'off'}">${on ? 'Открыта' : 'Закрыта'}</span>
+        </div>
+        <div class="rep-shift-row"><span class="k">Касса:</span> ${posEsc(s.kassaName || '—')}</div>
+        <div class="rep-shift-row"><span class="k">Продавец:</span> ${posEsc(s.seller || '—')}</div>
+        <div class="rep-shift-row"><span class="k">Открыта:</span> ${repDushTime(s.openedAt, false)}${on ? '' : ' · <span class="k">Закрыта:</span> ' + repDushTime(s.closedAt, false)}</div>
+        <div class="rep-shift-row"><span class="k">Чеков:</span> ${s.receipts || 0} · <span class="k">Сумма:</span> ${repFmtNum(s.totalSales)} сом</div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    repErr('repError', 'Смены: ' + (e.message || e));
+    if (box) box.innerHTML = `<div class="rep-empty">Не удалось загрузить смены</div>`;
+  }
+}
+
+async function repBuildReport() {
+  const from = (document.getElementById('repFrom') || {}).value || repToday();
+  const to = (document.getElementById('repTo') || {}).value || from;
+  const status = document.getElementById('repStatus');
+  const btn = document.getElementById('repBuild');
+  repErr('repError', '');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Считаю…'; }
+  if (status) status.textContent = '⏳ Формирую отчёт…';
+  try {
+    const r = await posApi(`?action=sales-report&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { method: 'GET' });
+    if (!r.ok || !r.data.ok) throw new Error((r.data && r.data.error) || 'Ошибка');
+    const rep = r.data.report;
+    repLastReport = rep;
+    repRenderReport(rep);
+    if (status) status.textContent = `${rep.from === rep.to ? rep.from : rep.from + ' — ' + rep.to} · ${rep.grand.receipts} чек(ов)`;
+  } catch (e) {
+    repErr('repError', 'Отчёт: ' + (e.message || e));
+    if (status) status.textContent = '';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📊 Сформировать отчёт'; }
+  }
+}
+
+function repRenderReport(rep) {
+  const g = rep.grand;
+  const kpis = document.getElementById('repKpis');
+  if (kpis) kpis.innerHTML = `
+    <div class="rep-kpi accent"><div class="rep-kpi-label">Итого продаж</div><div class="rep-kpi-val">${repFmtNum(g.total)} <span style="font-size:13px;">сом</span></div><div class="rep-kpi-sub">${g.receipts} чеков</div></div>
+    <div class="rep-kpi"><div class="rep-kpi-label">Наличные</div><div class="rep-kpi-val">${repFmtNum(g.cash)}</div></div>
+    <div class="rep-kpi"><div class="rep-kpi-label">Alif QR</div><div class="rep-kpi-val">${repFmtNum(g.alifqr)}</div></div>
+    <div class="rep-kpi"><div class="rep-kpi-label">Alif кошелёк</div><div class="rep-kpi-val">${repFmtNum(g.alifwlt)}</div></div>
+    <div class="rep-kpi"><div class="rep-kpi-label">DC кошелёк</div><div class="rep-kpi-val">${repFmtNum(g.dcwlt)}</div></div>
+    <div class="rep-kpi"><div class="rep-kpi-label">DC QR</div><div class="rep-kpi-val">${repFmtNum(g.dcqr)}</div></div>`;
+  const rows = document.getElementById('repRows');
+  if (rows) {
+    const shopRows = rep.shops.map(s => `
+      <tr>
+        <td class="rep-td l">${posEsc(s.shop)}</td>
+        <td class="rep-td">${repFmtNum(s.cash)}</td>
+        <td class="rep-td">${repFmtNum(s.alifqr)}</td>
+        <td class="rep-td">${repFmtNum(s.alifwlt)}</td>
+        <td class="rep-td">${repFmtNum(s.dcwlt)}</td>
+        <td class="rep-td">${repFmtNum(s.dcqr)}</td>
+        <td class="rep-td muted">${repFmtNum(s.other)}</td>
+        <td class="rep-td">${repFmtNum(s.total)}</td>
+        <td class="rep-td muted">${s.receipts}</td>
+      </tr>`).join('');
+    const totalRow = `
+      <tr class="rep-tr-total">
+        <td class="rep-td l">ИТОГО</td>
+        <td class="rep-td">${repFmtNum(g.cash)}</td>
+        <td class="rep-td">${repFmtNum(g.alifqr)}</td>
+        <td class="rep-td">${repFmtNum(g.alifwlt)}</td>
+        <td class="rep-td">${repFmtNum(g.dcwlt)}</td>
+        <td class="rep-td">${repFmtNum(g.dcqr)}</td>
+        <td class="rep-td">${repFmtNum(g.other)}</td>
+        <td class="rep-td">${repFmtNum(g.total)}</td>
+        <td class="rep-td">${g.receipts}</td>
+      </tr>`;
+    rows.innerHTML = shopRows + totalRow;
+  }
+  const wrap = document.getElementById('repTableWrap');
+  if (wrap) wrap.style.display = '';
+  const exp = document.getElementById('repExport');
+  if (exp) exp.style.display = 'flex';
+}
+
+// --- экспорт Excel (SheetJS) ---
+function repExportXlsx() {
+  if (!repLastReport || !window.XLSX) { alert('Сначала сформируйте отчёт'); return; }
+  const rep = repLastReport, g = rep.grand;
+  const head = ['Магазин', 'Наличные', 'Alif QR', 'Alif кошелёк', 'DC кошелёк', 'DC QR', 'Прочее', 'Итого', 'Чеков'];
+  const aoa = [
+    [`Отчёт по продажам · ${rep.from === rep.to ? rep.from : rep.from + ' — ' + rep.to}`],
+    [],
+    head,
+  ];
+  rep.shops.forEach(s => aoa.push([s.shop, s.cash, s.alifqr, s.alifwlt, s.dcwlt, s.dcqr, s.other, s.total, s.receipts]));
+  aoa.push(['ИТОГО', g.cash, g.alifqr, g.alifwlt, g.dcwlt, g.dcqr, g.other, g.total, g.receipts]);
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 11 }, { wch: 13 }, { wch: 13 }, { wch: 11 }, { wch: 11 }, { wch: 13 }, { wch: 8 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Отчёт');
+  XLSX.writeFile(wb, `Отчёт_продажи_${rep.from}${rep.from !== rep.to ? '_' + rep.to : ''}.xlsx`);
+}
+
+// --- экспорт PDF (печать стилизованной области; кириллица нативная) ---
+function repExportPdf() {
+  if (!repLastReport) { alert('Сначала сформируйте отчёт'); return; }
+  const rep = repLastReport, g = rep.grand;
+  const period = rep.from === rep.to ? rep.from : `${rep.from} — ${rep.to}`;
+  const row = (name, s, cls) => `<tr class="${cls || ''}">
+    <td class="l">${posEsc(name)}</td><td>${repFmtNum(s.cash)}</td><td>${repFmtNum(s.alifqr)}</td>
+    <td>${repFmtNum(s.alifwlt)}</td><td>${repFmtNum(s.dcwlt)}</td><td>${repFmtNum(s.dcqr)}</td>
+    <td>${repFmtNum(s.other)}</td><td><b>${repFmtNum(s.total)}</b></td><td>${s.receipts}</td></tr>`;
+  const shopRows = rep.shops.map(s => row(s.shop, s)).join('');
+  const totalRow = row('ИТОГО', g, 'tot');
+  const html = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+    <title>Отчёт по продажам ${period}</title>
+    <style>
+      *{font-family:Arial,'Segoe UI',sans-serif;box-sizing:border-box;}
+      body{margin:0;padding:28px 30px;color:#1f3a3c;}
+      .hd{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #0f8b91;padding-bottom:12px;margin-bottom:6px;}
+      .hd h1{margin:0;font-size:22px;color:#0a6f74;}
+      .hd .br{font-size:20px;font-weight:800;color:#f47a1f;}
+      .sub{color:#6b7f80;font-size:13px;margin:4px 0 18px;}
+      .kpis{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+      .kpi{border:1px solid #e7ddd0;border-radius:12px;padding:10px 14px;min-width:120px;}
+      .kpi .l{font-size:11px;color:#6b7f80;text-transform:uppercase;letter-spacing:.3px;}
+      .kpi .v{font-size:19px;font-weight:800;color:#0a6f74;}
+      .kpi.acc .v{color:#e06810;}
+      table{border-collapse:collapse;width:100%;font-size:12.5px;}
+      th{background:#e9f6f6;color:#0a6f74;font-weight:800;padding:9px 8px;text-align:right;border-bottom:2px solid #0f8b91;}
+      th.l,td.l{text-align:left;}
+      td{padding:8px;text-align:right;border-bottom:1px solid #e7ddd0;color:#1f3a3c;}
+      tr.tot td{background:#f2faf9;font-weight:800;border-top:2px solid #13a2a9;}
+      .ft{margin-top:22px;font-size:11px;color:#8a9a9a;text-align:center;}
+      @media print{body{padding:12px;} @page{size:A4 landscape;margin:12mm;}}
+    </style></head><body>
+    <div class="hd"><h1>💰 Отчёт по продажам</h1><div class="br">OrtoSalon</div></div>
+    <div class="sub">Период: <b>${period}</b> · Сформирован: ${repDushTime(new Date().toISOString(), true)} (Душанбе)</div>
+    <div class="kpis">
+      <div class="kpi acc"><div class="l">Итого продаж</div><div class="v">${repFmtNum(g.total)} сом</div></div>
+      <div class="kpi"><div class="l">Наличные</div><div class="v">${repFmtNum(g.cash)}</div></div>
+      <div class="kpi"><div class="l">Alif QR</div><div class="v">${repFmtNum(g.alifqr)}</div></div>
+      <div class="kpi"><div class="l">Alif кошелёк</div><div class="v">${repFmtNum(g.alifwlt)}</div></div>
+      <div class="kpi"><div class="l">DC кошелёк</div><div class="v">${repFmtNum(g.dcwlt)}</div></div>
+      <div class="kpi"><div class="l">DC QR</div><div class="v">${repFmtNum(g.dcqr)}</div></div>
+      <div class="kpi"><div class="l">Чеков</div><div class="v">${g.receipts}</div></div>
+    </div>
+    <table><thead><tr>
+      <th class="l">Магазин</th><th>Наличные</th><th>Alif QR</th><th>Alif кошелёк</th>
+      <th>DC кошелёк</th><th>DC QR</th><th>Прочее</th><th>Итого</th><th>Чеков</th>
+    </tr></thead><tbody>${shopRows}${totalRow}</tbody></table>
+    <div class="ft">Отчёт для снятия денежных средств · OrtoSalon · данные из 1С (Чеки ККМ)</div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},250);};<\/script>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { alert('Разрешите всплывающие окна для скачивания PDF'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+// --- биндинги ---
+function repBindEvents() {
+  const ha = document.getElementById('posHistApply');
+  if (ha) ha.addEventListener('click', posHistFetch);
+  const ht = document.getElementById('posHistToday');
+  if (ht) ht.addEventListener('click', () => {
+    const f = document.getElementById('posHistFrom'), t = document.getElementById('posHistTo');
+    if (f) f.value = repToday(); if (t) t.value = repToday();
+    posHistFetch();
+  });
+  const sr = document.getElementById('repShiftsRefresh');
+  if (sr) sr.addEventListener('click', repFetchShifts);
+  const rb = document.getElementById('repBuild');
+  if (rb) rb.addEventListener('click', repBuildReport);
+  const rp = document.getElementById('repExportPdf');
+  if (rp) rp.addEventListener('click', repExportPdf);
+  const rx = document.getElementById('repExportXlsx');
+  if (rx) rx.addEventListener('click', repExportXlsx);
+}
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', repBindEvents);
+} else {
+  repBindEvents();
 }

@@ -6554,14 +6554,29 @@ async function refreshStockFrom1C() {
 }
 
 // ── Недавние поступления ──────────────────────────
-async function loadReceipts() {
+async function loadReceipts(skipBalance) {
     const listEl = document.getElementById('bcReceiptsList');
     const errEl = document.getElementById('bcReceiptsError');
     if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    if (listEl) listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Загружаю поступления…</div>';
     const limitSel = document.getElementById('bcReceiptsLimit');
     const limit = limitSel ? limitSel.value : 5;
     try {
+        // 0) Автообновление остатков из 1С перед показом списка (не блокирует при ошибке).
+        //    action=balance подтягивает product_variants.stock и СОЗДАЁТ недостающие
+        //    варианты. Без этого новый приход мог показываться с остатком 0 и кнопка
+        //    «Сгенерировать штрихкоды» не появлялась.
+        if (!skipBalance) {
+            if (listEl) listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Обновляю остатки из 1С…</div>';
+            try {
+                await fetch(`${BARCODE_SVC_URL}/api/inventory?action=balance`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                    body: JSON.stringify({ all: true }),
+                    cache: 'no-store'
+                });
+            } catch (_) { /* не критично — покажем список как есть */ }
+        }
+        if (listEl) listEl.innerHTML = '<div style="color:var(--color-text-secondary);font-size:13px;">⏳ Загружаю поступления…</div>';
         const res = await fetch(`${BARCODE_SVC_URL}/api/inventory?action=receipts&limit=${encodeURIComponent(limit)}`, {
             method: 'GET',
             headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET },
@@ -6786,7 +6801,7 @@ async function bcGenReceiptCodes(btn, refsJson) {
         } else {
             alert(`✅ Готово.\nСоздано новых кодов: ${totalGen}\nОтправлено в 1С: ${totalReg}`);
         }
-        await loadReceipts(); // обновить статусы
+        await loadReceipts(true); // остаток уже актуален после генерации — не гоняем balance повторно
     } finally {
         btn.disabled = false;
         btn.textContent = orig;

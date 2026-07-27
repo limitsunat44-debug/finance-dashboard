@@ -6419,9 +6419,9 @@ async function loadBarcodes() {
     // что-то пойдёт не так, раздел всё равно останется рабочим для тестовой печати.
     try {
         const [warehouses, products, variants] = await Promise.all([
-            fetchAllRows('warehouses', 'id,c1_code,name,is_active'),
+            fetchAllRows('warehouses', 'id,c1_code,c1_ref,name,is_active'),
             fetchAllRows('products', 'id,name_ru,category,is_active,c1_ref'),
-            fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock,c1_char_ref')
+            fetchAllRows('product_variants', 'id,product_id,warehouse_id,size_label,stock,c1_char_ref,price,price_old')
         ]);
 
         barcodesState.warehouses = (warehouses || [])
@@ -7120,11 +7120,20 @@ function rcpSelectProduct(pid) {
     vs.forEach(v => {
         const key = v.c1_char_ref || v.size_label || v.id;
         if (!byChar[key]) {
-            byChar[key] = { charRef: v.c1_char_ref || '', size: v.size_label || '(без размера)', variantIdOnWh: null, stockOnWh: 0 };
+            byChar[key] = {
+                charRef: v.c1_char_ref || '', size: v.size_label || '(без размера)',
+                variantIdOnWh: null, stockOnWh: 0,
+                // текущие цены из базы (берём любой вариант этого размера; если есть на выбранном складе — предпочтём его)
+                price: (v.price != null && v.price !== '') ? Number(v.price) : null,
+                priceOld: (v.price_old != null && v.price_old !== '') ? Number(v.price_old) : null
+            };
         }
         if (whId && String(v.warehouse_id) === String(whId)) {
             byChar[key].variantIdOnWh = v.id;
             byChar[key].stockOnWh = Number(v.stock) || 0;
+            // на выбранном складе цены точнее — перекрываем
+            if (v.price != null && v.price !== '') byChar[key].price = Number(v.price);
+            if (v.price_old != null && v.price_old !== '') byChar[key].priceOld = Number(v.price_old);
         }
     });
     let sizes = Object.values(byChar);
@@ -7142,6 +7151,7 @@ function rcpSelectProduct(pid) {
         return;
     }
 
+    const pv = v => (v == null ? '' : v);
     const rows = sizes.map((s, i) => `
         <tr>
             <td style="padding:6px 8px;border-bottom:1px solid #eee;">
@@ -7153,23 +7163,37 @@ function rcpSelectProduct(pid) {
                     <b>${escapeHtml(s.size)}</b>
                 </label>
             </td>
-            <td style="padding:6px 8px;border-bottom:1px solid #eee;color:#888;font-size:12px;">остаток: ${s.stockOnWh}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #eee;">
-                <input type="number" class="rcp-size-qty form-control" data-idx="${i}" min="0" step="1" value="0" style="width:80px;">
+            <td style="padding:6px 6px;border-bottom:1px solid #eee;color:#888;font-size:12px;white-space:nowrap;">ост.: ${s.stockOnWh}</td>
+            <td style="padding:6px 6px;border-bottom:1px solid #eee;">
+                <input type="number" class="rcp-size-qty form-control" data-idx="${i}" min="0" step="1" value="0" style="width:64px;" title="Количество пар">
+            </td>
+            <td style="padding:6px 6px;border-bottom:1px solid #eee;">
+                <input type="number" class="rcp-size-purchase form-control" data-idx="${i}" min="0" step="0.01" value="" placeholder="0" style="width:84px;" title="Цена закупки">
+            </td>
+            <td style="padding:6px 6px;border-bottom:1px solid #eee;">
+                <input type="number" class="rcp-size-old form-control" data-idx="${i}" min="0" step="0.01" value="${pv(s.priceOld)}" placeholder="—" style="width:84px;" title="Старая (зачёркнутая) цена">
+            </td>
+            <td style="padding:6px 6px;border-bottom:1px solid #eee;">
+                <input type="number" class="rcp-size-new form-control" data-idx="${i}" min="0" step="0.01" value="${pv(s.price)}" placeholder="0" style="width:84px;" title="Новая розничная цена">
             </td>
         </tr>`).join('');
 
     box.innerHTML = `
         <div style="font-weight:600;margin:4px 0 8px;">${escapeHtml(prod.name_ru)} — размеры</div>
-        <div style="font-size:12px;color:#888;margin-bottom:6px;">Отметьте размеры и укажите количество пар. Размеры — из существующей номенклатуры.</div>
-        <table style="border-collapse:collapse;width:100%;max-width:460px;">
+        <div style="font-size:12px;color:#888;margin-bottom:6px;">Цены подставлены из базы — меняйте только где нужно. Отметьте размеры и укажите количество пар.</div>
+        <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;min-width:560px;">
             <thead><tr>
                 <th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;font-size:12px;">Размер</th>
-                <th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;font-size:12px;">Склад</th>
-                <th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;font-size:12px;">Кол-во</th>
+                <th style="text-align:left;padding:6px 6px;border-bottom:2px solid #ddd;font-size:12px;">Склад</th>
+                <th style="text-align:left;padding:6px 6px;border-bottom:2px solid #ddd;font-size:12px;">Кол-во</th>
+                <th style="text-align:left;padding:6px 6px;border-bottom:2px solid #ddd;font-size:12px;">Закупка</th>
+                <th style="text-align:left;padding:6px 6px;border-bottom:2px solid #ddd;font-size:12px;">Старая</th>
+                <th style="text-align:left;padding:6px 6px;border-bottom:2px solid #ddd;font-size:12px;">Новая</th>
             </tr></thead>
             <tbody>${rows}</tbody>
-        </table>`;
+        </table>
+        </div>`;
     box.style.display = 'block';
     box.querySelectorAll('.rcp-size-qty').forEach(q => {
         q.addEventListener('input', function () {
@@ -7177,13 +7201,13 @@ function rcpSelectProduct(pid) {
             if (cb) cb.checked = (Number(this.value) || 0) > 0;
         });
     });
-    if (pricesBox) pricesBox.style.display = 'block';
+    if (pricesBox) pricesBox.style.display = 'none'; // цены теперь построчно
     if (submitBtn) submitBtn.disabled = false;
 }
 
 function rcpReset() {
     receiptState.selectedProductId = null;
-    ['rcpProductSearch', 'rcpPurchasePrice', 'rcpPriceOld', 'rcpPriceNew'].forEach(id => {
+    ['rcpProductSearch'].forEach(id => {
         const el = document.getElementById(id); if (el) el.value = '';
     });
     const box = document.getElementById('rcpProductBox'); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
@@ -7213,25 +7237,24 @@ async function rcpSubmit() {
     }
 
     const box = document.getElementById('rcpProductBox');
-    const purchasePrice = Number(document.getElementById('rcpPurchasePrice')?.value) || 0;
-    const priceOldRaw = document.getElementById('rcpPriceOld')?.value;
-    const priceNewRaw = document.getElementById('rcpPriceNew')?.value;
-    const priceOld = priceOldRaw === '' ? null : Number(priceOldRaw);
-    const priceNew = priceNewRaw === '' ? null : Number(priceNewRaw);
 
+    // Цены теперь построчные: берём из полей каждого размера (предзаполнены из базы).
     const items = [];
     box.querySelectorAll('.rcp-size-cb').forEach(cb => {
         const idx = cb.dataset.idx;
         const qtyEl = box.querySelector(`.rcp-size-qty[data-idx="${idx}"]`);
         const qty = Number(qtyEl?.value) || 0;
         if (cb.checked && qty > 0) {
+            const pRaw = box.querySelector(`.rcp-size-purchase[data-idx="${idx}"]`)?.value;
+            const oRaw = box.querySelector(`.rcp-size-old[data-idx="${idx}"]`)?.value;
+            const nRaw = box.querySelector(`.rcp-size-new[data-idx="${idx}"]`)?.value;
             items.push({
                 productC1Ref: prod.c1_ref,
                 charC1Ref: cb.dataset.charref || null,
                 qty,
-                purchasePrice,
-                priceNew,
-                priceOld,
+                purchasePrice: (pRaw === '' || pRaw == null) ? 0 : Number(pRaw),
+                priceNew: (nRaw === '' || nRaw == null) ? null : Number(nRaw),
+                priceOld: (oRaw === '' || oRaw == null) ? null : Number(oRaw),
                 variantId: cb.dataset.variantid || null
             });
         }

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ортосалон Дашборд</title>
-    <link rel="stylesheet" href="style.css?v=20260727c-print-qty-fix">
+    <link rel="stylesheet" href="style.css?v=20260728a-nomen-ui">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -1476,15 +1476,26 @@
                         во вкладке «Печать».
                     </p>
 
-                    <!-- Склад + поиск товара -->
+                    <!-- Склад + поставщик -->
                     <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
                         <div style="min-width:200px;">
                             <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Склад прихода</label>
                             <select id="rcpWarehouse" class="form-control" style="min-width:200px;"></select>
                         </div>
+                        <div style="min-width:240px;">
+                            <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Поставщик (один на документ)</label>
+                            <select id="rcpSupplier" class="form-control" style="min-width:240px;"><option value="">— без поставщика —</option></select>
+                        </div>
+                    </div>
+
+                    <!-- Поиск товара + создание номенклатуры -->
+                    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px;">
                         <div style="flex:1;min-width:260px;position:relative;">
                             <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Товар (поиск по названию)</label>
                             <input type="text" id="rcpProductSearch" class="form-control" placeholder="Начните вводить название…" autocomplete="off">
+                        </div>
+                        <div>
+                            <button class="btn" type="button" onclick="rcpOpenCreateNomen()" title="Создать новую карточку товара в 1С">➕ Создать номенклатуру</button>
                         </div>
                     </div>
 
@@ -1519,6 +1530,50 @@
                     <div style="margin-top:16px;">
                         <button class="btn btn-primary" id="rcpSubmitBtn" onclick="rcpSubmit()" disabled>✅ Оприходовать</button>
                         <button class="btn" onclick="rcpReset()">Очистить</button>
+                    </div>
+
+                    <!-- МОДАЛКА: Создать номенклатуру -->
+                    <div id="rcpNomenModal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);">
+                        <div style="max-width:640px;margin:5vh auto;background:#fff;border-radius:12px;padding:22px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.3);">
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+                                <h3 style="margin:0;font-size:18px;">➕ Создать номенклатуру</h3>
+                                <button class="btn" type="button" style="padding:4px 10px;" onclick="rcpCloseCreateNomen()">✕</button>
+                            </div>
+                            <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 14px;">Единица измерения — всегда «шт». Товар создаётся в 1С и в базе, после чего его можно сразу оприходовать.</p>
+
+                            <div style="margin-bottom:12px;">
+                                <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Наименование товара *</label>
+                                <input type="text" id="nmName" class="form-control" placeholder="Напр. Forelli 2025 Black" autocomplete="off">
+                            </div>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+                                <div style="flex:1;min-width:220px;">
+                                    <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Товарная категория (вид) *</label>
+                                    <select id="nmKind" class="form-control"></select>
+                                </div>
+                                <div style="flex:1;min-width:220px;">
+                                    <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:4px;">Этикетка *</label>
+                                    <select id="nmLabel" class="form-control"></select>
+                                </div>
+                            </div>
+                            <div style="margin-bottom:8px;">
+                                <label style="font-size:12px;color:var(--color-text-secondary);display:block;margin-bottom:6px;">Размеры (из существующего пула)</label>
+                                <input type="text" id="nmSizeFilter" class="form-control" placeholder="Фильтр размеров… (напр. 40)" style="margin-bottom:8px;" autocomplete="off">
+                                <div id="nmSizesBox" style="display:flex;flex-wrap:wrap;gap:6px;max-height:180px;overflow-y:auto;border:1px solid var(--color-border,#ddd);border-radius:8px;padding:10px;"></div>
+                                <p style="font-size:11px;color:var(--color-text-secondary);margin:6px 0 0;">Отмеченные размеры будут созданы как характеристики товара. Можно добавить свой ниже.</p>
+                                <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+                                    <input type="text" id="nmSizeCustom" class="form-control" placeholder="Свой размер (напр. 46)" style="width:200px;" autocomplete="off">
+                                    <button class="btn" type="button" onclick="rcpAddCustomSize()">➕ Добавить размер</button>
+                                </div>
+                            </div>
+
+                            <div id="nmError" class="error-message" style="display:none;margin:10px 0;"></div>
+                            <div id="nmInfo" style="margin:10px 0;font-size:13px;"></div>
+
+                            <div style="display:flex;gap:10px;margin-top:16px;">
+                                <button class="btn btn-primary" id="nmSubmitBtn" type="button" onclick="rcpSubmitCreateNomen()">✅ Создать и выбрать</button>
+                                <button class="btn" type="button" onclick="rcpCloseCreateNomen()">Отмена</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1927,7 +1982,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260727c-print-qty-fix"></script>
+    <script src="app.js?v=20260728a-nomen-ui"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

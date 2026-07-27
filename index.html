@@ -11,120 +11,146 @@
     <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
-    /* ===== КАССА / РМК — самодостаточные адаптивные стили ===== */
-    .pos-root{max-width:640px;margin:0 auto;padding:0 4px;box-sizing:border-box;}
+    /* ===== КАССА / РМК — фирменный бирюзово-оранжевый стиль (референс orto-card) ===== */
+    .pos-root{
+      --pos-teal:#0f8b91; --pos-teal-2:#0a6f74; --pos-teal-3:#13a2a9;
+      --pos-orange:#f47a1f; --pos-orange-2:#e06810;
+      --pos-cream:#f7efe6; --pos-cream-2:#fbf6ef;
+      --pos-ink:#1f3a3c; --pos-muted:#6b7f80; --pos-line:#e7ddd0;
+      --pos-white:#ffffff; --pos-radius:20px;
+      max-width:640px;margin:0 auto;padding:14px 10px 40px;box-sizing:border-box;
+      background:linear-gradient(180deg,var(--pos-cream) 0%,var(--pos-cream-2) 100%);
+      border-radius:24px;color:var(--pos-ink);
+      font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    }
     .pos-root *{box-sizing:border-box;}
-    .pos-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:14px;}
-    .pos-topbar-title{font-size:22px;font-weight:700;}
-    .pos-topbar-status{font-size:13px;color:var(--color-text-secondary,#667);}
-    .pos-card{background:var(--color-surface,#fff);border:1px solid var(--color-border,#e3e6ea);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.04);}
-    .pos-step-head{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;margin:0 0 10px;}
-    .pos-step-num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#2563eb;color:#fff;font-size:14px;font-weight:700;flex:0 0 auto;}
-    .pos-hint{font-size:13px;color:var(--color-text-secondary,#667);margin:4px 0 12px;line-height:1.4;}
-    .pos-alert{border-radius:12px;padding:12px 14px;margin-bottom:14px;font-size:14px;line-height:1.4;}
-    .pos-alert-error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
-    .pos-loading{padding:18px;text-align:center;color:var(--color-text-secondary,#667);font-size:14px;}
+    /* topbar как заголовок карты */
+    .pos-topbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:2px 4px 16px;}
+    .pos-topbar-title{font-size:24px;font-weight:800;letter-spacing:-.3px;color:var(--pos-teal-2);}
+    .pos-topbar-status{font-size:13px;color:var(--pos-muted);font-weight:600;}
+    /* белая скруглённая карточка */
+    .pos-card{background:var(--pos-white);border:1px solid var(--pos-line);border-radius:var(--pos-radius);padding:18px;margin-bottom:14px;box-shadow:0 6px 20px rgba(31,58,60,.06);}
+    .pos-step-head{display:flex;align-items:center;gap:9px;font-size:17px;font-weight:800;margin:0 0 12px;color:var(--pos-teal-2);}
+    .pos-step-num{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--pos-orange);color:#fff;font-size:14px;font-weight:800;flex:0 0 auto;box-shadow:0 3px 8px rgba(244,122,31,.35);}
+    .pos-hint{font-size:13px;color:var(--pos-muted);margin:4px 0 12px;line-height:1.45;}
+    .pos-alert{border-radius:14px;padding:12px 14px;margin-bottom:14px;font-size:14px;line-height:1.4;}
+    .pos-alert-error{background:#fdecef;color:#a12c3b;border:1px solid #f3b9c2;}
+    .pos-loading{padding:18px;text-align:center;color:var(--pos-muted);font-size:14px;}
     /* список касс */
     .pos-kassa-list{display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px;}
-    .pos-kassa-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:14px 16px;border:2px solid var(--color-border,#e3e6ea);border-radius:12px;background:var(--color-surface,#fff);cursor:pointer;font-size:16px;font-weight:600;color:inherit;transition:all .12s;min-height:56px;}
-    .pos-kassa-item:hover{border-color:#93c5fd;}
-    .pos-kassa-item.active{border-color:#2563eb;background:#eff6ff;}
+    .pos-kassa-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:15px 16px;border:2px solid var(--pos-line);border-radius:16px;background:var(--pos-white);cursor:pointer;font-size:16px;font-weight:700;color:var(--pos-ink);transition:all .14s;min-height:58px;}
+    .pos-kassa-item:hover{border-color:var(--pos-teal-3);box-shadow:0 4px 14px rgba(15,139,145,.12);}
+    .pos-kassa-item.active{border-color:var(--pos-teal);background:#e9f6f6;}
     .pos-kassa-item .pos-kassa-emoji{font-size:22px;flex:0 0 auto;}
-    .pos-kassa-item .pos-kassa-sub{display:block;font-size:12px;font-weight:400;color:var(--color-text-secondary,#778);margin-top:2px;}
-    .pos-confirm{display:flex;align-items:flex-start;gap:10px;font-size:15px;line-height:1.4;padding:12px;background:#f8fafc;border:1px solid var(--color-border,#e3e6ea);border-radius:12px;margin-bottom:14px;cursor:pointer;}
-    .pos-confirm input{width:22px;height:22px;flex:0 0 auto;margin-top:1px;}
+    .pos-kassa-item .pos-kassa-sub{display:block;font-size:12px;font-weight:500;color:var(--pos-muted);margin-top:2px;}
+    .pos-confirm{display:flex;align-items:flex-start;gap:10px;font-size:15px;line-height:1.4;padding:13px;background:var(--pos-cream);border:1px solid var(--pos-line);border-radius:14px;margin-bottom:14px;cursor:pointer;}
+    .pos-confirm input{width:22px;height:22px;flex:0 0 auto;margin-top:1px;accent-color:var(--pos-teal);}
     /* поля */
     .pos-field{margin-bottom:14px;}
-    .pos-field label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--color-text-secondary,#556);}
-    .pos-select,.pos-input{width:100%;padding:13px 14px;font-size:16px;border:2px solid var(--color-border,#e3e6ea);border-radius:12px;background:var(--color-surface,#fff);color:inherit;min-height:50px;}
+    .pos-field label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;color:var(--pos-teal-2);}
+    .pos-select,.pos-input{width:100%;padding:13px 14px;font-size:16px;border:2px solid var(--pos-line);border-radius:14px;background:var(--pos-white);color:var(--pos-ink);min-height:50px;}
     .pos-input-scan{font-family:ui-monospace,Menlo,Consolas,monospace;letter-spacing:1px;}
-    .pos-select:focus,.pos-input:focus{outline:none;border-color:#2563eb;}
-    .pos-kassa-badge{display:inline-block;font-size:15px;font-weight:700;padding:8px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;margin-bottom:14px;color:#1e40af;}
+    .pos-select:focus,.pos-input:focus{outline:none;border-color:var(--pos-teal);box-shadow:0 0 0 3px rgba(15,139,145,.15);}
+    .pos-kassa-badge{display:inline-block;font-size:15px;font-weight:800;padding:8px 15px;background:#e9f6f6;border:1px solid #bfe3e4;border-radius:12px;margin-bottom:14px;color:var(--pos-teal-2);}
     /* кнопки */
-    .pos-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:14px 18px;font-size:16px;font-weight:600;border-radius:12px;border:none;cursor:pointer;min-height:52px;transition:all .12s;}
+    .pos-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:14px 18px;font-size:16px;font-weight:700;border-radius:14px;border:none;cursor:pointer;min-height:52px;transition:all .14s;}
     .pos-btn:disabled{opacity:.45;cursor:not-allowed;}
-    .pos-btn-primary{background:#2563eb;color:#fff;}
-    .pos-btn-primary:not(:disabled):hover{background:#1d4ed8;}
-    .pos-btn-ghost{background:var(--color-surface,#f1f5f9);color:inherit;border:2px solid var(--color-border,#e3e6ea);}
-    .pos-btn-danger{background:#dc2626;color:#fff;}
-    .pos-btn-danger:hover{background:#b91c1c;}
+    .pos-btn-primary{background:var(--pos-teal);color:#fff;box-shadow:0 4px 12px rgba(15,139,145,.28);}
+    .pos-btn-primary:not(:disabled):hover{background:var(--pos-teal-2);}
+    .pos-btn-ghost{background:var(--pos-cream);color:var(--pos-teal-2);border:2px solid var(--pos-line);}
+    .pos-btn-ghost:not(:disabled):hover{border-color:var(--pos-teal-3);}
+    .pos-btn-accent{background:var(--pos-orange);color:#fff;box-shadow:0 4px 12px rgba(244,122,31,.3);}
+    .pos-btn-accent:not(:disabled):hover{background:var(--pos-orange-2);}
+    .pos-btn-danger{background:var(--pos-orange-2);color:#fff;}
+    .pos-btn-danger:hover{background:#c95a0d;}
     .pos-btn-block{width:100%;}
-    .pos-btn-sm{padding:9px 14px;font-size:14px;min-height:auto;}
+    .pos-btn-sm{padding:9px 14px;font-size:14px;min-height:auto;border-radius:12px;}
     .pos-row-btns{display:flex;gap:10px;}
     .pos-row-btns .pos-btn{flex:1;}
-    /* смена / сканер */
-    .pos-shift-card{background:#f0fdf4;border-color:#bbf7d0;}
+    /* смена — hero-карта бирюзовый градиент */
+    .pos-shift-card{position:relative;overflow:hidden;background:linear-gradient(135deg,var(--pos-teal-3) 0%,var(--pos-teal) 55%,var(--pos-teal-2) 100%);border:none;color:#fff;}
+    .pos-shift-card::before{content:"";position:absolute;top:-60px;right:-40px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.10);}
+    .pos-shift-card::after{content:"";position:absolute;bottom:-70px;right:30px;width:130px;height:130px;border-radius:50%;background:rgba(255,255,255,.07);}
+    .pos-shift-card>*{position:relative;z-index:1;}
     .pos-shift-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
-    .pos-shift-open{font-size:16px;font-weight:700;color:#15803d;}
-    .pos-shift-meta{font-size:13px;color:var(--color-text-secondary,#556);margin-top:3px;line-height:1.4;}
+    .pos-shift-open{font-size:17px;font-weight:800;color:#fff;}
+    .pos-shift-meta{font-size:13px;color:rgba(255,255,255,.85);margin-top:4px;line-height:1.45;}
+    .pos-shift-card .pos-btn-danger{background:var(--pos-orange);box-shadow:0 3px 10px rgba(0,0,0,.18);}
+    .pos-shift-card .pos-btn-danger:hover{background:var(--pos-orange-2);}
     .pos-scan-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;}
-    .pos-mode-badge{font-size:12px;font-weight:600;padding:5px 10px;border-radius:20px;background:#e0e7ff;color:#3730a3;}
+    .pos-mode-badge{font-size:12px;font-weight:800;padding:6px 12px;border-radius:20px;background:var(--pos-orange);color:#fff;}
     .pos-camera-wrap{margin-bottom:14px;}
-    .pos-reader{width:100%;border-radius:12px;overflow:hidden;margin-bottom:10px;}
-    .pos-reader video{width:100%!important;height:auto!important;border-radius:12px;}
-    .pos-cart-empty{padding:16px;text-align:center;color:var(--color-text-secondary,#889);font-size:14px;}
-    .pos-cart-total{display:flex;align-items:center;justify-content:space-between;font-size:18px;font-weight:700;padding-top:12px;margin-top:8px;border-top:1px solid var(--color-border,#e3e6ea);}
+    .pos-reader{width:100%;border-radius:14px;overflow:hidden;margin-bottom:10px;}
+    .pos-reader video{width:100%!important;height:auto!important;border-radius:14px;}
+    .pos-cart-empty{padding:18px;text-align:center;color:var(--pos-muted);font-size:14px;}
+    .pos-cart-total{display:flex;align-items:center;justify-content:space-between;font-size:18px;font-weight:800;padding-top:12px;margin-top:8px;border-top:1px solid var(--pos-line);color:var(--pos-teal-2);}
     /* позиции чека */
-    .pos-line{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--color-border,#eef0f3);}
+    .pos-line{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid #f0e9de;}
     .pos-line:last-child{border-bottom:none;}
-    .pos-line.active{background:#eff6ff;border-radius:10px;padding:12px 10px;margin:0 -10px;border-bottom:1px solid transparent;}
+    .pos-line.active{background:#e9f6f6;border-radius:12px;padding:12px 10px;margin:0 -10px;border-bottom:1px solid transparent;}
     .pos-line-info{flex:1;min-width:0;}
-    .pos-line-name{font-size:14px;font-weight:600;line-height:1.3;}
-    .pos-line-sub{font-size:12px;color:var(--color-text-secondary,#889);margin-top:2px;}
-    .pos-line-sub .pos-disc-tag{color:#b45309;font-weight:600;}
-    .pos-line-warn{font-size:12px;color:#b91c1c;margin-top:2px;}
+    .pos-line-name{font-size:14px;font-weight:700;line-height:1.3;}
+    .pos-line-sub{font-size:12px;color:var(--pos-muted);margin-top:2px;}
+    .pos-line-sub .pos-disc-tag{color:var(--pos-orange-2);font-weight:700;}
+    .pos-line-warn{font-size:12px;color:#a12c3b;margin-top:2px;}
     .pos-qty{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
-    .pos-qty button{width:30px;height:30px;border-radius:8px;border:1px solid var(--color-border,#cdd3da);background:var(--color-surface,#fff);font-size:17px;font-weight:700;cursor:pointer;color:inherit;line-height:1;}
-    .pos-qty span{min-width:22px;text-align:center;font-weight:700;font-size:15px;}
-    .pos-line-sum{flex:0 0 auto;font-weight:700;font-size:14px;text-align:right;min-width:64px;}
-    .pos-line-rm{flex:0 0 auto;width:28px;height:28px;border:none;background:none;color:#c0392b;font-size:18px;cursor:pointer;line-height:1;}
+    .pos-qty button{width:32px;height:32px;border-radius:10px;border:1px solid var(--pos-line);background:var(--pos-cream);font-size:17px;font-weight:800;cursor:pointer;color:var(--pos-teal-2);line-height:1;}
+    .pos-qty button:hover{border-color:var(--pos-teal-3);}
+    .pos-qty span{min-width:22px;text-align:center;font-weight:800;font-size:15px;}
+    .pos-line-sum{flex:0 0 auto;font-weight:800;font-size:14px;text-align:right;min-width:64px;}
+    .pos-line-rm{flex:0 0 auto;width:28px;height:28px;border:none;background:none;color:var(--pos-orange-2);font-size:18px;cursor:pointer;line-height:1;}
     /* карты/скидки */
     .pos-card-results{margin-top:6px;display:flex;flex-direction:column;gap:4px;}
-    .pos-card-res-item{text-align:left;padding:9px 12px;border:1px solid var(--color-border,#e3e6ea);border-radius:9px;background:var(--color-surface,#fff);cursor:pointer;font-size:14px;color:inherit;}
-    .pos-card-res-item:hover{border-color:#93c5fd;background:#f0f7ff;}
-    .pos-card-chosen{margin-top:8px;padding:10px 12px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
-    .pos-card-chosen .pos-chosen-rm{border:none;background:none;color:#c0392b;font-size:16px;cursor:pointer;}
+    .pos-card-res-item{text-align:left;padding:10px 13px;border:1px solid var(--pos-line);border-radius:12px;background:var(--pos-white);cursor:pointer;font-size:14px;color:var(--pos-ink);}
+    .pos-card-res-item:hover{border-color:var(--pos-teal-3);background:#e9f6f6;}
+    .pos-card-chosen{margin-top:8px;padding:11px 13px;border-radius:12px;background:#e9f6f6;border:1px solid #bfe3e4;font-size:14px;font-weight:600;color:var(--pos-teal-2);display:flex;align-items:center;justify-content:space-between;gap:8px;}
+    .pos-card-chosen .pos-chosen-rm{border:none;background:none;color:var(--pos-orange-2);font-size:16px;cursor:pointer;}
     /* итоги */
-    .pos-totals{display:flex;flex-direction:column;gap:6px;}
+    .pos-totals{display:flex;flex-direction:column;gap:7px;}
     .pos-totals-row{display:flex;align-items:center;justify-content:space-between;font-size:15px;}
-    .pos-totals-disc{color:#b45309;}
-    .pos-totals-grand{font-size:19px;font-weight:800;padding-top:8px;margin-top:2px;border-top:1px solid var(--color-border,#e3e6ea);}
+    .pos-totals-disc{color:var(--pos-orange-2);font-weight:600;}
+    .pos-totals-grand{font-size:20px;font-weight:900;padding-top:9px;margin-top:2px;border-top:1px solid var(--pos-line);color:var(--pos-teal-2);}
     /* модальные окна кассы */
-    .pos-modal{position:fixed;inset:0;z-index:2000;background:rgba(15,23,42,.55);display:flex;align-items:flex-end;justify-content:center;padding:0;}
-    .pos-modal-box{background:var(--color-surface,#fff);width:100%;max-width:560px;border-radius:18px 18px 0 0;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 -4px 24px rgba(0,0,0,.2);}
-    .pos-modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--color-border,#e3e6ea);font-size:18px;font-weight:700;}
-    .pos-modal-x{border:none;background:none;font-size:22px;cursor:pointer;color:var(--color-text-secondary,#778);line-height:1;}
+    .pos-modal{position:fixed;inset:0;z-index:2000;background:rgba(15,58,60,.5);display:flex;align-items:flex-end;justify-content:center;padding:0;}
+    .pos-modal-box{background:var(--pos-cream-2);width:100%;max-width:560px;border-radius:24px 24px 0 0;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 -6px 30px rgba(0,0,0,.22);}
+    .pos-modal-head{display:flex;align-items:center;justify-content:space-between;padding:17px 18px;border-bottom:1px solid var(--pos-line);font-size:18px;font-weight:800;color:var(--pos-teal-2);}
+    .pos-modal-x{border:none;background:none;font-size:22px;cursor:pointer;color:var(--pos-muted);line-height:1;}
     .pos-modal-body{padding:16px 18px 22px;overflow-y:auto;}
-    .pos-paygrand{font-size:20px;font-weight:800;margin-bottom:14px;padding:12px 14px;background:#eff6ff;border-radius:12px;color:#1e40af;}
+    .pos-paygrand{font-size:20px;font-weight:900;margin-bottom:14px;padding:14px 16px;background:linear-gradient(135deg,var(--pos-teal-3),var(--pos-teal));border-radius:16px;color:#fff;box-shadow:0 4px 14px rgba(15,139,145,.25);}
     .pos-paymode-btns{display:flex;gap:8px;}
     .pos-paymode-btns .pos-btn{flex:1;}
-    .pos-paymode.active{border-color:#2563eb;background:#eff6ff;color:#1e40af;}
-    .pos-change{font-size:17px;font-weight:700;color:#15803d;padding:10px 12px;background:#f0fdf4;border-radius:10px;border:1px solid #bbf7d0;}
-    .pos-change.neg{color:#b91c1c;background:#fef2f2;border-color:#fecaca;}
+    .pos-paymode.active{border-color:var(--pos-teal);background:#e9f6f6;color:var(--pos-teal-2);}
+    .pos-change{font-size:17px;font-weight:800;color:#1f7a4d;padding:11px 13px;background:#e7f7ee;border-radius:12px;border:1px solid #b7e4ca;}
+    .pos-change.neg{color:#a12c3b;background:#fdecef;border-color:#f3b9c2;}
     /* чек-сверка */
-    .pos-receipt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed var(--color-border,#cdd3da);border-radius:12px;padding:16px;background:#fcfcfd;line-height:1.55;}
-    .pos-receipt .pr-title{text-align:center;font-weight:800;font-size:15px;margin-bottom:2px;}
-    .pos-receipt .pr-sub{text-align:center;color:#667;margin-bottom:10px;}
+    .pos-receipt{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #cbb9a2;border-radius:14px;padding:16px;background:var(--pos-white);line-height:1.55;color:var(--pos-ink);}
+    .pos-receipt .pr-title{text-align:center;font-weight:900;font-size:15px;margin-bottom:2px;color:var(--pos-teal-2);}
+    .pos-receipt .pr-sub{text-align:center;color:var(--pos-muted);margin-bottom:10px;}
     .pos-receipt .pr-line{display:flex;justify-content:space-between;gap:8px;}
     .pos-receipt .pr-item{margin:6px 0;}
-    .pos-receipt .pr-hr{border-top:1px dashed #cbd5e1;margin:10px 0;}
-    .pos-receipt .pr-grand{font-size:16px;font-weight:800;}
-    .pos-receipt .pr-disc{color:#b45309;}
+    .pos-receipt .pr-hr{border-top:1px dashed #d9c9b4;margin:10px 0;}
+    .pos-receipt .pr-grand{font-size:16px;font-weight:900;color:var(--pos-teal-2);}
+    .pos-receipt .pr-disc{color:var(--pos-orange-2);}
     /* мобайл */
     @media (max-width:560px){
-      .pos-root{padding:0 2px;}
-      .pos-topbar-title{font-size:20px;}
-      .pos-card{padding:14px;border-radius:12px;}
-      .pos-kassa-item{font-size:15px;padding:13px 14px;}
+      .pos-root{padding:12px 6px 32px;border-radius:18px;}
+      .pos-topbar-title{font-size:21px;}
+      .pos-card{padding:15px;border-radius:16px;}
+      .pos-kassa-item{font-size:15px;padding:14px;}
       .pos-btn{font-size:15px;padding:13px 14px;}
       .pos-row-btns{flex-direction:column;}
     }
     @media (prefers-color-scheme:dark){
-      .pos-confirm{background:#1e293b;}
-      .pos-kassa-item.active{background:#1e3a5f;}
-      .pos-kassa-badge{background:#1e3a5f;color:#bfdbfe;border-color:#1e40af;}
-      .pos-shift-card{background:#0f2417;border-color:#166534;}
-      .pos-alert-error{background:#450a0a;color:#fca5a5;border-color:#7f1d1d;}
+      .pos-root{--pos-cream:#14201f;--pos-cream-2:#182726;--pos-white:#1d2c2b;--pos-ink:#e8f0ef;--pos-muted:#8fa5a4;--pos-line:#2c3d3c;--pos-teal-2:#4fbcc2;}
+      .pos-topbar-title{color:#5fc9cf;}
+      .pos-step-head{color:#5fc9cf;}
+      .pos-card-chosen{background:#12332f;border-color:#1c5049;color:#7fd6c2;}
+      .pos-kassa-item.active{background:#123433;}
+      .pos-kassa-badge{background:#123433;color:#7fd6d8;border-color:#1c5654;}
+      .pos-alert-error{background:#3a1218;color:#f3b9c2;border-color:#6e2530;}
+      .pos-confirm{background:#182726;}
+      .pos-line.active{background:#123433;}
+      .pos-change{background:#12331f;border-color:#1c5033;color:#7fd6a2;}
     }
     </style>
 </head>
@@ -2010,7 +2036,7 @@
               <div class="pos-card">
                 <div class="pos-scan-head">
                   <div class="pos-step-head" style="margin:0;">Чек</div>
-                  <button class="pos-btn pos-btn-primary pos-btn-sm" id="posScanNext" type="button">📷 Отсканировать товар</button>
+                  <button class="pos-btn pos-btn-accent pos-btn-sm" id="posScanNext" type="button">📷 Отсканировать товар</button>
                 </div>
                 <div id="posCart" class="pos-cart">
                   <div class="pos-cart-empty">Корзина пуста. Отсканируйте товар.</div>
@@ -2123,7 +2149,7 @@
                   <div id="posReceiptPreview" class="pos-receipt"></div>
                   <div class="pos-row-btns" style="margin-top:14px;">
                     <button class="pos-btn pos-btn-ghost" id="posReceiptBack" type="button">← Назад</button>
-                    <button class="pos-btn pos-btn-primary" id="posReceiptConfirm" type="button">✅ Провести продажу</button>
+                    <button class="pos-btn pos-btn-accent" id="posReceiptConfirm" type="button">✅ Провести продажу</button>
                   </div>
                   <div class="pos-alert pos-alert-error" id="posReceiptError" style="display:none;margin-top:10px;"></div>
                 </div>
@@ -2310,7 +2336,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728d-pos2"></script>
+    <script src="app.js?v=20260728e-posdesign"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

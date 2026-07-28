@@ -60,10 +60,10 @@ const ADMIN_ACCOUNTS = {
 let currentAllowedTabs = '*';
 
 function isTabAllowed(tabName) {
-    // Вкладки «Касса» (РМК) и «История продаж» видны ВСЕМ пользователям.
-    if (tabName === 'pos' || tabName === 'posHistory') return true;
-    // «Отчёты и кассы» (админ-дашборд) — только админам с полным доступом.
-    if (tabName === 'salesReports') return currentAllowedTabs === '*';
+    // Вкладка «Касса» (РМК) видна ВСЕМ пользователям (в т.ч. кассиру).
+    if (tabName === 'pos') return true;
+    // «История продаж» и «Отчёты и кассы» — только админам с полным доступом (кассир их НЕ видит).
+    if (tabName === 'posHistory' || tabName === 'salesReports') return currentAllowedTabs === '*';
     return currentAllowedTabs === '*' || currentAllowedTabs.includes(tabName);
 }
 
@@ -10352,18 +10352,26 @@ function posRecalcChange() {
     }
 }
 
+// имя вида оплаты по ref (для разбивки выручки на закрытии смены)
+function posPayName(ref) {
+    const pt = POS.paytypes || {};
+    const all = (pt.cash || []).concat(pt.cards || []);
+    return (all.find(x => x.ref === ref) || {}).name || null;
+}
+
 function posBuildPayments() {
     const t = posTotals();
     const pt = POS.paytypes || {};
     const cashRef = (pt.cash && pt.cash[0] && pt.cash[0].ref) || null;
+    const cashName = (pt.cash && pt.cash[0] && pt.cash[0].name) || 'Наличные';
     const term = (pt.defaultTerminal) || null;
     if (POS.payMode === 'cash') {
-        return { payments: [{ payTypeC1Ref: cashRef, amount: t.grand }], error: cashRef ? null : 'Нет вида оплаты «Наличные»' };
+        return { payments: [{ payTypeC1Ref: cashRef, amount: t.grand, payName: cashName }], error: cashRef ? null : 'Нет вида оплаты «Наличные»' };
     }
     if (POS.payMode === 'card') {
         const ref = document.getElementById('posCardType').value;
         if (!ref) return { error: 'Выберите платёжную карту' };
-        return { payments: [{ payTypeC1Ref: ref, amount: t.grand, terminalC1Ref: term }] };
+        return { payments: [{ payTypeC1Ref: ref, amount: t.grand, terminalC1Ref: term, payName: posPayName(ref) }] };
     }
     // mixed
     const cash = Math.round(Number(document.getElementById('posMixCash').value) || 0);
@@ -10373,8 +10381,8 @@ function posBuildPayments() {
     if (cash >= t.grand) return { error: 'Наличные покрывают весь чек — выберите «Наличные»' };
     if (!ref) return { error: 'Выберите платёжную карту для остатка' };
     return { payments: [
-        { payTypeC1Ref: cashRef, amount: cash },
-        { payTypeC1Ref: ref, amount: rest, terminalC1Ref: term },
+        { payTypeC1Ref: cashRef, amount: cash, payName: cashName },
+        { payTypeC1Ref: ref, amount: rest, terminalC1Ref: term, payName: posPayName(ref) },
     ], error: cashRef ? null : 'Нет вида оплаты «Наличные»' };
 }
 
@@ -10538,6 +10546,8 @@ async function posCloseShift() {
             body: JSON.stringify({ shiftId: POS.shift.id }),
         });
         if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        const closedShift = r.data.shift || {};
+        const kassaName = (POS.shift && POS.shift.kassa_name) || closedShift.kassa_name || '';
         POS.shift = null;
         POS.chosen = null;
         const top = document.getElementById('posTopStatus');
@@ -10548,9 +10558,52 @@ async function posCloseShift() {
         if (wrap) wrap.style.display = 'none';
         posUpdateStep1Btn();
         posShowStep(1);
+        // Показываем итоги смены — разбивка выручки по способам оплаты.
+        posShowShiftSummary(closedShift, kassaName);
     } catch (e) {
         posError('Не удалось закрыть смену: ' + e.message);
     }
+}
+
+// Рендер итогов закрытой смены: общая выручка + разбивка по каждому способу оплаты.
+function posShowShiftSummary(shift, kassaName) {
+    const body = document.getElementById('posShiftSummaryBody');
+    if (!body) return;
+    const total = Number(shift.total_sales) || 0;
+    const receipts = Number(shift.receipts_count) || 0;
+    const bd = shift.payments_breakdown || {};
+    // порядок: Наличные первыми, остальные по убыванию суммы
+    const entries = Object.keys(bd).map(k => [k, Number(bd[k]) || 0])
+        .sort((a, b) => {
+            const ca = /налич/i.test(a[0]) ? 1 : 0, cb = /налич/i.test(b[0]) ? 1 : 0;
+            if (ca !== cb) return cb - ca;
+            return b[1] - a[1];
+        });
+    const icon = (name) => {
+        if (/налич/i.test(name)) return '💵';
+        if (/qr|кьюар|кюар/i.test(name)) return '📱';
+        if (/карт|visa|master|мир|uzcard|humo/i.test(name)) return '💳';
+        return '💰';
+    };
+    let rows = '';
+    if (entries.length) {
+        rows = entries.map(([name, amt]) =>
+            `<div class="pr-line"><span>${icon(name)} ${posEsc(name)}</span><b>${posMoney(amt)} сом</b></div>`
+        ).join('');
+    } else {
+        rows = `<div class="pr-line" style="color:#7a7974;"><span>Продаж не было</span><span></span></div>`;
+    }
+    body.innerHTML = `
+        <div class="pr-line" style="color:#4b5563;"><span>Касса</span><span>${posEsc(kassaName || '')}</span></div>
+        <div class="pr-line" style="color:#4b5563;"><span>Чеков за смену</span><span>${receipts}</span></div>
+        <div class="pr-hr"></div>
+        <div style="font-weight:700;color:#01696F;margin:6px 0 4px;">Выручка по способам оплаты</div>
+        ${rows}
+        <div class="pr-hr"></div>
+        <div class="pr-line pr-grand"><span>ИТОГО</span><b>${posMoney(total)} сом</b></div>
+    `;
+    const modal = document.getElementById('posShiftSummaryModal');
+    if (modal) modal.style.display = 'flex';
 }
 
 // Навешиваем обработчики один раз при загрузке DOM
@@ -10779,6 +10832,15 @@ function posBindEvents() {
     if (payModal) payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.style.display = 'none'; });
     const rcptModal = document.getElementById('posReceiptModal');
     if (rcptModal) rcptModal.addEventListener('click', (e) => { if (e.target === rcptModal) rcptModal.style.display = 'none'; });
+
+    // ——— Итоги смены при закрытии ———
+    const ssClose = () => { const m = document.getElementById('posShiftSummaryModal'); if (m) m.style.display = 'none'; };
+    const ssX = document.getElementById('posShiftSummaryClose');
+    if (ssX) ssX.addEventListener('click', ssClose);
+    const ssOk = document.getElementById('posShiftSummaryOk');
+    if (ssOk) ssOk.addEventListener('click', ssClose);
+    const ssModal = document.getElementById('posShiftSummaryModal');
+    if (ssModal) ssModal.addEventListener('click', (e) => { if (e.target === ssModal) ssClose(); });
 
     // ——— ВОЗВРАТ ТОВАРА ———
     const retBtn = document.getElementById('posReturnBtn');

@@ -2225,6 +2225,20 @@
               </div>
             </div>
 
+            <!-- МОДАЛЬ: итоги смены при закрытии (разбивка выручки по способам оплаты) -->
+            <div id="posShiftSummaryModal" class="pos-modal" style="display:none;">
+              <div class="pos-modal-box">
+                <div class="pos-modal-head">
+                  <span>Смена закрыта — выручка</span>
+                  <button class="pos-modal-x" id="posShiftSummaryClose" type="button">✕</button>
+                </div>
+                <div class="pos-modal-body">
+                  <div id="posShiftSummaryBody" class="pos-receipt"></div>
+                  <button class="pos-btn pos-btn-primary pos-btn-block" id="posShiftSummaryOk" type="button" style="margin-top:14px;">Готово</button>
+                </div>
+              </div>
+            </div>
+
             <!-- МОДАЛЬ: возврат товара -->
             <div id="posReturnModal" class="pos-modal" style="display:none;">
               <div class="pos-modal-box">
@@ -2580,7 +2594,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728h-returns"></script>
+    <script src="app.js?v=20260728i-concurrency"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

@@ -53,11 +53,19 @@ const ADMIN_ACCOUNTS = {
     'Shahida': { password: 's2364170', displayName: 'Shahida', allowedTabs: '*' },
     'umed': { password: 'umed1234', displayName: 'umed', allowedTabs: ['expenses', 'products', 'shipments', 'barcodes', 'cashier'] },
     'Кассир': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] },
-    'kassir': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] }
+    'kassir': { password: '1234', displayName: 'Кассир', allowedTabs: ['cashier'] },
+    // Заводские логины магазинов: каждый видит только СВОЮ кассу.
+    // allowedKassa — точное имя кассы в 1С (фильтр списка касс в РМК).
+    'siyoma':   { password: 'siyoma123',   displayName: 'Сиёма',    allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Сиёма"' },
+    'ayni':     { password: 'ayni123',     displayName: 'Айни',     allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Айни"' },
+    'barakat':  { password: 'barakat123',  displayName: 'Баракат',  allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Баракат"' },
+    'citymall': { password: 'citymall123', displayName: 'Сити-Молл', allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Сити-Молл"' }
 };
 
 // Права доступа текущего пользователя: '*' (полный) или массив id вкладок.
 let currentAllowedTabs = '*';
+// Разрешённая касса для логина магазина (точное имя) или null = все кассы.
+let currentAllowedKassa = null;
 
 function isTabAllowed(tabName) {
     // Вкладка «Касса» (РМК) видна ВСЕМ пользователям (в т.ч. кассиру).
@@ -1492,6 +1500,7 @@ function autoBackup() {
 function _applyAccount(account) {
     currentUser = account.displayName;
     currentAllowedTabs = account.allowedTabs || '*';
+    currentAllowedKassa = account.allowedKassa || null;
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('mainApp').style.display = 'block';
     document.getElementById('currentUser').textContent = currentUser;
@@ -1541,6 +1550,7 @@ function login(username, password) {
 function logout() {
     currentUser = null;
     currentAllowedTabs = '*';
+    currentAllowedKassa = null;
     // ЗАБЫВАЕМ СЕССИЮ: после выхода автовхода не будет — можно зайти под другим аккаунтом.
     try { localStorage.removeItem('ortoSession'); } catch (_) {}
     document.body.classList.remove('role-cashier');
@@ -9809,10 +9819,20 @@ async function loadPos() {
         const r = await posApi('', { method: 'GET' });
         if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
         POS.kassas = r.data.kassas || [];
+        // Логин магазина: оставляем только его СОБСТВЕННУЮ кассу.
+        if (currentAllowedKassa) {
+            const norm = s => String(s || '').trim().toLowerCase();
+            POS.kassas = POS.kassas.filter(k => norm(k.name) === norm(currentAllowedKassa));
+        }
         POS.sellers = r.data.sellers || [];
         POS.loaded = true;
         posRenderKassas();
         posPopulateSellers();
+        // Если касса единственная (логин магазина) — сразу выбираем её,
+        // чтобы кассир не выбирал одну и ту же кассу каждый раз.
+        if (currentAllowedKassa && POS.kassas.length === 1) {
+            posSelectKassa(POS.kassas[0]);
+        }
     } catch (e) {
         if (listEl) listEl.innerHTML = '';
         posError('Не удалось загрузить кассы: ' + e.message);
@@ -10683,6 +10703,11 @@ async function posCloseShift() {
         if (wrap) wrap.style.display = 'none';
         posUpdateStep1Btn();
         posShowStep(1);
+        // Логин магазина: касса одна — сразу выбираем её, чтобы кассир
+        // после закрытия смены сразу шёл к выбору продавца.
+        if (currentAllowedKassa && POS.kassas && POS.kassas.length === 1) {
+            posSelectKassa(POS.kassas[0]);
+        }
         // Показываем итоги смены — разбивка выручки по способам оплаты.
         posShowShiftSummary(closedShift, kassaName);
     } catch (e) {

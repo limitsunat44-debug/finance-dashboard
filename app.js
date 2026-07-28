@@ -1551,6 +1551,15 @@ function logout() {
     currentUser = null;
     currentAllowedTabs = '*';
     currentAllowedKassa = null;
+    // Сбрасываем состояние РМК, чтобы следующий аккаунт загрузил кассы заново
+    // (иначе останется отфильтрованный список предыдущего магазина).
+    if (typeof POS !== 'undefined') {
+        POS.loaded = false;
+        POS.kassas = [];
+        POS.sellers = [];
+        POS.chosen = null;
+        POS.shift = null;
+    }
     // ЗАБЫВАЕМ СЕССИЮ: после выхода автовхода не будет — можно зайти под другим аккаунтом.
     try { localStorage.removeItem('ortoSession'); } catch (_) {}
     document.body.classList.remove('role-cashier');

@@ -9801,6 +9801,157 @@ async function posApi(path, opts) {
     return { ok: res.ok, status: res.status, data };
 }
 
+// posApi с таймаутом: при слабой сети не висим бесконечно, а бросаем ошибку → в очередь.
+async function posApiTimeout(path, opts, ms) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms || 12000);
+    try {
+        return await posApi(path, { ...(opts || {}), signal: ctrl.signal });
+    } finally { clearTimeout(t); }
+}
+
+// ============================================================
+//  ОФЛАЙН-ОЧЕРЕДЬ РМК (IndexedDB)
+//  Онлайн-first: чек всегда сначала шлётся в сеть. Если сети нет/таймаут —
+//  чек ложится в очередь на телефоне и досылается, когда связь вернётся.
+// ============================================================
+const PosQueue = (() => {
+    const DB = 'orto_pos_queue', STORE = 'ops', VER = 1;
+    let _db = null;
+    function open() {
+        if (_db) return Promise.resolve(_db);
+        return new Promise((resolve, reject) => {
+            const rq = indexedDB.open(DB, VER);
+            rq.onupgradeneeded = () => {
+                const db = rq.result;
+                if (!db.objectStoreNames.contains(STORE)) {
+                    db.createObjectStore(STORE, { keyPath: 'clientSaleId' });
+                }
+            };
+            rq.onsuccess = () => { _db = rq.result; resolve(_db); };
+            rq.onerror = () => reject(rq.error);
+        });
+    }
+    function tx(mode) { return open().then(db => db.transaction(STORE, mode).objectStore(STORE)); }
+    return {
+        // добавить операцию (продажа/возврат) в очередь
+        async add(op) {
+            const st = await tx('readwrite');
+            return new Promise((res, rej) => {
+                const r = st.put(op); r.onsuccess = () => res(op); r.onerror = () => rej(r.error);
+            });
+        },
+        async all() {
+            const st = await tx('readonly');
+            return new Promise((res, rej) => {
+                const r = st.getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => rej(r.error);
+            });
+        },
+        async remove(clientSaleId) {
+            const st = await tx('readwrite');
+            return new Promise((res, rej) => {
+                const r = st.delete(clientSaleId); r.onsuccess = () => res(); r.onerror = () => rej(r.error);
+            });
+        },
+        async count() { return (await this.all()).length; },
+    };
+})();
+
+// Генератор уникального id чека (до отправки) — основа идемпотентности.
+function posNewClientSaleId() {
+    const rnd = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+        : (Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+    return 'cs-' + rnd;
+}
+
+// Ошибка сети (не ответ сервера, а именно невозможность достучаться)?
+function posIsNetworkError(e) {
+    if (!e) return false;
+    if (e.name === 'AbortError') return true;                    // таймаут
+    if (e instanceof TypeError) return true;                     // fetch failed (нет сети)
+    return /failed to fetch|networkerror|network request failed|load failed/i.test(String(e.message || ''));
+}
+
+// Сколько экземпляров/количества уже стоит в очереди по варианту/штрихкоду —
+// чтобы офлайн не продать один экземпляр дважды (контроль остатка офлайн).
+async function posQueuedReserved() {
+    const ops = await PosQueue.all();
+    const byBarcode = new Set();   // экземплярные штрихкоды, уже «проданные» офлайн
+    const byChar = {};             // charC1Ref -> кол-во группового товара в очереди
+    for (const op of ops) {
+        if (op.action !== 'sell') continue;
+        for (const it of (op.body.items || [])) {
+            const codes = (Array.isArray(it.uniqueBarcodes) && it.uniqueBarcodes.length)
+                ? it.uniqueBarcodes : (it.uniqueBarcode ? [it.uniqueBarcode] : []);
+            if (codes.length) { codes.forEach(c => byBarcode.add(String(c))); }
+            else if (it.charC1Ref) { byChar[it.charC1Ref] = (byChar[it.charC1Ref] || 0) + (Number(it.qty) || 1); }
+        }
+    }
+    return { byBarcode, byChar };
+}
+
+// Авто-досылка очереди (последовательно, по порядку).
+let _posFlushing = false;
+async function posFlushQueue() {
+    if (_posFlushing) return;
+    if (!navigator.onLine) { posUpdateConnUI(); return; }
+    _posFlushing = true;
+    try {
+        const ops = (await PosQueue.all()).sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        for (const op of ops) {
+            try {
+                const r = await posApiTimeout(`?action=${op.action}`, {
+                    method: 'POST', body: JSON.stringify(op.body),
+                }, 20000);
+                if (r.ok && r.data && r.data.ok) {
+                    // успех (вкл. duplicate:true — чек уже проведён) → убираем из очереди
+                    await PosQueue.remove(op.clientSaleId);
+                } else if (r.status >= 400 && r.status < 500 && !posIsNetworkError(null)) {
+                    // Сервер отклонил по сути (напр. товар уже продан на другой кассе).
+                    // Не зацикливаемся: помечаем как ошибочный и оставляем для ручного разбора.
+                    op.error = (r.data && r.data.error) || ('HTTP ' + r.status);
+                    op.failed = true;
+                    await PosQueue.add(op);
+                }
+                // если 5xx или сеть отвалилась — оставляем в очереди, повторим позже
+            } catch (e) {
+                if (posIsNetworkError(e)) break;   // сеть снова пропала — останавливаемся
+            }
+        }
+    } finally {
+        _posFlushing = false;
+        posUpdateConnUI();
+    }
+}
+
+// Индикатор связи + счётчик очереди в шапке РМК.
+async function posUpdateConnUI() {
+    const el = document.getElementById('posTopStatus');
+    if (!el) return;
+    let n = 0;
+    try { n = await PosQueue.count(); } catch (_) {}
+    const online = navigator.onLine;
+    let html = online
+        ? '<span style="color:#437A22;">\u25cf Онлайн</span>'
+        : '<span style="color:#b45309;">\u25cf Офлайн</span>';
+    if (n > 0) {
+        html += ` <span style="color:#b45309;font-weight:700;">\u2022 Записей к отправке: ${n}</span>`;
+    }
+    el.innerHTML = html;
+}
+
+// Слушатели событий связи + периодическая досылка (один раз на загрузку).
+let _posQueueWired = false;
+function posWireQueue() {
+    if (_posQueueWired) return;
+    _posQueueWired = true;
+    window.addEventListener('online', () => { posUpdateConnUI(); posFlushQueue(); });
+    window.addEventListener('offline', () => { posUpdateConnUI(); });
+    setInterval(() => { if (navigator.onLine) posFlushQueue(); }, 30000); // каждые 30с
+    posUpdateConnUI();
+    if (navigator.onLine) posFlushQueue();
+}
+
 // Эмодзи для магазина
 function posKassaEmoji(name) {
     const n = (name || '').toLowerCase();
@@ -9815,6 +9966,7 @@ function posKassaEmoji(name) {
 async function loadPos() {
     POS.isMobile = posDetectMobile();
     posError('');
+    posWireQueue();   // подключаем офлайн-очередь + индикатор связи (один раз)
 
     // Если уже загружено и есть выбранная касса с открытой сменой — показываем её
     if (POS.loaded && POS.shift) { posShowStep(3); return; }
@@ -10066,9 +10218,17 @@ async function posHandleScannedCode(code) {
     if (inp) inp.value = '';
     const hint = document.getElementById('posScanHint');
     if (hint) hint.innerHTML = `⏳ Ищу товар <b>${posEsc(code)}</b>…`;
+    // Офлайн-защита: если этот же экземплярный штрихкод уже стоит в офлайн-очереди — нельзя продать дважды.
+    try {
+        const reserved = await posQueuedReserved();
+        if (reserved.byBarcode.has(String(code))) {
+            if (hint) hint.innerHTML = `⛔ Экземпляр <b>${posEsc(code)}</b> уже в неотправленном чеке (ждёт связи). Повторно продать нельзя.`;
+            return;
+        }
+    } catch (_) { /* очередь недоступна — не блокируем скан */ }
     try {
         const wh = encodeURIComponent(posShopWh() || '');
-        const r = await posApi(`?action=scan&barcode=${encodeURIComponent(code)}&wh=${wh}`, { method: 'GET' });
+        const r = await posApiTimeout(`?action=scan&barcode=${encodeURIComponent(code)}&wh=${wh}`, { method: 'GET' }, 10000);
         if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
         const it = r.data.item;
         if (!it || !it.found) {
@@ -10084,7 +10244,11 @@ async function posHandleScannedCode(code) {
             }
         }
     } catch (e) {
-        if (hint) hint.innerHTML = `⚠️ Ошибка поиска: ${posEsc(e.message)}`;
+        if (posIsNetworkError(e)) {
+            if (hint) hint.innerHTML = `📶 Нет связи — не могу проверить товар <b>${posEsc(code)}</b>. Подождите пару секунд и отсканируйте снова.`;
+        } else {
+            if (hint) hint.innerHTML = `⚠️ Ошибка поиска: ${posEsc(e.message)}`;
+        }
     }
 }
 
@@ -10619,6 +10783,7 @@ async function posConfirmSale() {
         }
         const sh = POS.shift || {};
         const body = {
+            clientSaleId: posNewClientSaleId(),   // уникальный id чека — защита от дублей при досылке
             kassaC1Ref: POS.chosen.ref,
             sellerC1Ref: sh.seller_c1_ref || sh.seller_ref || sh.sellerC1Ref,
             sellerName: sh.seller_name,
@@ -10628,13 +10793,30 @@ async function posConfirmSale() {
             items,
             payments: POS._payments || [],
         };
-        const r = await posApi('?action=sell', { method: 'POST', body: JSON.stringify(body) });
+        // ОНЛАЙН-FIRST: сначала пробуем отправить в сеть с таймаутом.
+        let r;
+        try {
+            r = await posApiTimeout('?action=sell', { method: 'POST', body: JSON.stringify(body) }, 12000);
+        } catch (netErr) {
+            if (posIsNetworkError(netErr)) {
+                // Сеть недоступна/таймаут → кладём в офлайн-очередь, дошлём позже.
+                await PosQueue.add({ clientSaleId: body.clientSaleId, action: 'sell', body, ts: Date.now() });
+                document.getElementById('posReceiptModal').style.display = 'none';
+                posResetSale();
+                posUpdateConnUI();
+                const hint = document.getElementById('posScanHint');
+                if (hint) hint.innerHTML = '💾 Слабая связь — чек <b>сохранён</b> и отправится автоматически, когда появится интернет.';
+                return;   // не бросаем ошибку — для кассира это успех
+            }
+            throw netErr;
+        }
         if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
         // успех
         document.getElementById('posReceiptModal').style.display = 'none';
         const num = r.data.docNumber || '';
         const posted = r.data.posted;
         posResetSale();
+        posUpdateConnUI();
         const hint = document.getElementById('posScanHint');
         if (hint) hint.innerHTML = `✅ Продажа проведена! Чек <b>${posEsc(num)}</b>${posted ? '' : ' <span style="color:#b45309;">(создан, проведённость проверьте в 1С)</span>'}`;
     } catch (e) {
@@ -10885,6 +11067,7 @@ async function posReturnConfirm() {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Оформляю…'; }
     try {
         const body = {
+            clientSaleId: posNewClientSaleId(),   // идемпотентность возврата
             uniqueBarcode: look.barcode,
             kassaC1Ref: POS.chosen.ref,
             sellerC1Ref: sh.seller_c1_ref || sh.seller_ref || sh.sellerC1Ref || null,
@@ -10892,7 +11075,22 @@ async function posReturnConfirm() {
             reason: reason,
             refundPayC1Ref: refundPayC1Ref,
         };
-        const r = await posApi('?action=return-item', { method: 'POST', body: JSON.stringify(body) });
+        // ОНЛАЙН-FIRST с таймаутом; при сбое сети — в очередь.
+        let r;
+        try {
+            r = await posApiTimeout('?action=return-item', { method: 'POST', body: JSON.stringify(body) }, 12000);
+        } catch (netErr) {
+            if (posIsNetworkError(netErr)) {
+                await PosQueue.add({ clientSaleId: body.clientSaleId, action: 'return-item', body, ts: Date.now() });
+                posUpdateConnUI();
+                const done = document.getElementById('posRetDoneMsg');
+                if (done) done.innerHTML = '💾 Слабая связь — возврат <b>сохранён</b> и оформится автоматически, когда появится интернет.<br>' +
+                    'Товар «' + posEsc(look.product.name || '') + '» будет возвращён на склад после досылки.';
+                posRetShowStep('done');
+                return;
+            }
+            throw netErr;
+        }
         if (!r.ok || !r.data.ok) throw new Error(r.data.error || ('HTTP ' + r.status));
         const num = r.data.docNumber || '';
         const done = document.getElementById('posRetDoneMsg');
@@ -10900,6 +11098,7 @@ async function posReturnConfirm() {
             `Товар «${posEsc(look.product.name || '')}» возвращён на склад.<br>` +
             `Сумма к возврату: <b>${posMoney(r.data.sum)} сом</b>` +
             (r.data.posted ? '' : '<br><span style="color:#b45309;">(создан, проведённость проверьте в 1С)</span>');
+        posUpdateConnUI();
         posRetShowStep('done');
     } catch (e) {
         if (err) { err.style.display = 'block'; err.textContent = '⚠️ ' + e.message; }

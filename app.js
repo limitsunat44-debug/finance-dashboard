@@ -1488,6 +1488,21 @@ function autoBackup() {
 
 
 // Authentication functions
+// Применить аккаунт: выставить роль/доступ, показать приложение, отметить роль кассира.
+function _applyAccount(account) {
+    currentUser = account.displayName;
+    currentAllowedTabs = account.allowedTabs || '*';
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('mainApp').style.display = 'block';
+    document.getElementById('currentUser').textContent = currentUser;
+    // Класс роли кассира на <body>: только у него центрируем вкладки.
+    // Кассир = не админ (allowedTabs с ограничениями), без доступа к expenses/products и т.п.
+    const isCashier = currentAllowedTabs !== '*' &&
+        Array.isArray(currentAllowedTabs) && currentAllowedTabs.includes('cashier') &&
+        !currentAllowedTabs.includes('expenses');
+    document.body.classList.toggle('role-cashier', !!isCashier);
+}
+
 function login(username, password) {
     // Точное совпадение, иначе — поиск без учёта регистра (удобно для логинов вроде kassir/Kassir/KASSIR)
     let account = ADMIN_ACCOUNTS[username];
@@ -1498,12 +1513,12 @@ function login(username, password) {
         if (key) account = ADMIN_ACCOUNTS[key];
     }
     if (account && account.password === String(password).trim()) {
-        currentUser = account.displayName;
-        currentAllowedTabs = account.allowedTabs || '*';
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('mainApp').style.display = 'block';
-        document.getElementById('currentUser').textContent = currentUser;
-
+        // вычисляем канонический ключ аккаунта (для сохранения сессии)
+        const acctKey = Object.keys(ADMIN_ACCOUNTS).find(k => ADMIN_ACCOUNTS[k] === account) || username;
+        _applyAccount(account);
+        // ЗАПОМИНАЕМ ВХОД: сохраняем только ключ аккаунта (НЕ пароль).
+        // При следующем открытии касса войдёт автоматически.
+        try { localStorage.setItem('ortoSession', acctKey); } catch (_) {}
         applyTabAccess();
 
         loadData().then(() => {
@@ -1526,10 +1541,34 @@ function login(username, password) {
 function logout() {
     currentUser = null;
     currentAllowedTabs = '*';
+    // ЗАБЫВАЕМ СЕССИЮ: после выхода автовхода не будет — можно зайти под другим аккаунтом.
+    try { localStorage.removeItem('ortoSession'); } catch (_) {}
+    document.body.classList.remove('role-cashier');
     resetTabAccess();
     document.getElementById('loginScreen').style.display = 'flex';
     document.getElementById('mainApp').style.display = 'none';
     document.getElementById('loginForm').reset();
+}
+
+// Автовход по сохранённой сессии (вызывается при загрузке страницы).
+// Возвращает true, если успешно вошли без запроса логина/пароля.
+function restoreSession() {
+    let acctKey = null;
+    try { acctKey = localStorage.getItem('ortoSession'); } catch (_) {}
+    if (!acctKey) return false;
+    const account = ADMIN_ACCOUNTS[acctKey];
+    if (!account) { try { localStorage.removeItem('ortoSession'); } catch (_) {} return false; }
+    _applyAccount(account);
+    applyTabAccess();
+    loadData().then(() => {
+        loadSales1C().then(() => updateDashboard());
+        loadEmployeeSales1C();
+        updateDashboard();
+        loadAllTables();
+        const exchangeRateInput = document.getElementById('exchangeRateInput');
+        if (exchangeRateInput) exchangeRateInput.value = appData.exchangeRate;
+    });
+    return true;
 }
 
 // Navigation functions
@@ -2921,6 +2960,9 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     document.getElementById('logoutBtn').addEventListener('click', logout);
+
+    // Автовход: если прошлый раз входили — сразу открываем приложение без запроса логина/пароля.
+    restoreSession();
 
     document.querySelectorAll('.nav-tab').forEach(tab => {
         tab.addEventListener('click', function() {

@@ -9688,7 +9688,7 @@ const POS = {
     camOn: false,
     keyHandler: null,
     // ── ЭТАП 2: чек ──
-    cart: [],          // позиции: {key,barcode,uniqueBarcode,name,sizeLabel,price,qty,discountPct,productC1Ref,charC1Ref,warehouseC1Ref,kind}
+    cart: [],          // позиции: {key,barcode,uniqueBarcode,scans[],name,sizeLabel,price,qty,discountPct,productC1Ref,charC1Ref,warehouseC1Ref,kind,availableAtShop,status}
     activeKey: null,   // последняя отсканированная/выбранная позиция
     doctor: null,      // {c1_ref,full_name,card_code}
     client: null,      // {c1_ref,full_name,card_code,discount_pct}
@@ -10004,43 +10004,101 @@ async function posHandleScannedCode(code) {
             if (hint) hint.innerHTML = `❌ Штрихкод <b>${posEsc(code)}</b> не найден в базе.`;
             return;
         }
-        posAddToCart(it);
-        if (hint) hint.innerHTML = `✅ Добавлено: <b>${posEsc(it.name)}</b>${it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : ''}`;
+        const err = posAddToCart(it);
+        if (hint) {
+            if (err) hint.innerHTML = err;
+            else {
+                const last4 = String(it.uniqueBarcode || it.barcode || '').slice(-4);
+                hint.innerHTML = `✅ Добавлено: <b>${posEsc(it.name)}</b>${it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : ''}${last4 ? ' · №' + posEsc(last4) : ''}`;
+            }
+        }
     } catch (e) {
         if (hint) hint.innerHTML = `⚠️ Ошибка поиска: ${posEsc(e.message)}`;
     }
 }
 
+// вернёт текст ошибки для hint (если добавить нельзя) либо null при успехе
 function posAddToCart(it) {
-    // экземплярный штрихкод — уникален, нельзя добавить дважды
+    // Фактический остаток на складе кассы (из бэкенда scan).
+    const avail = (it.availableAtShop != null) ? Number(it.availableAtShop) : null;
+
+    // ─── ЭКЗЕМПЛЯРНЫЙ штрихкод (у каждой пары свой уникальный код) ───
     if (it.uniqueBarcode) {
-        const exist = POS.cart.find(l => l.uniqueBarcode === it.uniqueBarcode);
-        if (exist) { POS.activeKey = exist.key; posRenderCart(); return; }
+        // не в наличии (уже продан/другой склад) — не добавляем
+        if (it.status && it.status !== 'in_stock') {
+            return '⛔ Экземпляр не в наличии (уже продан или списан).';
+        }
+        // ищем строку этого же варианта (группируем экземпляры одной модели+размера)
+        let line = POS.cart.find(l => l.uniqueBarcode && l.charC1Ref === it.charC1Ref);
+        if (line) {
+            // этот штрихкод уже сканирован?
+            if (line.scans.includes(it.uniqueBarcode)) {
+                POS.activeKey = line.key; posRenderCart();
+                return '⚠️ Этот экземпляр уже в чеке.';
+            }
+            // не превышаем фактический остаток на складе
+            if (avail != null && line.scans.length >= avail) {
+                POS.activeKey = line.key; posRenderCart();
+                return `⛔ На складе кассы только ${avail} шт. Больше продать нельзя.`;
+            }
+            line.scans.push(it.uniqueBarcode);
+            line.qty = line.scans.length;
+            if (avail != null) line.availableAtShop = avail;
+            POS.activeKey = line.key; posRenderCart();
+            return null;
+        }
+        // новая строка экземплярного товара
+        if (avail != null && avail < 1) {
+            return '⛔ Товара нет на складе этой кассы.';
+        }
+        line = {
+            key: 'L' + (POS.keySeq++), kind: it.kind,
+            barcode: it.barcode, uniqueBarcode: it.uniqueBarcode,
+            scans: [it.uniqueBarcode],
+            name: it.name, sizeLabel: it.sizeLabel || null,
+            price: Number(it.price) || 0, qty: 1, discountPct: 0,
+            productC1Ref: it.productC1Ref, charC1Ref: it.charC1Ref || null,
+            warehouseC1Ref: it.warehouseC1Ref || posShopWh() || null,
+            warning: it.warning || null,
+            availableAtShop: avail, status: it.status || null,
+        };
+        POS.cart.push(line);
+        POS.activeKey = line.key;
+        posRenderCart();
+        return null;
     }
-    // групповой EAN — наращиваем количество
-    if (!it.uniqueBarcode) {
-        const exist = POS.cart.find(l => !l.uniqueBarcode && l.barcode === it.barcode && l.charC1Ref === it.charC1Ref);
-        if (exist) { exist.qty += 1; POS.activeKey = exist.key; posRenderCart(); return; }
+
+    // ─── ГРУППОВОЙ EAN (общий штрихкод на вариант, остаток из product_variants.stock) ───
+    let line = POS.cart.find(l => !l.uniqueBarcode && l.barcode === it.barcode && l.charC1Ref === it.charC1Ref);
+    if (line) {
+        if (avail != null && line.qty >= avail) {
+            POS.activeKey = line.key; posRenderCart();
+            return `⛔ На складе кассы только ${avail} шт. Больше продать нельзя.`;
+        }
+        line.qty += 1;
+        line.scans.push(it.barcode);
+        if (avail != null) line.availableAtShop = avail;
+        POS.activeKey = line.key; posRenderCart();
+        return null;
     }
-    const line = {
-        key: 'L' + (POS.keySeq++),
-        kind: it.kind,
-        barcode: it.barcode,
-        uniqueBarcode: it.uniqueBarcode || null,
+    if (avail != null && avail < 1) {
+        return '⛔ Товара нет на складе этой кассы.';
+    }
+    line = {
+        key: 'L' + (POS.keySeq++), kind: it.kind,
+        barcode: it.barcode, uniqueBarcode: null,
+        scans: [it.barcode],
         name: it.name, sizeLabel: it.sizeLabel || null,
-        price: Number(it.price) || 0,
-        qty: 1,
-        discountPct: 0,
-        productC1Ref: it.productC1Ref,
-        charC1Ref: it.charC1Ref || null,
+        price: Number(it.price) || 0, qty: 1, discountPct: 0,
+        productC1Ref: it.productC1Ref, charC1Ref: it.charC1Ref || null,
         warehouseC1Ref: it.warehouseC1Ref || posShopWh() || null,
         warning: it.warning || null,
-        availableAtShop: (it.availableAtShop != null ? Number(it.availableAtShop) : null),
-        status: it.status || null,
+        availableAtShop: avail, status: it.status || null,
     };
     POS.cart.push(line);
     POS.activeKey = line.key;
     posRenderCart();
+    return null;
 }
 
 function posLineNet(l) {
@@ -10092,29 +10150,52 @@ function posRenderCart() {
         const discTag = l.discountPct ? ` <span class="pos-disc-tag">−${l.discountPct}%</span>` : '';
         const priceInfo = `${posMoney(l.price)}${l.qty > 1 ? ' × ' + l.qty : ''}${discTag}`;
         const warnText = l.warning || (oos ? 'Не числится на складе этой кассы' : null);
+        // список отсканированных штрихкодов (последние 4 цифры)
+        const scans = Array.isArray(l.scans) ? l.scans : [];
+        let scanHtml = '';
+        if (scans.length === 1) {
+            const c = String(scans[0] || '');
+            scanHtml = `<span class="pos-line-code">№ ${posEsc(c.slice(-4))}</span>`;
+        } else if (scans.length > 1) {
+            const opts = scans.map((c, i) =>
+                `<div class="pos-code-item"><span>${i + 1}. № ${posEsc(String(c).slice(-4))}</span>` +
+                `<button type="button" class="pos-code-rm" data-act="rmscan" data-idx="${i}" title="Убрать экземпляр">×</button></div>`
+            ).join('');
+            scanHtml =
+                `<details class="pos-code-drop">` +
+                `<summary>${scans.length} шт. · штрихкоды ▾</summary>` +
+                `<div class="pos-code-list">${opts}</div></details>`;
+        }
         div.innerHTML = `
             <div class="pos-line-info">
               <div class="pos-line-name">${posEsc(l.name)}</div>
               <div class="pos-line-sub">${l.sizeLabel ? posEsc(l.sizeLabel) + ' · ' : ''}${priceInfo}</div>
+              ${scanHtml ? `<div class="pos-line-codes">${scanHtml}</div>` : ''}
               ${warnText ? `<div class="pos-line-warn">⚠️ ${posEsc(warnText)}</div>` : ''}
             </div>
-            <div class="pos-qty">
-              <button type="button" data-act="minus">−</button>
-              <span>${l.qty}</span>
-              <button type="button" data-act="plus">+</button>
-            </div>
+            <div class="pos-qty pos-qty-ro" title="Количество = число отсканированных товаров">×${l.qty}</div>
             <div class="pos-line-sum">${posMoney(net)}</div>
-            <button class="pos-line-rm" type="button" data-act="rm" title="Удалить">×</button>`;
+            <button class="pos-line-rm" type="button" data-act="rm" title="Удалить позицию">×</button>`;
         div.querySelectorAll('[data-act]').forEach(b => {
             b.onclick = (ev) => {
                 ev.stopPropagation();
                 POS.activeKey = l.key;
                 const act = b.dataset.act;
-                if (act === 'plus') l.qty += 1;
-                else if (act === 'minus') { l.qty -= 1; if (l.qty < 1) posRemoveLine(l.key); }
-                else if (act === 'rm') { posRemoveLine(l.key); return; }
-                posRenderCart();
+                if (act === 'rm') { posRemoveLine(l.key); return; }
+                if (act === 'rmscan') {
+                    const idx = parseInt(b.dataset.idx, 10);
+                    if (!isNaN(idx) && Array.isArray(l.scans)) {
+                        l.scans.splice(idx, 1);
+                        l.qty = l.scans.length;
+                        if (l.qty < 1) { posRemoveLine(l.key); return; }
+                    }
+                    posRenderCart();
+                }
             };
+        });
+        // клик по details не должен выбирать/сбрасывать позицию
+        div.querySelectorAll('.pos-code-drop, .pos-line-code').forEach(el => {
+            el.addEventListener('click', ev => ev.stopPropagation());
         });
         box.appendChild(div);
     });
@@ -10453,7 +10534,9 @@ async function posConfirmSale() {
             productC1Ref: l.productC1Ref, charC1Ref: l.charC1Ref,
             warehouseC1Ref: l.warehouseC1Ref || posShopWh(),
             qty: l.qty, price: l.price, discountPct: l.discountPct || 0,
-            uniqueBarcode: l.uniqueBarcode, barcode: l.barcode,
+            uniqueBarcode: l.uniqueBarcode, barcode: l.barcode, name: l.name,
+            // все отсканированные экземплярные штрихкоды (для экземплярного товара = каждый помечается отдельно)
+            uniqueBarcodes: (l.uniqueBarcode && Array.isArray(l.scans)) ? l.scans.slice() : null,
         }));
         // скидка на чек (клиент + ручные 5%) — размазываем по позициям как доп. %
         const cartPct = posCartDiscPct();

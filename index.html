@@ -98,6 +98,19 @@
     .pos-line-sub{font-size:12px;color:var(--pos-muted);margin-top:2px;}
     .pos-line-sub .pos-disc-tag{color:var(--pos-orange-2);font-weight:700;}
     .pos-line-warn{font-size:12px;color:#a12c3b;margin-top:2px;font-weight:600;}
+    /* отсканированные штрихкоды (последние 4 цифры) */
+    .pos-line-codes{margin-top:4px;}
+    .pos-line-code{display:inline-block;font-size:12px;font-weight:700;color:var(--pos-teal-2);background:var(--pos-cream);border:1px solid var(--pos-line);border-radius:8px;padding:2px 8px;font-variant-numeric:tabular-nums;letter-spacing:.5px;}
+    .pos-code-drop{font-size:12px;}
+    .pos-code-drop summary{cursor:pointer;list-style:none;display:inline-block;font-weight:700;color:var(--pos-teal-2);background:var(--pos-cream);border:1px solid var(--pos-line);border-radius:8px;padding:3px 9px;user-select:none;}
+    .pos-code-drop summary::-webkit-details-marker{display:none;}
+    .pos-code-drop summary:hover{border-color:var(--pos-teal-3);}
+    .pos-code-drop[open] summary{border-color:var(--pos-teal-3);}
+    .pos-code-list{margin-top:6px;display:flex;flex-direction:column;gap:4px;padding-left:2px;}
+    .pos-code-item{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;color:var(--pos-ink);background:#fff;border:1px solid var(--pos-line);border-radius:8px;padding:4px 6px 4px 10px;font-variant-numeric:tabular-nums;}
+    .pos-code-rm{width:22px;height:22px;border:none;background:none;color:var(--pos-orange-2);font-size:15px;cursor:pointer;line-height:1;flex:0 0 auto;}
+    .pos-code-rm:hover{color:#a12c3b;}
+    .pos-qty-ro{display:flex;align-items:center;justify-content:center;flex:0 0 auto;min-width:40px;height:32px;padding:0 10px;border-radius:10px;background:var(--pos-cream);border:1px solid var(--pos-line);font-weight:800;font-size:15px;color:var(--pos-teal-2);font-variant-numeric:tabular-nums;}
     .pos-line.oos{background:#fdecef;border-radius:12px;padding:12px 10px;margin:0 -10px;border-bottom:1px solid transparent;}
     .pos-line.oos .pos-line-name{color:#a12c3b;}
     .pos-qty{display:flex;align-items:center;gap:6px;flex:0 0 auto;}
@@ -2594,7 +2607,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728i-concurrency"></script>
+    <script src="app.js?v=20260728j-stockcap-codes"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

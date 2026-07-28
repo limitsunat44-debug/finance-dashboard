@@ -2,8 +2,21 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Ортосалон Дашборд</title>
+
+    <!-- ─── PWA: касса устанавливается как приложение ─── -->
+    <link rel="manifest" href="manifest.json?v=20260728-pwa-v1">
+    <meta name="theme-color" content="#01696F">
+    <meta name="mobile-web-app-capable" content="yes">
+    <!-- iOS/Safari: полноэкранный режим + иконка на домашнем экране -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Касса">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+
     <link rel="stylesheet" href="style.css?v=20260728c-pos">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -2616,6 +2629,37 @@
         <span class="sync-icon">✓</span>
         <span class="sync-text">Сохранено</span>
     </div>
-	
+
+    <!-- ═══ PWA: регистрация Service Worker ═══ -->
+    <script>
+      // Регистрируем SW только на https (или localhost). На Vercel — всегда https.
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('sw.js').then(function (reg) {
+            // Проверка обновлений: если пришла новая версия SW —
+            // активируем её сразу и перезагружаем страницу один раз,
+            // чтобы кассир не сидел на старом коде.
+            reg.addEventListener('updatefound', function () {
+              var nw = reg.installing;
+              if (!nw) return;
+              nw.addEventListener('statechange', function () {
+                if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+                  nw.postMessage('SKIP_WAITING');
+                }
+              });
+            });
+            // Периодически проверяем обновления (напр. каждые 30 мин работы смены).
+            setInterval(function () { reg.update().catch(function(){}); }, 30 * 60 * 1000);
+          }).catch(function (e) { console.warn('SW register failed', e); });
+
+          // Когда новый SW взял контроль — однократно перезагружаем для свежего кода.
+          var reloaded = false;
+          navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (reloaded) return; reloaded = true; window.location.reload();
+          });
+        });
+      }
+    </script>
+
 </body>
 </html>

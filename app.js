@@ -10554,6 +10554,149 @@ async function posCloseShift() {
 }
 
 // Навешиваем обработчики один раз при загрузке DOM
+// ============================================================
+//  ВОЗВРАТ ТОВАРА (РМК)
+// ============================================================
+POS._return = { look: null, busy: false };
+
+function posRetShowStep(step) {
+    ['scan', 'confirm', 'done'].forEach(s => {
+        const el = document.getElementById('posRetStep' + s.charAt(0).toUpperCase() + s.slice(1));
+        if (el) el.style.display = (s === step) ? '' : 'none';
+    });
+    if (step === 'scan') {
+        setTimeout(() => { const inp = document.getElementById('posRetScanInput'); if (inp) { inp.value = ''; inp.focus(); } }, 80);
+    }
+}
+
+function posOpenReturn() {
+    if (!POS.shift) return;
+    POS._return = { look: null, busy: false };
+    const err1 = document.getElementById('posRetScanError'); if (err1) err1.style.display = 'none';
+    const err2 = document.getElementById('posRetConfirmError'); if (err2) err2.style.display = 'none';
+    const hint = document.getElementById('posRetScanHint');
+    if (hint) hint.textContent = 'Каждый экземпляр имеет уникальный штрихкод — найдём именно ту продажу.';
+    posRetShowStep('scan');
+    const m = document.getElementById('posReturnModal');
+    if (m) m.style.display = 'flex';
+}
+
+function posCloseReturn() {
+    const m = document.getElementById('posReturnModal');
+    if (m) m.style.display = 'none';
+    // вернём фокус на основное поле сканирования продажи
+    setTimeout(() => { const inp = document.getElementById('posScanInput'); if (inp && !POS.isMobile) inp.focus(); }, 80);
+}
+
+// Шаг 1 → поиск продажи по штрихкоду
+async function posReturnFind() {
+    if (POS._return.busy) return;
+    const inp = document.getElementById('posRetScanInput');
+    const err = document.getElementById('posRetScanError');
+    const btn = document.getElementById('posRetFindBtn');
+    const code = (inp && inp.value || '').trim();
+    if (err) err.style.display = 'none';
+    if (code.length < 6) { if (err) { err.style.display = 'block'; err.textContent = '⚠️ Введите корректный штрихкод'; } return; }
+    POS._return.busy = true;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Ищу…'; }
+    try {
+        const r = await posApi('?action=lookup-sale&barcode=' + encodeURIComponent(code), { method: 'GET' });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || ('HTTP ' + r.status));
+        if (!r.data.found) throw new Error(r.data.reason || 'Экземпляр не найден');
+        if (!r.data.sellable) throw new Error(r.data.reason || 'Возврат невозможен для этого экземпляра');
+        POS._return.look = r.data;
+        posRetRenderSale(r.data);
+        posRetFillRefundOptions(r.data);
+        // сброс причины к «Обмен»
+        document.querySelectorAll('.pos-ret-reason').forEach((b, i) => b.classList.toggle('active', i === 0));
+        posRetShowStep('confirm');
+    } catch (e) {
+        if (err) { err.style.display = 'block'; err.textContent = '⚠️ ' + e.message; }
+    } finally {
+        POS._return.busy = false;
+        if (btn) { btn.disabled = false; btn.textContent = 'Найти продажу'; }
+    }
+}
+
+function posRetRenderSale(d) {
+    const box = document.getElementById('posRetSaleCard');
+    if (!box) return;
+    const soldAt = d.sale.soldAt ? new Date(d.sale.soldAt).toLocaleString('ru-RU') : '—';
+    box.innerHTML = `
+        <div class="pr-title">Найдена продажа</div>
+        <div class="pr-sub">Чек № ${posEsc(d.sale.receiptNumber || '—')} · ${soldAt}</div>
+        <div class="pr-hr"></div>
+        <div class="pr-line"><span>${posEsc(d.product.name || 'Товар')}</span></div>
+        ${d.unit.sizeLabel ? `<div class="pr-line"><span>&nbsp;&nbsp;${posEsc(d.unit.sizeLabel)}</span></div>` : ''}
+        <div class="pr-line"><span>Штрихкод</span><span>${posEsc(d.barcode)}</span></div>
+        <div class="pr-line"><span>Магазин</span><span>${posEsc(d.sale.shopName || '—')}</span></div>
+        <div class="pr-line"><span>Продавец</span><span>${posEsc(d.sale.sellerName || '—')}</span></div>
+        <div class="pr-hr"></div>
+        <div class="pr-line pr-grand"><span>К возврату</span><span>${posMoney(d.product.price)} сом</span></div>`;
+}
+
+function posRetFillRefundOptions(d) {
+    const sel = document.getElementById('posRetRefund');
+    if (!sel) return;
+    sel.innerHTML = '';
+    const pt = POS.paytypes || {};
+    const list = (pt.cash || []).concat(pt.cards || []);
+    if (!list.length) {
+        const o = document.createElement('option');
+        o.value = ''; o.textContent = 'Наличные (по умолчанию)';
+        sel.appendChild(o);
+        return;
+    }
+    list.forEach(p => {
+        const o = document.createElement('option');
+        o.value = p.ref; o.textContent = p.name;
+        sel.appendChild(o);
+    });
+    // по умолчанию — наличные, если есть
+    if (pt.cash && pt.cash[0]) sel.value = pt.cash[0].ref;
+}
+
+// Шаг 2 → оформление возврата
+async function posReturnConfirm() {
+    if (POS._return.busy) return;
+    const look = POS._return.look;
+    if (!look) return;
+    const err = document.getElementById('posRetConfirmError');
+    const btn = document.getElementById('posRetConfirm');
+    if (err) err.style.display = 'none';
+    const reasonBtn = document.querySelector('.pos-ret-reason.active');
+    const reason = reasonBtn ? reasonBtn.getAttribute('data-reason') : '';
+    const refundSel = document.getElementById('posRetRefund');
+    const refundPayC1Ref = (refundSel && refundSel.value) || null;
+    const sh = POS.shift || {};
+    POS._return.busy = true;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Оформляю…'; }
+    try {
+        const body = {
+            uniqueBarcode: look.barcode,
+            kassaC1Ref: POS.chosen.ref,
+            sellerC1Ref: sh.seller_c1_ref || sh.seller_ref || sh.sellerC1Ref || null,
+            sellerName: sh.seller_name || null,
+            reason: reason,
+            refundPayC1Ref: refundPayC1Ref,
+        };
+        const r = await posApi('?action=return-item', { method: 'POST', body: JSON.stringify(body) });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || ('HTTP ' + r.status));
+        const num = r.data.docNumber || '';
+        const done = document.getElementById('posRetDoneMsg');
+        if (done) done.innerHTML = `✅ Возврат оформлен!<br>Чек-возврат <b>${posEsc(num)}</b><br>` +
+            `Товар «${posEsc(look.product.name || '')}» возвращён на склад.<br>` +
+            `Сумма к возврату: <b>${posMoney(r.data.sum)} сом</b>` +
+            (r.data.posted ? '' : '<br><span style="color:#b45309;">(создан, проведённость проверьте в 1С)</span>');
+        posRetShowStep('done');
+    } catch (e) {
+        if (err) { err.style.display = 'block'; err.textContent = '⚠️ ' + e.message; }
+    } finally {
+        POS._return.busy = false;
+        if (btn) { btn.disabled = false; btn.textContent = '↩️ Оформить возврат'; }
+    }
+}
+
 function posBindEvents() {
     const chk = document.getElementById('posConfirmKassa');
     if (chk) chk.addEventListener('change', posUpdateStep1Btn);
@@ -10636,6 +10779,30 @@ function posBindEvents() {
     if (payModal) payModal.addEventListener('click', (e) => { if (e.target === payModal) payModal.style.display = 'none'; });
     const rcptModal = document.getElementById('posReceiptModal');
     if (rcptModal) rcptModal.addEventListener('click', (e) => { if (e.target === rcptModal) rcptModal.style.display = 'none'; });
+
+    // ——— ВОЗВРАТ ТОВАРА ———
+    const retBtn = document.getElementById('posReturnBtn');
+    if (retBtn) retBtn.addEventListener('click', posOpenReturn);
+    const retClose = document.getElementById('posReturnClose');
+    if (retClose) retClose.addEventListener('click', posCloseReturn);
+    const retModal = document.getElementById('posReturnModal');
+    if (retModal) retModal.addEventListener('click', (e) => { if (e.target === retModal) posCloseReturn(); });
+    const retFind = document.getElementById('posRetFindBtn');
+    if (retFind) retFind.addEventListener('click', posReturnFind);
+    const retScanInp = document.getElementById('posRetScanInput');
+    if (retScanInp) retScanInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); posReturnFind(); } });
+    const retBack = document.getElementById('posRetBack');
+    if (retBack) retBack.addEventListener('click', () => posRetShowStep('scan'));
+    const retConfirm = document.getElementById('posRetConfirm');
+    if (retConfirm) retConfirm.addEventListener('click', posReturnConfirm);
+    const retDoneClose = document.getElementById('posRetDoneClose');
+    if (retDoneClose) retDoneClose.addEventListener('click', posCloseReturn);
+    document.querySelectorAll('.pos-ret-reason').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.pos-ret-reason').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
 }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', posBindEvents);

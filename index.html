@@ -127,6 +127,9 @@
     .pos-paymode-btns{display:flex;gap:8px;}
     .pos-paymode-btns .pos-btn{flex:1;}
     .pos-paymode.active{border-color:var(--pos-teal);background:#e9f6f6;color:var(--pos-teal-2);}
+    .pos-shift-actions{display:flex;gap:8px;flex-wrap:wrap;}
+    .pos-ret-reason.active{border-color:var(--pos-orange);background:#fdf1e6;color:var(--pos-orange-2);}
+    .pos-ret-done{padding:16px;border-radius:14px;background:#eaf7f2;border:1px solid #bfe6d6;color:#0a6f4a;font-size:15px;line-height:1.5;font-weight:600;text-align:center;}
     .pos-change{font-size:17px;font-weight:800;color:#1f7a4d;padding:11px 13px;background:#e7f7ee;border-radius:12px;border:1px solid #b7e4ca;}
     .pos-change.neg{color:#a12c3b;background:#fdecef;border-color:#f3b9c2;}
     /* чек-сверка */
@@ -2062,7 +2065,10 @@
                     <div class="pos-shift-open">🟢 Смена открыта</div>
                     <div class="pos-shift-meta" id="posShiftMeta">—</div>
                   </div>
-                  <button class="pos-btn pos-btn-danger pos-btn-sm" id="posCloseShift">Закрыть смену</button>
+                  <div class="pos-shift-actions">
+                    <button class="pos-btn pos-btn-ghost pos-btn-sm" id="posReturnBtn" type="button">↩️ Возврат товара</button>
+                    <button class="pos-btn pos-btn-danger pos-btn-sm" id="posCloseShift">Закрыть смену</button>
+                  </div>
                 </div>
               </div>
 
@@ -2215,6 +2221,62 @@
                     <button class="pos-btn pos-btn-accent" id="posReceiptConfirm" type="button">✅ Провести продажу</button>
                   </div>
                   <div class="pos-alert pos-alert-error" id="posReceiptError" style="display:none;margin-top:10px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- МОДАЛЬ: возврат товара -->
+            <div id="posReturnModal" class="pos-modal" style="display:none;">
+              <div class="pos-modal-box">
+                <div class="pos-modal-head">
+                  <span>↩️ Возврат товара</span>
+                  <button class="pos-modal-x" id="posReturnClose" type="button">✕</button>
+                </div>
+                <div class="pos-modal-body">
+
+                  <!-- Шаг 1: сканирование -->
+                  <div id="posRetStepScan">
+                    <div class="pos-field">
+                      <label for="posRetScanInput">Отсканируйте штрихкод возвращаемого товара</label>
+                      <input type="text" id="posRetScanInput" class="pos-input pos-input-scan" inputmode="numeric"
+                             placeholder="Наведите сканер или введите код…" autocomplete="off">
+                      <p class="pos-hint" id="posRetScanHint">Каждый экземпляр имеет уникальный штрихкод — найдём именно ту продажу.</p>
+                    </div>
+                    <button class="pos-btn pos-btn-primary pos-btn-block" id="posRetFindBtn" type="button">Найти продажу</button>
+                    <div class="pos-alert pos-alert-error" id="posRetScanError" style="display:none;margin-top:10px;"></div>
+                  </div>
+
+                  <!-- Шаг 2: найденная продажа + параметры возврата -->
+                  <div id="posRetStepConfirm" style="display:none;">
+                    <div class="pos-receipt" id="posRetSaleCard"></div>
+
+                    <div class="pos-field" style="margin-top:14px;">
+                      <label>Причина возврата</label>
+                      <div class="pos-paymode-btns" id="posRetReasons">
+                        <button class="pos-btn pos-btn-ghost pos-btn-sm pos-ret-reason active" data-reason="Обмен" type="button">🔄 Обмен</button>
+                        <button class="pos-btn pos-btn-ghost pos-btn-sm pos-ret-reason" data-reason="Не подошёл размер" type="button">📏 Не подошёл размер</button>
+                        <button class="pos-btn pos-btn-ghost pos-btn-sm pos-ret-reason" data-reason="Брак" type="button">⚠️ Брак</button>
+                      </div>
+                    </div>
+
+                    <div class="pos-field">
+                      <label>Способ возврата средств</label>
+                      <select id="posRetRefund" class="pos-select"></select>
+                    </div>
+
+                    <div class="pos-row-btns" style="margin-top:14px;">
+                      <button class="pos-btn pos-btn-ghost" id="posRetBack" type="button">← Назад</button>
+                      <button class="pos-btn pos-btn-accent" id="posRetConfirm" type="button">↩️ Оформить возврат</button>
+                    </div>
+                    <div class="pos-alert pos-alert-error" id="posRetConfirmError" style="display:none;margin-top:10px;"></div>
+                  </div>
+
+                  <!-- Шаг 3: успех -->
+                  <div id="posRetStepDone" style="display:none;">
+                    <div class="pos-ret-done" id="posRetDoneMsg"></div>
+                    <button class="pos-btn pos-btn-primary pos-btn-block" id="posRetDoneClose" type="button" style="margin-top:14px;">Готово</button>
+                  </div>
+
                 </div>
               </div>
             </div>
@@ -2518,7 +2580,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260728g-shiftsync"></script>
+    <script src="app.js?v=20260728h-returns"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

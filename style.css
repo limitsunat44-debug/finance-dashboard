@@ -1504,19 +1504,34 @@ tbody tr:hover {
 }
 
 /* Print styles */
+/* ВАЖНО: по умолчанию при печати НИЧЕГО не печатаем.
+   Печать разрешена только в спец-режимах, которые ставят класс на <body>:
+     • body.printing-labels → печатаем только #labelPrintArea (ценники)
+     • body.pmob-printing   → печатаем только #pmobPrintArea  (чек мобильной кассы)
+   Это исключает случай, когда браузер печатает весь дашборд (все секции)
+   на сотни/тысячи пустых листов размером этикетки. */
 @media print {
+    /* Если НИ ОДИН режим печати не активен — прячем весь документ,
+       чтобы случайный Ctrl+P не выплюнул весь дашборд. */
+    body:not(.printing-labels):not(.pmob-printing) * {
+        visibility: hidden !important;
+    }
+    body:not(.printing-labels):not(.pmob-printing)::after {
+        content: "Используйте кнопку печати в приложении";
+        visibility: visible;
+        position: fixed;
+        top: 8mm; left: 8mm;
+        font: 12px Arial, sans-serif;
+        color: #000;
+    }
+
     .nav-tabs,
     .header,
     .btn,
     .modal-overlay {
         display: none !important;
     }
-    
-    .section {
-        display: block !important;
-        padding: 0;
-    }
-    
+
     .card {
         box-shadow: none;
         border: 1px solid #ccc;
@@ -3700,18 +3715,28 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
   word-break: break-all;
 }
 
-/* Печать этикеток: показываем только область этикеток */
+/* Печать этикеток: показываем ТОЛЬКО область этикеток.
+   Bulletproof-изоляция: прячем всё тело через visibility, затем
+   возвращаем видимость только #labelPrintArea и его содержимому.
+   Так печать этикеток не зависит от того, какие секции остались display:block. */
 @media print {
-  body.printing-labels .header,
-  body.printing-labels .nav-tabs,
-  body.printing-labels .section,
-  body.printing-labels .modal-overlay,
-  body.printing-labels .sync-indicator,
-  body.printing-labels #loadingIndicator {
+  body.printing-labels * {
+    visibility: hidden !important;
+  }
+  body.printing-labels #labelPrintArea,
+  body.printing-labels #labelPrintArea * {
+    visibility: visible !important;
+  }
+  /* #pmobPrintArea не должен всплыть при печати этикеток */
+  body.printing-labels #pmobPrintArea {
     display: none !important;
   }
   body.printing-labels #labelPrintArea {
     display: block !important;
+    position: absolute !important;
+    left: 0; top: 0;
+    width: 100%;
+    margin: 0; padding: 0;
   }
   body.printing-labels .label-tag {
     display: flex !important;
@@ -4416,16 +4441,25 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
 
 /* — печать чека возврата (мобильная касса) — */
 #pmobPrintArea { display: none; }
+/* Печать чека мобильной кассы: та же bulletproof-изоляция через visibility —
+   печатаем ТОЛЬКО #pmobPrintArea, никогда не весь дашборд. */
 @media print {
-    body.pmob-printing .header,
-    body.pmob-printing .nav-tabs,
-    body.pmob-printing .section,
-    body.pmob-printing .modal-overlay,
-    body.pmob-printing .sync-indicator,
-    body.pmob-printing #loadingIndicator,
-    body.pmob-printing #labelPrintArea,
-    body.pmob-printing .pmob-restore { display: none !important; }
-    body.pmob-printing #pmobPrintArea { display: block !important; }
+    body.pmob-printing * {
+        visibility: hidden !important;
+    }
+    body.pmob-printing #pmobPrintArea,
+    body.pmob-printing #pmobPrintArea * {
+        visibility: visible !important;
+    }
+    /* #labelPrintArea не должен всплыть при печати чека */
+    body.pmob-printing #labelPrintArea { display: none !important; }
+    body.pmob-printing #pmobPrintArea {
+        display: block !important;
+        position: absolute !important;
+        left: 0; top: 0;
+        width: 100%;
+        margin: 0; padding: 0;
+    }
 }
 #pmobPrintArea .pmob-rcpt {
     max-width: 74mm; margin: 0 auto; padding: 4mm 2mm;

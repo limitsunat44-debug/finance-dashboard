@@ -15,7 +15,7 @@
    ПРИ ОБНОВЛЕНИИ: поднять SW_VERSION (и, как обычно, ?v=... у app.js/style.css).
    ============================================================================ */
 
-const SW_VERSION = '20260729-143505';
+const SW_VERSION = '20260729-145630';
 const CACHE_STATIC = 'orto-kassa-static-' + SW_VERSION;
 
 // Ядро оболочки (app-shell). Пути относительные к scope.
@@ -75,9 +75,38 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // 1) ЧУЖОЙ ORIGIN (Supabase, 1c-sync*, CDN и т.п.) — НЕ трогаем.
-  //    Пусть браузер идёт в сеть напрямую. Никакого кэша живых данных.
-  if (url.origin !== self.location.origin) return;
+  // 1a) КРИТИЧНЫЕ CDN-БИБЛИОТЕКИ (JsBarcode и др.) — cache-first с фоновым
+  //    обновлением. Версии зафиксированы в URL, поэтому кэш безопасен.
+  //    Критично для печати штрихкодов на кассе со слабым интернетом:
+  //    без JsBarcode ценники печатаются без штрихкода.
+  if (url.origin !== self.location.origin) {
+    const isCriticalCdn =
+      /jsdelivr\.net\/npm\/jsbarcode/i.test(req.url) ||
+      /jsdelivr\.net\/npm\/chart\.js/i.test(req.url) ||
+      /cdnjs\.cloudflare\.com\/ajax\/libs\/xlsx/i.test(req.url) ||
+      /unpkg\.com\/html5-qrcode/i.test(req.url);
+    if (isCriticalCdn) {
+      event.respondWith(
+        caches.match(req).then((cached) => {
+          const network = fetch(req)
+            .then((res) => {
+              if (res && (res.ok || res.type === 'opaque')) {
+                const copy = res.clone();
+                caches.open(CACHE_STATIC).then((c) => c.put(req, copy));
+              }
+              return res;
+            })
+            .catch(() => cached);
+          // cache-first: отдаём из кэша мгновенно, в фоне обновляем
+          return cached || network;
+        })
+      );
+      return;
+    }
+    // 1b) Прочие чужие origin (Supabase, 1c-sync*, живые данные) — НЕ трогаем.
+    //    Пусть браузер идёт в сеть напрямую. Никакого кэша живых данных.
+    return;
+  }
 
   // 2) СВОЙ ORIGIN.
   //    a) Навигация/HTML — network-first (свежесть важнее), кэш — офлайн-фолбэк.

@@ -8658,6 +8658,24 @@ function renderLabels(units, w, h) {
         </div>`;
     }).join('');
 
+    // Если библиотека штрихкодов НЕ загрузилась (CDN недоступен на кассе,
+    // слабый интернет) — рисуем крупный текстовый код вместо пустого SVG,
+    // чтобы этикетка не оказалась пустой.
+    if (typeof JsBarcode === 'undefined') {
+        console.warn('JsBarcode не загружен — рисую код текстом (фолбэк)');
+        units.forEach((u, i) => {
+            const svg = document.getElementById('bcSvg' + i);
+            if (!svg || !svg.parentNode) return;
+            const value = String(u.unique_barcode || '').trim();
+            if (!value) return;
+            const span = document.createElement('div');
+            span.style.cssText = 'font-family:"Courier New",monospace;font-weight:700;font-size:4mm;letter-spacing:1px;';
+            span.textContent = value;
+            svg.parentNode.replaceChild(span, svg);
+        });
+        return;
+    }
+
     // Рисуем штрихкоды: EAN13 для 13-значных цифровых, иначе фоллбэк CODE128
     units.forEach((u, i) => {
         const svg = document.getElementById('bcSvg' + i);
@@ -8688,6 +8706,13 @@ function renderLabels(units, w, h) {
 
 // Печать: инжектим @page нужного размера, показываем только область этикеток
 function bcDoPrint(w, h) {
+    // Защита: не печатаем, если область этикеток пустая — иначе
+    // браузер напечатает пустые листы со своими колонтитулами.
+    const area = document.getElementById('labelPrintArea');
+    if (!area || !area.querySelector('.label-tag')) {
+        alert('Нечего печатать: этикетки не сформированы. Проверьте выбор товара/размеров.');
+        return;
+    }
     let st = document.getElementById('labelPageStyle');
     if (!st) {
         st = document.createElement('style');

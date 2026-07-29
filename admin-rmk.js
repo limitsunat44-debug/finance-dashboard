@@ -133,8 +133,9 @@ const VIEW_META = {
   returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
+  search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search'];
 
 async function bootApp() {
   // фильтры даты
@@ -201,6 +202,7 @@ function renderView(force) {
   else if (v === 'returns') renderReturns(force);
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
+  else if (v === 'search') renderSearch(force);
 }
 
 // общий помощник кеширования запросов
@@ -777,6 +779,82 @@ async function renderCards(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить карты: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ПОИСК ТОВАРА (скан/ввод штрихкода)
+// ═════════════════════════════════════════════════════
+const STATUS_META = {
+  in_stock: { label: 'В наличии',    cls: 'g'  },
+  sold:     { label: 'Продан',       cls: 'r'  },
+  reserved: { label: 'Зарезервирован', cls: 'amber' },
+  written_off: { label: 'Списан',    cls: 'r' },
+};
+let scLast = '';
+async function renderSearch(force) {
+  const box = $('scBody');
+  // статичный каркас — рисуем один раз
+  if (!box.dataset.ready) {
+    box.innerHTML = `
+      <div class="card card-pad">
+        <div class="sc-search">
+          <input class="finput" id="scInput" inputmode="numeric" autocomplete="off"
+                 placeholder="Отсканируйте или введите штрихкод…">
+          <button class="btn btn-primary" id="scGo">Найти</button>
+        </div>
+        <div class="muted" style="font-size:12.5px;margin-top:8px">Сканер обычно сам добавляет Enter — поиск запустится автоматически.</div>
+      </div>
+      <div id="scResult" style="margin-top:16px"></div>`;
+    box.dataset.ready = '1';
+    const go = () => scanOne($('scInput').value.trim());
+    $('scGo').addEventListener('click', go);
+    $('scInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  }
+  setTimeout(() => { const el = $('scInput'); if (el) el.focus(); }, 60);
+}
+
+async function scanOne(code) {
+  const rbox = $('scResult');
+  if (!code) { rbox.innerHTML = ''; return; }
+  scLast = code;
+  rbox.innerHTML = `<div class="loading">⏳ Ищу «${esc(code)}»…</div>`;
+  try {
+    const d = await posApi(`?action=scan&barcode=${encodeURIComponent(code)}`, { method: 'GET' });
+    if (scLast !== code) return; // отменили более новым сканом
+    const it = d.item || {};
+    if (!it.found) {
+      rbox.innerHTML = `<div class="card card-pad sc-empty">
+        <div class="sc-empty-ic">❗</div>
+        <div><div class="strong">Штрихкод не найден</div>
+        <div class="muted">Код <b>${esc(code)}</b> отсутствует в базе товаров${it.reason?' — '+esc(it.reason):''}.</div></div>
+      </div>`;
+      return;
+    }
+    const st = STATUS_META[it.status] || { label: it.status || '—', cls: 'gray' };
+    const isInstance = it.kind === 'instance';
+    const avail = Number(it.availableAtShop) || 0;
+    rbox.innerHTML = `
+      <div class="card card-pad sc-card">
+        <div class="sc-head">
+          <div class="sc-title">${esc(it.name || 'Без названия')}</div>
+          <span class="badge ${st.cls}">${esc(st.label)}</span>
+        </div>
+        <div class="sc-grid">
+          <div class="sc-cell"><div class="sc-k">Цена</div><div class="sc-v big">${money(it.price||0)}</div>
+            ${it.priceOld && it.priceOld>it.price ? `<div class="sc-old">${money(it.priceOld)}</div>` : ''}</div>
+          <div class="sc-cell"><div class="sc-k">Остаток</div><div class="sc-v big ${avail>0?'pos':'neg'}">${fmtInt(avail)} шт</div></div>
+          <div class="sc-cell"><div class="sc-k">Размер</div><div class="sc-v">${esc(it.sizeLabel || '—')}</div></div>
+          <div class="sc-cell"><div class="sc-k">Тип</div><div class="sc-v">${isInstance?'Экземпляр (уник. штрихкод)':'Модель (общий штрихкод)'}</div></div>
+          <div class="sc-cell"><div class="sc-k">Штрихкод</div><div class="sc-v rc-bc">${esc(it.uniqueBarcode || it.barcode || code)}</div></div>
+        </div>
+        ${it.warning ? `<div class="sc-warn">⚠ ${esc(it.warning)}</div>` : ''}
+      </div>`;
+  } catch (e) {
+    if (scLast !== code) return;
+    rbox.innerHTML = errBar('Ошибка поиска: ' + (e.message || e));
+  } finally {
+    const el = $('scInput'); if (el) { el.select(); }
   }
 }
 

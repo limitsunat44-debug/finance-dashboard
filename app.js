@@ -10412,9 +10412,32 @@ function posAddToCart(it) {
     return null;
 }
 
+// Округление вниз до кратного 10 (523→520, 427→420). Только для положительных сумм.
+function posFloor10(x) {
+    const v = Number(x) || 0;
+    if (v <= 0) return 0;
+    return Math.floor(v / 10) * 10;
+}
+
+// Чистая цена позиции.
+// Если на позиции включена скидка 5% — берём цену со скидкой и ОКРУГЛЯЕМ ВНИЗ до 10.
+// Из-за округления фактическая скидка получается чуть больше 5% — это ожидаемо.
 function posLineNet(l) {
     const gross = l.price * l.qty;
-    return Math.max(0, gross * (1 - (l.discountPct || 0) / 100));
+    if ((l.discountPct || 0) > 0) {
+        return Math.max(0, posFloor10(gross * (1 - (l.discountPct || 0) / 100)));
+    }
+    return Math.max(0, gross);
+}
+
+// Фактическая скидка на позицию (после округления вниз): { amount (сомони), pct (%) }.
+// Считаем от реальной разницы gross - net, а не от номинальных 5%.
+function posLineDiscInfo(l) {
+    const gross = Math.round((l.price * l.qty) || 0);
+    const net = Math.round(posLineNet(l));
+    const amount = Math.max(0, gross - net);
+    const pct = gross > 0 ? (amount / gross) * 100 : 0;
+    return { gross, net, amount, pct };
 }
 
 // Позиция «не в наличии на складе кассы»: экземпляр не in_stock, или на складе кассы 0 шт.
@@ -10846,7 +10869,9 @@ async function posConfirmSale() {
         const items = POS.cart.map(l => ({
             productC1Ref: l.productC1Ref, charC1Ref: l.charC1Ref,
             warehouseC1Ref: l.warehouseC1Ref || posShopWh(),
-            qty: l.qty, price: l.price, discountPct: l.discountPct || 0,
+            // ВАЖНО: отправляем ФАКТИЧЕСКИй % скидки (после округления вниз до 10),
+            // чтобы net в 1С совпадал с тем, что видел кассир (а не номинальные 5%).
+            qty: l.qty, price: l.price, discountPct: (l.discountPct ? posLineDiscInfo(l).pct : 0),
             uniqueBarcode: l.uniqueBarcode, barcode: l.barcode, name: l.name,
             // все отсканированные экземплярные штрихкоды (для экземплярного товара = каждый помечается отдельно)
             uniqueBarcodes: (l.uniqueBarcode && Array.isArray(l.scans)) ? l.scans.slice() : null,
@@ -11370,6 +11395,9 @@ function pmobRenderLines() {
         if (code) parts.push('№ ' + code);
         const warn = l.warning || (oos ? 'Не числится на складе этой кассы' : '');
         const hasDisc = (l.discountPct || 0) >= 5;
+        const di = posLineDiscInfo(l);
+        // Фактический % скидки (после округления вниз): 1 знак, без лишнего .0
+        const realPct = di.pct % 1 === 0 ? String(Math.round(di.pct)) : di.pct.toFixed(1);
         const row = document.createElement('div');
         row.className = 'pmob-line' + (oos ? ' oos' : '');
         // Количество = число отсканированных штрихкодов (только чтение, без степпера).
@@ -11379,11 +11407,12 @@ function pmobRenderLines() {
               ${parts.length ? `<div class="pmob-line-sub">${posEsc(parts.join(' | '))}</div>` : ''}
               ${warn ? `<div class="pmob-line-warn">⚠️ ${posEsc(warn)}</div>` : ''}
               <button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
-                      title="Скидка 5% на эту позицию">${hasDisc ? '−5%' : '5%'}</button>
+                      title="Скидка 5% на эту позицию (с округлением вниз до 10)">${hasDisc ? '−5%' : '5%'}</button>
+              ${hasDisc ? `<div class="pmob-line-discinfo">Скидка: −${pmobMoney(di.amount)} · ${realPct}%</div>` : ''}
             </div>
             <div class="pmob-line-right">
-              <div class="pmob-line-price">${pmobMoney(posLineNet(l))}</div>
-              ${hasDisc ? `<div class="pmob-line-old">${pmobMoney(l.price * l.qty)}</div>` : ''}
+              <div class="pmob-line-price">${pmobMoney(di.net)}</div>
+              ${hasDisc ? `<div class="pmob-line-old">${pmobMoney(di.gross)}</div>` : ''}
               <div class="pmob-line-qty">${l.qty} шт.</div>
             </div>
             <button type="button" class="pmob-line-rm" aria-label="Удалить позицию">×</button>`;
@@ -11717,6 +11746,7 @@ async function pmobOpenPay() {
     await posOpenPayment();                        // грузит POS.paytypes (общая логика)
     const modal = pmobEl('posPayModal');
     if (modal) modal.style.display = 'none';       // ПК-модаль на мобиле не показываем
+    pmobCloseMix();                                // сброс панели смешанной оплаты
     pmobRenderPayList();
     pmobShow('pay');
 }
@@ -11752,6 +11782,89 @@ function pmobRenderPayList() {
     };
     cash.forEach(c => add(c.name || 'Наличными', 'Оплата наличными', 'cash', c.ref, 'cash'));
     cards.forEach(c => add(c.name, 'Электронная оплата', 'card', c.ref));
+    // Смешанная оплата доступна, если есть и наличные, и хотя бы одна карта.
+    if (cash.length && cards.length) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pmob-pay-item mixed';
+        b.innerHTML = `<span class="pmob-pay-ico">🔀</span>` +
+            `<span class="pmob-pay-name">Смешанная оплата` +
+            `<span class="pmob-pay-sub">Наличные + остаток картой</span></span>` +
+            `<span class="pmob-chev">›</span>`;
+        b.addEventListener('click', () => pmobOpenMix());
+        box.appendChild(b);
+    }
+}
+
+// Открыть панель смешанной оплаты.
+function pmobOpenMix() {
+    const err = pmobEl('pmobPayError');
+    if (err) err.style.display = 'none';
+    // Заполняем список карт для остатка (переиспользуем ПК-элементы + мобильный select).
+    posPopulateCardSelects();
+    const sel = pmobEl('pmobMixCard');
+    const cards = (POS.paytypes && POS.paytypes.cards) || [];
+    if (sel) {
+        sel.innerHTML = '';
+        cards.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.ref; o.textContent = c.name;
+            sel.appendChild(o);
+        });
+    }
+    const cashInput = pmobEl('pmobMixCash');
+    if (cashInput) cashInput.value = '';
+    const list = pmobEl('pmobPayList');
+    if (list) list.style.display = 'none';
+    const panel = pmobEl('pmobMixPanel');
+    if (panel) panel.style.display = 'block';
+    pmobMixRecalc();
+    if (cashInput) setTimeout(() => cashInput.focus(), 60);
+}
+
+// Закрыть панель, вернуться к списку способов.
+function pmobCloseMix() {
+    const panel = pmobEl('pmobMixPanel');
+    if (panel) panel.style.display = 'none';
+    const list = pmobEl('pmobPayList');
+    if (list) list.style.display = '';
+    const err = pmobEl('pmobPayError');
+    if (err) err.style.display = 'none';
+}
+
+// Пересчёт остатка картой = К оплате − наличные.
+function pmobMixRecalc() {
+    const t = posTotals();
+    const cash = Math.round(Number((pmobEl('pmobMixCash') || {}).value) || 0);
+    const rest = t.grand - cash;
+    const restEl = pmobEl('pmobMixRest');
+    if (restEl) {
+        if (cash <= 0) restEl.textContent = 'Остаток картой: ' + pmobMoney(t.grand);
+        else if (cash >= t.grand) restEl.textContent = 'Наличные покрывают весь чек — выберите «Наличными»';
+        else restEl.textContent = 'Остаток картой: ' + pmobMoney(rest);
+        restEl.classList.toggle('warn', cash >= t.grand);
+    }
+}
+
+// Подтвердить смешанную оплату → переиспользуем ПК-логику posBuildPayments('mixed').
+function pmobConfirmMix() {
+    const t = posTotals();
+    const cash = Math.round(Number((pmobEl('pmobMixCash') || {}).value) || 0);
+    const cardRef = (pmobEl('pmobMixCard') || {}).value || '';
+    const err = pmobEl('pmobPayError');
+    const showErr = (m) => { if (err) { err.style.display = 'block'; err.textContent = '⚠️ ' + m; } };
+    if (cash <= 0) { showErr('Укажите сумму наличными'); return; }
+    if (cash >= t.grand) { showErr('Наличные покрывают весь чек — выберите «Наличными»'); return; }
+    if (!cardRef) { showErr('Выберите карту для остатка'); return; }
+    // Пишем значения в ПК-элементы, которые читает posBuildPayments (mixed).
+    const mc = pmobEl('posMixCash'); if (mc) mc.value = String(cash);
+    const mct = pmobEl('posMixCardType'); if (mct) mct.value = cardRef;
+    posSetPayMode('mixed');
+    if (err) err.style.display = 'none';
+    posShowReceipt();
+    // Если posShowReceipt выставил ошибку в ПК-поле — продублируем в мобильное.
+    const perr = pmobEl('posPayError');
+    if (perr && perr.style.display !== 'none' && perr.textContent) { showErr(perr.textContent.replace(/^⚠️\s*/, '')); }
 }
 
 // Выбор способа → существующий flow: posSetPayMode → чек-сверка → posConfirmSale.
@@ -12206,7 +12319,14 @@ function pmobBindEvents() {
     on('pmobCamFlip', pmobFlipCamera);
     on('pmobTorch', pmobToggleTorch);
     on('pmobToPay', pmobOpenPay);
-    on('pmobPayBack', () => pmobShow('cart'));
+    on('pmobPayBack', () => { pmobCloseMix(); pmobShow('cart'); });
+    // смешанная оплата
+    const mixCash = pmobEl('pmobMixCash');
+    if (mixCash) mixCash.addEventListener('input', pmobMixRecalc);
+    const mixCard = pmobEl('pmobMixCard');
+    if (mixCard) mixCard.addEventListener('change', pmobMixRecalc);
+    on('pmobMixCancel', pmobCloseMix);
+    on('pmobMixOk', pmobConfirmMix);
     on('pmobMoreBack', () => pmobShow('cart'));
     on('pmobCloseShift', posCloseShift);
     on('pmobMoreCloseShift', posCloseShift);

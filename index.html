@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260729-102206">
+    <link rel="stylesheet" href="style.css?v=20260729-103247">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2259,6 +2259,25 @@
                   <div class="pmob-pay-grand" id="pmobPayGrand">0 с.</div>
                 </div>
                 <div class="pmob-pay-list" id="pmobPayList"></div>
+
+                <!-- Смешанная оплата: наличные + остаток картой -->
+                <div class="pmob-mix" id="pmobMixPanel" style="display:none;">
+                  <div class="pmob-mix-title">Смешанная оплата</div>
+                  <label class="pmob-mix-field">
+                    <span>💵 Наличными</span>
+                    <input type="number" inputmode="decimal" id="pmobMixCash" class="pmob-mix-input" placeholder="0" min="0">
+                  </label>
+                  <label class="pmob-mix-field">
+                    <span>💳 Остаток картой</span>
+                    <select id="pmobMixCard" class="pmob-mix-input"></select>
+                  </label>
+                  <div class="pmob-mix-rest" id="pmobMixRest">Остаток картой: 0 с.</div>
+                  <div class="pmob-mix-actions">
+                    <button type="button" class="pmob-mix-cancel" id="pmobMixCancel">Отмена</button>
+                    <button type="button" class="pmob-mix-ok" id="pmobMixOk">Оплатить смешанно</button>
+                  </div>
+                </div>
+
                 <p class="pmob-err" id="pmobPayError" style="display:none;"></p>
               </section>
 
@@ -2929,7 +2948,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260729-102206"></script>
+    <script src="app.js?v=20260729-103247"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

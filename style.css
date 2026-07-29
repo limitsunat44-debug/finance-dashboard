@@ -4172,10 +4172,52 @@ body.pmob-on { overflow: hidden; }
     font-size: 12px; font-weight: 800; cursor: pointer;
 }
 .pmob-line-disc.on { border-color: var(--pm-green); background: #e8f8ef; color: #15803d; }
+.pmob-line-discinfo {
+    margin-top: 6px; font-size: 12px; font-weight: 700; color: #15803d;
+    font-variant-numeric: tabular-nums;
+}
 .pmob-line-old {
     margin-top: 2px; font-size: 12px; font-weight: 600;
     color: var(--pm-muted); text-decoration: line-through; font-variant-numeric: tabular-nums;
 }
+
+/* — панель смешанной оплаты (мобильный экран оплаты) — */
+.pmob-mix {
+    margin-top: 14px; padding: 16px;
+    border: 1px solid var(--pm-line); border-radius: 18px; background: var(--pm-soft);
+}
+.pmob-mix-title { font-size: 16px; font-weight: 800; color: var(--pm-ink); margin-bottom: 12px; }
+.pmob-mix-field {
+    display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px;
+    font-size: 13px; font-weight: 700; color: var(--pm-muted);
+}
+.pmob-mix-input {
+    width: 100%; min-height: 48px; padding: 12px 14px;
+    border: 1px solid var(--pm-line); border-radius: 12px; background: var(--pm-bg);
+    font-size: 17px; font-weight: 700; color: var(--pm-ink); font-variant-numeric: tabular-nums;
+    -webkit-appearance: none; appearance: none;
+}
+.pmob-mix-input:focus { outline: none; border-color: var(--pm-teal-2); box-shadow: 0 0 0 3px rgba(32,128,141,.15); }
+select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%236b7f80' d='M6 8 0 0h12z'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 34px; }
+.pmob-mix-rest {
+    margin: 4px 0 14px; font-size: 15px; font-weight: 800; color: var(--pm-teal);
+    font-variant-numeric: tabular-nums;
+}
+.pmob-mix-rest.warn { color: var(--pm-red); font-size: 13px; }
+.pmob-mix-actions { display: flex; gap: 10px; }
+.pmob-mix-cancel {
+    flex: 0 0 auto; min-height: 50px; padding: 14px 18px;
+    border: 1px solid var(--pm-line); border-radius: 14px; background: var(--pm-bg);
+    color: var(--pm-muted); font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.pmob-mix-ok {
+    flex: 1; min-height: 50px; padding: 14px;
+    border: none; border-radius: 14px; background: var(--pm-green); color: #fff;
+    font-size: 16px; font-weight: 800; cursor: pointer;
+    box-shadow: 0 6px 16px rgba(22,163,74,.3);
+}
+.pmob-mix-ok:active { background: #15803d; }
+.pmob-pay-item.mixed .pmob-pay-ico { background: #eef4f4; }
 
 /* — строка «Применить скидку покупателя» — */
 .pmob-client-bar {

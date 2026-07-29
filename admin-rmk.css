@@ -287,6 +287,11 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
 
 /* ═══ Строка фильтров и пагинатор (Дисконтные карты) ═══ */
 .filters.filters-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.au-chip{border:1px solid var(--line);background:var(--card);color:var(--tx2);border-radius:999px;padding:6px 14px;font-size:13px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:6px}
+.au-chip b{color:var(--tx);font-weight:700}
+.au-chip:hover{border-color:var(--g);color:var(--tx)}
+.au-chip.on{background:var(--g-soft2);border-color:var(--g);color:var(--g3)}
+.au-chip.on b{color:var(--g3)}
 .pager{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:14px}
 .pager-info{font-size:13px;color:var(--tx2);font-weight:600;min-width:120px;text-align:center}
 .pager .btn[disabled]{opacity:.45;cursor:not-allowed}

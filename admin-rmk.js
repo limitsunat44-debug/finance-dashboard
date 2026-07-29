@@ -136,8 +136,9 @@ const VIEW_META = {
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
   users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
+  audit:     { title: 'Журнал действий', sub: 'Смены, продажи и возвраты в хронологии' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit'];
 
 async function bootApp() {
   // фильтры даты
@@ -207,6 +208,7 @@ function renderView(force) {
   else if (v === 'search') renderSearch(force);
   else if (v === 'history') renderHistory(force);
   else if (v === 'users') renderUsers(force);
+  else if (v === 'audit') renderAudit(force);
 }
 
 // общий помощник кеширования запросов
@@ -1009,6 +1011,79 @@ async function renderUsers(force) {
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить пользователей: ' + (e.message || e));
   }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ЖУРНАЛ ДЕЙСТВИЙ
+// ═════════════════════════════════════════════════════
+const AU_META = {
+  sale:        { ic: '💰', cls: 'g',    label: 'Продажа' },
+  return:      { ic: '↩️', cls: 'ret',  label: 'Возврат' },
+  shift_open:  { ic: '🔓', cls: 'blue', label: 'Открытие смены' },
+  shift_close: { ic: '🔒', cls: 'gray', label: 'Закрытие смены' },
+};
+const auState = { type: '' };
+let auCache = null;
+
+async function renderAudit(force) {
+  const box = $('auBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю журнал…</div>`;
+  try {
+    const d = await cachedApi(`aud:${state.from}:${state.to}:${state.kassa}`, `?action=audit&from=${state.from}&to=${state.to}${kassaQS()}`);
+    auCache = d;
+    drawAudit();
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить журнал: ' + (e.message || e));
+  }
+}
+
+function drawAudit() {
+  const box = $('auBody');
+  const d = auCache; if (!d) return;
+  const c = d.counts || {};
+  const all = d.events || [];
+  const rows = auState.type ? all.filter(e => e.type === auState.type) : all;
+  const per = state.from === state.to ? state.from : state.from + ' — ' + state.to;
+  const chip = (t, label, n) => `<button class="au-chip${auState.type===t?' on':''}" data-autype="${t}">${label} <b>${fmtInt(n)}</b></button>`;
+  box.innerHTML = `
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+      ${kpi('📋','Всего событий', fmtInt(d.count||0),'gray', per)}
+      ${kpi('💰','Продажи', fmtInt(c.sale||0),'g')}
+      ${kpi('↩️','Возвраты', fmtInt(c.return||0),'r')}
+      ${kpi('🔓','Смены', fmtInt((c.shift_open||0)),'blue', fmtInt(c.shift_close||0)+' закрыто')}
+    </div>
+    <div class="card card-pad">
+      <div class="filters filters-row" style="margin-bottom:12px">
+        ${chip('', 'Все', d.count||0)}
+        ${chip('sale', '💰 Продажи', c.sale||0)}
+        ${chip('return', '↩️ Возвраты', c.return||0)}
+        ${chip('shift_open', '🔓 Открытие', c.shift_open||0)}
+        ${chip('shift_close', '🔒 Закрытие', c.shift_close||0)}
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Время</th><th class="c">Событие</th><th>Кто</th><th>Магазин</th><th>Документ</th><th class="r">Сумма</th><th>Примечание</th></tr></thead>
+          <tbody>${rows.length ? rows.map(e=>{
+            const m = AU_META[e.type] || { ic:'•', cls:'gray', label:e.label };
+            return `<tr>
+              <td class="muted" style="white-space:nowrap">${dushTime(e.at,true)}</td>
+              <td class="c"><span class="badge ${m.cls}">${m.ic} ${esc(e.label)}</span></td>
+              <td>${esc(e.who||'—')}</td>
+              <td>${esc(e.shop||'—')}</td>
+              <td class="rc-bc">${e.doc?esc(e.doc):'—'}</td>
+              <td class="r">${e.amount!=null?money(e.amount):'—'}</td>
+              <td class="muted" style="font-size:12.5px">${e.note?esc(e.note):''}</td>
+            </tr>`;
+          }).join('') : `<tr><td class="tbl-empty" colspan="7">Нет событий за период</td></tr>`}</tbody>
+        </table>
+      </div>
+      ${(d.count||0) >= 500 ? `<div class="muted" style="font-size:12px;margin-top:10px">Показаны первые 500 событий — сузьте период.</div>` : ''}
+    </div>
+  `;
+  box.querySelectorAll('.au-chip').forEach(b => b.addEventListener('click', () => {
+    auState.type = b.dataset.autype || ''; drawAudit();
+  }));
 }
 
 // кеш состава чеков по ref (чтобы не дёргать 1С при повторном раскрытии)

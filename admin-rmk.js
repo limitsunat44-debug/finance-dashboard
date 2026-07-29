@@ -137,8 +137,9 @@ const VIEW_META = {
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
   users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
   audit:     { title: 'Журнал действий', sub: 'Смены, продажи и возвраты в хронологии' },
+  settings:  { title: 'Настройки РМК', sub: 'Магазины, кассы ККМ и параметры системы' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings'];
 
 async function bootApp() {
   // фильтры даты
@@ -209,6 +210,7 @@ function renderView(force) {
   else if (v === 'history') renderHistory(force);
   else if (v === 'users') renderUsers(force);
   else if (v === 'audit') renderAudit(force);
+  else if (v === 'settings') renderSettings(force);
 }
 
 // общий помощник кеширования запросов
@@ -1084,6 +1086,78 @@ function drawAudit() {
   box.querySelectorAll('.au-chip').forEach(b => b.addEventListener('click', () => {
     auState.type = b.dataset.autype || ''; drawAudit();
   }));
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: НАСТРОЙКИ РМК (read-only)
+// ═════════════════════════════════════════════════════
+async function renderSettings(force) {
+  const box = $('stBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю настройки…</div>`;
+  try {
+    const d = await cachedApi('settings', '?action=settings');
+    const sh = d.shop || {}; const sys = d.system || {}; const st = d.stats || {};
+    const krow = (k) => `<tr>
+      <td class="strong">${esc(k.shop || k.name)}</td>
+      <td>${esc(k.type || '—')}</td>
+      <td class="c"><span class="badge ${k.offline?'amber':'g'}">${k.offline?'Автономная':'Онлайн'}</span></td>
+      <td class="rc-bc muted" style="font-size:11.5px">${esc(k.ref||'')}</td>
+    </tr>`;
+    const wrow = (w) => `<tr>
+      <td class="strong">${esc(w.name)}</td>
+      <td class="c">${esc(w.code || '—')}</td>
+      <td class="c"><span class="badge ${w.active?'ok':'off'}">${w.active?'Активен':'Откл.'}</span></td>
+      <td class="rc-bc muted" style="font-size:11.5px">${esc(w.c1Ref||'')}</td>
+    </tr>`;
+    const cfgRow = (label, val, tone) => `<div class="st-row"><span class="st-k">${label}</span><span class="st-v ${tone||''}">${val}</span></div>`;
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        ${kpi('🏪','Магазинов/складов', fmtInt(st.warehouses||0),'g', fmtInt(st.activeWarehouses||0)+' активных')}
+        ${kpi('🧾','Касс ККМ', fmtInt(st.kassas||0),'blue')}
+        ${kpi('%','Скидка по умолч.', sh.discountPercent!=null?sh.discountPercent+'%':'—','gray')}
+        ${kpi('⚠️','Порог остатка', sh.stockThreshold!=null?fmtInt(sh.stockThreshold)+' шт':'—','amber')}
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Магазины и склады</h3></div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Наименование</th><th class="c">Код 1С</th><th class="c">Статус</th><th>Ref_Key 1С</th></tr></thead>
+          <tbody>${(d.warehouses||[]).map(wrow).join('') || `<tr><td class="tbl-empty" colspan="4">Нет данных</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Кассы ККМ (1С)</h3></div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Магазин</th><th>Тип кассы</th><th class="c">Режим</th><th>Ref_Key 1С</th></tr></thead>
+          <tbody>${(d.kassas||[]).map(krow).join('') || `<tr><td class="tbl-empty" colspan="4">Нет данных</td></tr>`}</tbody>
+        </table></div>
+      </div>
+
+      <div class="cards-2">
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Общие параметры</h3></div>
+          ${cfgRow('Скидка по умолчанию', sh.discountPercent!=null?sh.discountPercent+'%':'—')}
+          ${cfgRow('Порог низкого остатка', sh.stockThreshold!=null?fmtInt(sh.stockThreshold)+' шт':'—')}
+          ${cfgRow('WhatsApp уведомления', sh.whatsappRecipients?esc(sh.whatsappRecipients):'—')}
+          ${cfgRow('Единица измерения', esc(sys.unit||'шт'))}
+          ${cfgRow('Валюта', esc(sys.currency||'с.'))}
+          ${cfgRow('Часовой пояс', esc(sys.timezone||''))}
+          ${sh.updatedAt?`<div class="muted" style="font-size:12px;margin-top:8px">Обновлено: ${dushTime(sh.updatedAt,true)}</div>`:''}
+        </div>
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Система</h3></div>
+          ${cfgRow('API бэкенда', `<span class="rc-bc" style="font-size:11.5px">${esc(sys.apiBase||'')}</span>`)}
+          ${cfgRow('Подключение к 1С (OData)', sys.odataConfigured?'<span class="badge ok">Настроено</span>':'<span class="badge off">Нет</span>')}
+          ${cfgRow('Подключение к Supabase', sys.supabaseConfigured?'<span class="badge ok">Настроено</span>':'<span class="badge off">Нет</span>')}
+          <div class="muted" style="font-size:12px;margin-top:12px">Раздел только для просмотра. Изменение параметров — через 1С и основной дашборд.</div>
+        </div>
+      </div>
+    `;
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить настройки: ' + (e.message || e));
+  }
 }
 
 // кеш состава чеков по ref (чтобы не дёргать 1С при повторном раскрытии)

@@ -292,6 +292,13 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
 .au-chip:hover{border-color:var(--g);color:var(--tx)}
 .au-chip.on{background:var(--g-soft2);border-color:var(--g);color:var(--g3)}
 .au-chip.on b{color:var(--g3)}
+/* ═══ Настройки РМК ═══ */
+.cards-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:820px){.cards-2{grid-template-columns:1fr}}
+.st-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:9px 0;border-bottom:1px solid var(--line)}
+.st-row:last-of-type{border-bottom:none}
+.st-k{color:var(--tx2);font-size:13.5px}
+.st-v{color:var(--tx);font-weight:600;font-size:13.5px;text-align:right}
 .pager{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:14px}
 .pager-info{font-size:13px;color:var(--tx2);font-weight:600;min-width:120px;text-align:center}
 .pager .btn[disabled]{opacity:.45;cursor:not-allowed}

@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260729-104440">
+    <link rel="stylesheet" href="style.css?v=20260729-143505">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2365,7 +2365,7 @@
 
                 <div class="pmob-info">
                   <div class="pmob-info-head"><span class="pmob-info-ico">ⓘ</span>Информация</div>
-                  <p>Можно сканировать товары из чека или без чека.</p>
+                  <p>Отсканируйте любой товар из чека продажи — система найдёт чек и покажет все проданные товары с ценой.</p>
                 </div>
               </section>
 
@@ -2388,8 +2388,14 @@
                   </span>
                 </div>
 
-                <h3 class="pmob-sec-title">Товар для возврата</h3>
-                <div class="pmob-ret-card" id="pmobRetCard"></div>
+                <!-- Шапка исходного чека продажи (дата, №, продавец) -->
+                <div class="pmob-ret-salehdr" id="pmobRetSaleHdr"></div>
+
+                <h3 class="pmob-sec-title">Товары из чека продажи</h3>
+                <p class="pmob-hint">Отметьте, что вернуть. Показана цена, по которой товар был продан (с учётом скидки). Лишние позиции снимите.</p>
+                <div class="pmob-ret-lines" id="pmobRetLines"></div>
+                <!-- скрытая одиночная карточка (совместимость со старым кодом) -->
+                <div class="pmob-ret-card" id="pmobRetCard" style="display:none;"></div>
 
                 <h3 class="pmob-sec-title">Причина возврата</h3>
                 <select class="pmob-select" id="pmobRetReason"></select>
@@ -2397,15 +2403,13 @@
                 <h3 class="pmob-sec-title">Способ возврата средств</h3>
                 <select class="pmob-select" id="pmobRetRefund"></select>
 
-                <h3 class="pmob-sec-title">Количество к возврату</h3>
-                <div class="pmob-qty-ro">
-                  <span class="pmob-qty-val">1 шт.</span>
-                  <span class="pmob-qty-note">Доступно: 1 шт.</span>
-                </div>
-                <p class="pmob-hint">Каждый экземпляр имеет уникальный штрихкод — возврат всегда на 1 шт.</p>
-
                 <h3 class="pmob-sec-title">Сумма возврата</h3>
-                <div class="pmob-ret-sum" id="pmobRetSum">0 с.</div>
+                <div class="pmob-ret-suminp">
+                  <input type="number" inputmode="numeric" min="0" step="1" class="pmob-ret-suminp-field" id="pmobRetSumInput" />
+                  <span class="pmob-ret-suminp-cur">с.</span>
+                </div>
+                <p class="pmob-hint" id="pmobRetSumHint">По умолчанию — сумма выбранных позиций. Можно изменить.</p>
+                <div class="pmob-ret-sum" id="pmobRetSum" style="display:none;">0 с.</div>
 
                 <button type="button" class="pmob-btn-red" id="pmobRetConfirmBtn">Подтвердить возврат</button>
                 <p class="pmob-err" id="pmobRetError" style="display:none;"></p>
@@ -2977,7 +2981,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260729-104440"></script>
+    <script src="app.js?v=20260729-143505"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

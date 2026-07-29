@@ -11392,10 +11392,15 @@ function pmobRenderLines() {
     POS.cart.forEach(l => {
         const oos = posLineOutOfStock(l);
         const scans = Array.isArray(l.scans) ? l.scans : [];
-        const code = scans.length ? String(scans[scans.length - 1]).slice(-6) : (l.barcode ? String(l.barcode).slice(-6) : '');
+        // Последние 4 цифры КАЖДОГО отсканированного экземпляра (не только последнего).
+        const tails = scans.map(c => String(c || '').slice(-4)).filter(Boolean);
+        let codeStr = '';
+        if (tails.length === 1) codeStr = '№ ' + tails[0];
+        else if (tails.length > 1) codeStr = '№ ' + tails.join(', ');
+        else if (l.barcode) codeStr = '№ ' + String(l.barcode).slice(-4);
         const parts = [];
         if (l.sizeLabel) parts.push('Размер: ' + l.sizeLabel);
-        if (code) parts.push('№ ' + code);
+        if (codeStr) parts.push(codeStr);
         const warn = l.warning || (oos ? 'Не числится на складе этой кассы' : '');
         const hasDisc = (l.discountPct || 0) >= 5;
         const di = posLineDiscInfo(l);
@@ -12052,15 +12057,143 @@ async function pmobEnsurePaytypes() {
     }
 }
 
-// Скан штрихкода в режиме возврата → существующий posReturnFind (он вызовет pmobRetFound/pmobRetLookupFail).
+// Скан штрихкода в режиме возврата → грузим ВЕСЬ чек продажи (lookup-sale-receipt),
+// показываем все товары чека с фактической ценой продажи.
 async function pmobRetHandleCode(code) {
     const c = String(code || '').trim();
     if (c.length < 6) { pmobToast('Некорректный штрихкод', c, true); return; }
     if (!POS._return) POS._return = { look: null, busy: false };
     POS._return.look = null;
+    POS._retReceipt = null;
     const inp = pmobEl('posRetScanInput');
     if (inp) inp.value = c;
-    await posReturnFind();
+    if (POS._return.busy) return;
+    POS._return.busy = true;
+    try {
+        const kassa = (POS.chosen && POS.chosen.ref) || '';
+        const r = await posApi('?action=lookup-sale-receipt&barcode=' + encodeURIComponent(c) +
+            '&kassa=' + encodeURIComponent(kassa), { method: 'GET' });
+        if (!r.ok || !r.data || !r.data.ok) throw new Error((r.data && (r.data.reason || r.data.error)) || ('HTTP ' + r.status));
+        const lines = Array.isArray(r.data.lines) ? r.data.lines : [];
+        if (!lines.length) throw new Error('В чеке продажи нет позиций для возврата');
+        // по умолчанию выбрана только отсканированная позиция
+        const selected = {};
+        lines.forEach(l => { selected[l.barcode] = !!l.isScanned; });
+        // если почему-то ни одна не отмечена — отмечаем ту, что отсканировали по штрихкоду
+        if (!Object.values(selected).some(Boolean) && selected[c] !== undefined) selected[c] = true;
+        POS._retReceipt = {
+            scannedBarcode: r.data.scannedBarcode || c,
+            sale: r.data.sale || {},
+            grandTotal: r.data.grandTotal || 0,
+            lines,
+            selected,
+            sumEdited: false,   // кассир вручную поменял сумму?
+        };
+        pmobRetShowReceipt();
+    } catch (e) {
+        pmobRetLookupFail(e.message);
+    } finally {
+        POS._return.busy = false;
+    }
+}
+
+// Показать экран возврата с полным чеком продажи.
+function pmobRetShowReceipt() {
+    if (!POS.isMobile) return;
+    const m = pmobEl('posReturnModal');
+    if (m) m.style.display = 'none';
+    const scr = pmobEl('pmobScreenScan');
+    if (scr) scr.style.display = 'none';
+    pmobCloseScan();
+    pmobFillRetReason();
+    pmobFillRetRefund();
+    pmobRenderRetReceipt();
+    const err = pmobEl('pmobRetError');
+    if (err) { err.style.display = 'none'; err.textContent = ''; }
+    pmobShow('retitem');
+}
+
+// Рендер шапки чека + списка позиций с чекбоксами.
+function pmobRenderRetReceipt() {
+    const R = POS._retReceipt;
+    const hdr = pmobEl('pmobRetSaleHdr');
+    const box = pmobEl('pmobRetLines');
+    if (!R || !box) { if (box) box.innerHTML = '<div class="pmob-empty">Нет данных</div>'; return; }
+    // шапка
+    if (hdr) {
+        const soldAt = R.sale.soldAt ? new Date(R.sale.soldAt).toLocaleString('ru-RU') : '—';
+        hdr.innerHTML =
+            '<div class="rh-t">Чек продажи № ' + posEsc(R.sale.receiptNumber || '—') + '</div>' +
+            '<div class="rh-r"><span>Дата продажи</span><b>' + posEsc(soldAt) + '</b></div>' +
+            (R.sale.sellerName ? '<div class="rh-r"><span>Продавец</span><b>' + posEsc(R.sale.sellerName) + '</b></div>' : '') +
+            (R.sale.shopName ? '<div class="rh-r"><span>Магазин</span><b>' + posEsc(R.sale.shopName) + '</b></div>' : '');
+    }
+    // позиции
+    box.innerHTML = '';
+    R.lines.forEach(l => {
+        const on = !!R.selected[l.barcode];
+        const div = document.createElement('div');
+        div.className = 'pmob-rl' + (on ? '' : ' off') + (l.isScanned ? ' scanned' : '');
+        const sz = l.sizeLabel ? String(l.sizeLabel).replace(/^размер:\s*/i, '') : '';
+        const discTxt = (l.discountPct && l.discountPct >= 0.5)
+            ? '<span class="old">' + pmobMoney(l.priceUnit) + '</span>' : '';
+        div.innerHTML =
+            '<input type="checkbox" class="pmob-rl-chk"' + (on ? ' checked' : '') +
+                ' data-bc="' + posEsc(l.barcode) + '" aria-label="Вернуть">' +
+            '<div class="pmob-rl-body">' +
+                '<div class="pmob-rl-name">' + posEsc(l.name || 'Товар') +
+                    (l.isScanned ? '<span class="pmob-rl-scanbadge">СКАН</span>' : '') + '</div>' +
+                '<div class="pmob-rl-meta">' +
+                    (sz ? '<span>Размер: ' + posEsc(sz) + '</span>' : '') +
+                    '<span>№ ' + posEsc(l.barcodeTail || String(l.barcode).slice(-4)) + '</span>' +
+                    (l.discountPct && l.discountPct >= 0.5 ? '<span>Скидка ' + pmobDiscFmt(l.discountPct) + '%</span>' : '') +
+                '</div>' +
+                '<div class="pmob-rl-price"><span class="lbl">Продан за</span>' +
+                    '<span><span class="val">' + pmobMoney(l.soldSum) + '</span>' + discTxt + '</span></div>' +
+            '</div>';
+        const chk = div.querySelector('.pmob-rl-chk');
+        if (chk) chk.addEventListener('change', () => pmobRetToggleLine(l.barcode, chk.checked));
+        box.appendChild(div);
+    });
+    pmobRetRecalcSum(true);
+    // подписка на ручное редактирование суммы
+    const inp = pmobEl('pmobRetSumInput');
+    if (inp && !inp._pmobBound) {
+        inp._pmobBound = true;
+        inp.addEventListener('input', () => { if (POS._retReceipt) POS._retReceipt.sumEdited = true; });
+    }
+}
+
+function pmobDiscFmt(p) {
+    const n = Math.round((Number(p) || 0) * 10) / 10;
+    return (n % 1 === 0) ? String(n) : n.toFixed(1);
+}
+
+// Переключение позиции в чеке.
+function pmobRetToggleLine(barcode, on) {
+    const R = POS._retReceipt;
+    if (!R) return;
+    R.selected[barcode] = !!on;
+    // перерисуем класс строки
+    const box = pmobEl('pmobRetLines');
+    if (box) {
+        const chk = box.querySelector('.pmob-rl-chk[data-bc="' + (window.CSS && CSS.escape ? CSS.escape(barcode) : barcode) + '"]');
+        if (chk) chk.closest('.pmob-rl').classList.toggle('off', !on);
+    }
+    // если кассир не менял сумму вручную — пересчитываем по выбору
+    pmobRetRecalcSum(false);
+}
+
+// Сумма по выбранным позициям (если force=true — всегда перезаписываем).
+function pmobRetRecalcSum(force) {
+    const R = POS._retReceipt;
+    const inp = pmobEl('pmobRetSumInput');
+    if (!R || !inp) return;
+    if (!force && R.sumEdited) return; // не трогаем ручной ввод
+    let sum = 0;
+    R.lines.forEach(l => { if (R.selected[l.barcode]) sum += Number(l.soldSum) || 0; });
+    inp.value = Math.round(sum);
+    if (force) R.sumEdited = false;
 }
 
 function pmobRetFound() {
@@ -12135,27 +12268,68 @@ function pmobRenderRetItem() {
     if (sum) sum.textContent = pmobMoney(look.product.price);
 }
 
-// Подтверждение: переносим выбор в ПК-контролы и вызываем общий posReturnConfirm.
+// Подтверждение возврата по чеку: один чек-возврат на все выбранные позиции,
+// с редактируемой суммой (уходит в 1С Сумма/Оплата).
 async function pmobRetConfirm() {
-    const look = (POS._return && POS._return.look) || null;
-    if (!look) { pmobShow('return'); return; }
+    const R = POS._retReceipt;
+    if (!R) { pmobShow('return'); return; }
     const err = pmobEl('pmobRetError');
     if (err) { err.style.display = 'none'; err.textContent = ''; }
-    const rSel = pmobEl('pmobRetReason');
-    if (rSel) {
-        const want = rSel.value;
-        document.querySelectorAll('.pos-ret-reason').forEach(b => {
-            b.classList.toggle('active', (b.getAttribute('data-reason') || '') === want);
-        });
+
+    // выбранные штрихкоды
+    const barcodes = R.lines.filter(l => R.selected[l.barcode]).map(l => l.barcode);
+    if (!barcodes.length) {
+        if (err) { err.style.display = 'block'; err.textContent = '⚠️ Отметьте хотя бы один товар для возврата'; }
+        return;
     }
+    // сумма к возврату
+    const sumInp = pmobEl('pmobRetSumInput');
+    let refundTotal = sumInp ? Math.round(Number(sumInp.value)) : null;
+    if (!Number.isFinite(refundTotal) || refundTotal < 0) refundTotal = null;
+
+    const rSel = pmobEl('pmobRetReason');
+    const reason = rSel ? (rSel.value || '') : '';
     const fSel = pmobEl('pmobRetRefund');
-    const pcSel = pmobEl('posRetRefund');
-    if (fSel && pcSel) pcSel.value = fSel.value;
+    const refundPayC1Ref = (fSel && fSel.value) || null;
+    const sh = POS.shift || {};
+
     const btn = pmobEl('pmobRetConfirmBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Оформляю…'; }
+    if (!POS._return) POS._return = {};
+    POS._return.busy = true;
     try {
-        await posReturnConfirm();
+        const body = {
+            clientSaleId: posNewClientSaleId(),
+            barcodes,
+            kassaC1Ref: POS.chosen.ref,
+            sellerC1Ref: sh.seller_c1_ref || sh.seller_ref || sh.sellerC1Ref || null,
+            sellerName: sh.seller_name || null,
+            reason,
+            refundPayC1Ref,
+            refundTotal,
+        };
+        let r;
+        try {
+            r = await posApiTimeout('?action=return-receipt', { method: 'POST', body: JSON.stringify(body) }, 20000);
+        } catch (netErr) {
+            if (posIsNetworkError(netErr)) {
+                await PosQueue.add({ clientSaleId: body.clientSaleId, action: 'return-receipt', body, ts: Date.now() });
+                posUpdateConnUI();
+                POS._return.result = { queued: true, docNumber: '', sum: refundTotal || 0, posted: false,
+                    reason, count: barcodes.length };
+                pmobRetDone();
+                return;
+            }
+            throw netErr;
+        }
+        if (!r.ok || !r.data || !r.data.ok) throw new Error((r.data && (r.data.error || r.data.reason)) || ('HTTP ' + r.status));
+        POS._return.result = { queued: false, docNumber: r.data.docNumber || '', sum: r.data.sum,
+            posted: !!r.data.posted, reason, count: r.data.count || barcodes.length };
+        pmobRetDone();
+    } catch (e) {
+        pmobRetFail(e.message);
     } finally {
+        POS._return.busy = false;
         if (btn) { btn.disabled = false; btn.textContent = 'Подтвердить возврат'; }
     }
 }
@@ -12172,7 +12346,10 @@ function pmobRetDone() {
         if (res.queued) {
             note.innerHTML = '💾 Слабая связь — возврат <b>сохранён</b> и оформится автоматически, когда появится интернет.';
         } else {
+            const cnt = res.count || 1;
+            const cntTxt = cnt > 1 ? ('Возвращено позиций: <b>' + cnt + '</b><br>') : '';
             note.innerHTML = (res.docNumber ? 'Чек-возврат <b>' + posEsc(res.docNumber) + '</b><br>' : '') +
+                cntTxt +
                 (res.posted ? 'Товар возвращён на склад.' : 'Создан — проведённость проверьте в 1С.');
         }
     }
@@ -12188,29 +12365,33 @@ function pmobRetFail(msg) {
     pmobShow('retitem');
 }
 
-// Чек возврата из данных POS._return (готового механизма печати чеков в РМК нет).
+// Чек возврата (мультитоварный) из POS._retReceipt + POS._return.result.
 function pmobRetReceiptHtml() {
-    const look = (POS._return && POS._return.look) || {};
+    const R = POS._retReceipt || {};
     const res = (POS._return && POS._return.result) || {};
     const sh = POS.shift || {};
-    const p = look.product || {};
-    const u = look.unit || {};
+    const sale = R.sale || {};
     const row = (a, b) => `<div class="pmob-rcpt-row"><span>${posEsc(a)}</span><span>${posEsc(b)}</span></div>`;
+    const picked = (R.lines || []).filter(l => R.selected && R.selected[l.barcode]);
+    let items = '';
+    picked.forEach(l => {
+        const sz = l.sizeLabel ? String(l.sizeLabel).replace(/^размер:\s*/i, '') : '';
+        items += `<div class="pmob-rcpt-row"><span>${posEsc(l.name || 'Товар')}${sz ? ' (' + posEsc(sz) + ')' : ''}</span>` +
+            `<span>${posEsc(pmobMoney(l.soldSum))}</span></div>` +
+            `<div class="pmob-rcpt-row" style="font-size:11px;color:#6b7f80;"><span>№ ${posEsc(l.barcodeTail || String(l.barcode).slice(-4))}</span><span></span></div>`;
+    });
     return '<div class="pmob-rcpt-row" style="justify-content:center;"><b>ЧЕК ВОЗВРАТА</b></div>' +
         '<div class="pmob-rcpt-hr"></div>' +
         row('Документ', res.docNumber || (res.queued ? 'в очереди на отправку' : '—')) +
         row('Дата', new Date().toLocaleString('ru-RU')) +
-        row('Касса', sh.kassa_name || '—') +
+        row('Касса', sh.kassa_name || (POS.chosen && POS.chosen.name) || '—') +
         row('Продавец', sh.seller_name || '—') +
-        '<div class="pmob-rcpt-hr"></div>' +
-        `<div class="pmob-rcpt-row"><span>${posEsc(p.name || 'Товар')}</span></div>` +
-        (u.sizeLabel ? row('Размер', String(u.sizeLabel).replace(/^размер:\s*/i, '')) : '') +
-        row('Штрихкод', look.barcode || '—') +
-        row('Количество', '1 шт.') +
+        (sale.receiptNumber ? row('Чек продажи', sale.receiptNumber) : '') +
         (res.reason ? row('Причина', res.reason) : '') +
-        (look.sale && look.sale.receiptNumber ? row('Чек продажи', look.sale.receiptNumber) : '') +
         '<div class="pmob-rcpt-hr"></div>' +
-        `<div class="pmob-rcpt-row pmob-rcpt-grand"><span>К возврату</span><span>${posEsc(pmobMoney(res.sum || p.price || 0))}</span></div>`;
+        items +
+        '<div class="pmob-rcpt-hr"></div>' +
+        `<div class="pmob-rcpt-row pmob-rcpt-grand"><span>К возврату</span><span>${posEsc(pmobMoney(res.sum || 0))}</span></div>`;
 }
 
 function pmobRetToggleReceipt() {

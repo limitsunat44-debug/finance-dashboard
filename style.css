@@ -4153,6 +4153,31 @@ body.pmob-on { overflow: hidden; }
 .pmob-done-sum { margin-top: 6px; font-size: 32px; font-weight: 900; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
 .pmob-done-note { margin-top: 12px; font-size: 13px; line-height: 1.5; color: var(--pm-muted); }
 
+/* — экран «Чек (продажа)» — зелёная тема — */
+.pmob-done-title-green { color: var(--pm-green); }
+.pmob-done-sum-green { color: var(--pm-ink); }
+.pmob-btn-green {
+    width: 100%; min-height: 54px; margin-top: 18px; padding: 15px;
+    border: none; border-radius: 16px;
+    background: var(--pm-green); color: #fff; font-size: 17px; font-weight: 800; cursor: pointer;
+    box-shadow: 0 6px 16px rgba(22, 163, 74, .26);
+}
+.pmob-btn-green:active { filter: brightness(.93); }
+.pmob-btn-green:disabled { opacity: .55; box-shadow: none; }
+
+/* — реквизиты чека продажи — */
+.pmob-sale-info { margin-top: 18px; }
+.pmob-sale-info-row {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+    padding: 11px 2px; border-bottom: 1px solid var(--pm-line);
+}
+.pmob-sale-info-row:last-child { border-bottom: none; }
+.pmob-sale-info-k { font-size: 13px; font-weight: 600; color: var(--pm-muted); }
+.pmob-sale-info-v {
+    font-size: 14px; font-weight: 800; color: var(--pm-ink);
+    text-align: right; font-variant-numeric: tabular-nums;
+}
+
 /* — превью чека возврата — */
 .pmob-rcpt {
     margin-top: 16px; padding: 16px; border: 1px dashed #cfdada; border-radius: 16px;

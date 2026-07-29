@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260729-103247">
+    <link rel="stylesheet" href="style.css?v=20260729-104440">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2435,6 +2435,35 @@
                 <button type="button" class="pmob-btn-red" id="pmobRetAgain" style="margin-top:18px;">Вернуться в возврат</button>
               </section>
 
+              <!-- ЭКРАН: чек (продажа) — после успешной продажи -->
+              <section class="pmob-screen" id="pmobScreenSaleDone" style="display:none;">
+                <div class="pmob-sub-head">
+                  <div class="pmob-sub-title">Чек (продажа)</div>
+                  <span class="pmob-head-gap"></span>
+                </div>
+                <div class="pmob-done pmob-done-sale">
+                  <span class="pmob-done-ico pmob-done-ico-green" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.6l5 5L19.5 7.5"/></svg>
+                  </span>
+                  <div class="pmob-done-title pmob-done-title-green">Оплата успешна</div>
+                  <div class="pmob-done-sum pmob-done-sum-green" id="pmobSaleDoneSum">0 с.</div>
+                  <div class="pmob-done-cap">Продажа</div>
+                  <div class="pmob-done-note" id="pmobSaleDoneNote" style="display:none;"></div>
+                </div>
+                <div class="pmob-sale-info">
+                  <div class="pmob-sale-info-row"><span class="pmob-sale-info-k">Номер чека</span><span class="pmob-sale-info-v" id="pmobSaleDonNum">—</span></div>
+                  <div class="pmob-sale-info-row"><span class="pmob-sale-info-k">Дата и время</span><span class="pmob-sale-info-v" id="pmobSaleDoneDt">—</span></div>
+                  <div class="pmob-sale-info-row"><span class="pmob-sale-info-k">Продавец</span><span class="pmob-sale-info-v" id="pmobSaleDoneSeller">—</span></div>
+                  <div class="pmob-sale-info-row"><span class="pmob-sale-info-k">Способ оплаты</span><span class="pmob-sale-info-v" id="pmobSaleDonePay">—</span></div>
+                </div>
+                <div class="pmob-menu">
+                  <button type="button" class="pmob-menu-item" id="pmobSaleView"><span class="pmob-menu-ico">🧾</span><span class="pmob-menu-txt">Посмотреть чек</span><span class="pmob-chev">›</span></button>
+                  <button type="button" class="pmob-menu-item" id="pmobSalePrintBtn"><span class="pmob-menu-ico">🖨</span><span class="pmob-menu-txt">Отправить / печать чека</span><span class="pmob-chev">›</span></button>
+                </div>
+                <div class="pmob-rcpt" id="pmobSaleReceipt" style="display:none;"></div>
+                <button type="button" class="pmob-btn-green" id="pmobSaleNewBtn" style="margin-top:18px;">Новый чек</button>
+              </section>
+
               <!-- ЭКРАН: поиск товара (справочный, остатки по складам) -->
               <section class="pmob-screen" id="pmobScreenSearch" style="display:none;">
                 <div class="pmob-sub-head">
@@ -2948,7 +2977,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260729-103247"></script>
+    <script src="app.js?v=20260729-104440"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

@@ -10905,6 +10905,7 @@ async function posConfirmSale() {
                 // Сеть недоступна/таймаут → кладём в офлайн-очередь, дошлём позже.
                 await PosQueue.add({ clientSaleId: body.clientSaleId, action: 'sell', body, ts: Date.now() });
                 document.getElementById('posReceiptModal').style.display = 'none';
+                pmobCaptureSale({ docNumber: '', posted: false, queued: true });
                 posResetSale();
                 posUpdateConnUI();
                 const hint = document.getElementById('posScanHint');
@@ -10918,6 +10919,7 @@ async function posConfirmSale() {
         document.getElementById('posReceiptModal').style.display = 'none';
         const num = r.data.docNumber || '';
         const posted = r.data.posted;
+        pmobCaptureSale({ docNumber: num, posted: posted, queued: false });
         posResetSale();
         posUpdateConnUI();
         const hint = document.getElementById('posScanHint');
@@ -11303,10 +11305,11 @@ const PMOB_SCREENS = {
     return: 'pmobScreenReturn',
     retitem: 'pmobScreenRetItem',
     retdone: 'pmobScreenRetDone',
+    saledone: 'pmobScreenSaleDone',
 };
 const PMOB_NAV_OF = {
     cart: 'cart', card: 'cart', doctor: 'cart', pay: 'pay', more: 'more', search: 'more',
-    return: 'return', retitem: 'return', retdone: 'return',
+    return: 'return', retitem: 'return', retdone: 'return', saledone: 'cart',
 };
 
 function pmobShow(screen) {
@@ -11889,12 +11892,129 @@ function pmobPickPay(mode, ref) {
 }
 
 // Чек проведён (или ушёл в офлайн-очередь) — начинаем новый.
+// СНИМОК продажи — вызывается ДО posResetSale(), пока корзина/оплаты ещё живы.
+// Сохраняем всё нужное для чека продажи в POS._lastSale.
+function pmobCaptureSale(meta) {
+    if (!POS.isMobile) { POS._lastSale = null; return; }
+    const t = posTotals();
+    const sh = POS.shift || {};
+    POS._lastSale = {
+        docNumber: (meta && meta.docNumber) || '',
+        posted: !!(meta && meta.posted),
+        queued: !!(meta && meta.queued),
+        when: new Date(),
+        grand: t.grand,
+        kassaName: sh.kassa_name || (POS.chosen && POS.chosen.name) || '',
+        sellerName: sh.seller_name || '',
+        clientName: (POS.client && POS.client.full_name) || '',
+        doctorName: (POS.doctor && POS.doctor.full_name) || '',
+        payments: (POS._payments || []).map(p => ({ name: p.payName || 'Оплата', amount: Number(p.amount) || 0 })),
+        lines: POS.cart.map(l => {
+            const di = posLineDiscInfo(l);
+            return { name: l.name, qty: l.qty, price: l.price, net: di.net, hasDisc: (l.discountPct || 0) > 0, discAmount: di.amount, discPct: di.pct };
+        }),
+    };
+}
+
 function pmobAfterSale() {
     if (!POS.isMobile) return;
     const ov = pmobEl('posMobile');
     if (!ov || ov.style.display === 'none') return;
+    if (POS._lastSale) { pmobSaleDone(); return; }
     pmobShow('cart');
     pmobToast('Чек закрыт', 'Можно начинать новый чек');
+}
+
+// Экран «Чек (продажа)» — после успешной продажи (аналог экрана возврата).
+function pmobSaleDone() {
+    const s = POS._lastSale;
+    if (!s) { pmobShow('cart'); return; }
+    const sum = pmobEl('pmobSaleDoneSum');
+    if (sum) sum.textContent = pmobMoney(s.grand);
+    // реквизиты
+    const set = (id, v) => { const el = pmobEl(id); if (el) el.textContent = v; };
+    set('pmobSaleDonNum', s.docNumber || (s.queued ? 'в очереди' : '—'));
+    set('pmobSaleDoneDt', s.when.toLocaleString('ru-RU'));
+    set('pmobSaleDoneSeller', s.sellerName || '—');
+    // способ оплаты: один — название; несколько — «Смешанная» + разбивка
+    const payEl = pmobEl('pmobSaleDonePay');
+    if (payEl) {
+        if (s.payments.length === 1) payEl.textContent = s.payments[0].name;
+        else if (s.payments.length > 1) payEl.textContent = 'Смешанная';
+        else payEl.textContent = '—';
+    }
+    // примечание (очередь / непроведён)
+    const note = pmobEl('pmobSaleDoneNote');
+    if (note) {
+        if (s.queued) note.innerHTML = '💾 Слабая связь — чек <b>сохранён</b> и отправится автоматически, когда появится интернет.';
+        else if (!s.posted) note.innerHTML = '⚠️ Чек создан — проведённость проверьте в 1С.';
+        else note.innerHTML = '';
+        note.style.display = note.innerHTML ? '' : 'none';
+    }
+    const rc = pmobEl('pmobSaleReceipt');
+    if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
+    pmobShow('saledone');
+}
+
+// Чек продажи из снимка POS._lastSale.
+function pmobSaleReceiptHtml() {
+    const s = POS._lastSale;
+    if (!s) return '';
+    const row = (a, b) => `<div class="pmob-rcpt-row"><span>${posEsc(a)}</span><span>${posEsc(b)}</span></div>`;
+    let html = '<div class="pmob-rcpt-row" style="justify-content:center;"><b>ЧЕК ПРОДАЖИ</b></div>' +
+        '<div class="pmob-rcpt-hr"></div>' +
+        row('Документ', s.docNumber || (s.queued ? 'в очереди на отправку' : '—')) +
+        row('Дата', s.when.toLocaleString('ru-RU')) +
+        row('Касса', s.kassaName || '—') +
+        row('Продавец', s.sellerName || '—') +
+        (s.clientName ? row('Клиент', s.clientName) : '') +
+        (s.doctorName ? row('Врач', s.doctorName) : '') +
+        '<div class="pmob-rcpt-hr"></div>';
+    s.lines.forEach((l, i) => {
+        html += `<div class="pmob-rcpt-row"><span>${i + 1}. ${posEsc(l.name)}</span></div>`;
+        const priceLine = `${posMoney(l.price)} × ${l.qty}` + (l.hasDisc ? ` (−${posMoney(l.discAmount)})` : '');
+        html += `<div class="pmob-rcpt-row"><span style="color:#6b7f80;">${posEsc(priceLine)}</span><span>${posEsc(pmobMoney(l.net))}</span></div>`;
+    });
+    html += '<div class="pmob-rcpt-hr"></div>';
+    s.payments.forEach(p => { html += row(p.name, pmobMoney(p.amount)); });
+    html += `<div class="pmob-rcpt-row pmob-rcpt-grand"><span>Итого</span><span>${posEsc(pmobMoney(s.grand))}</span></div>`;
+    return html;
+}
+
+function pmobSaleToggleReceipt() {
+    const rc = pmobEl('pmobSaleReceipt');
+    if (!rc) return;
+    if (rc.style.display === 'none' || !rc.innerHTML) {
+        rc.innerHTML = pmobSaleReceiptHtml();
+        rc.style.display = 'block';
+    } else {
+        rc.style.display = 'none';
+    }
+}
+
+function pmobSalePrint() {
+    const area = pmobEl('pmobPrintArea');
+    if (!area) { window.print(); return; }
+    area.innerHTML = '<div class="pmob-rcpt">' + pmobSaleReceiptHtml() + '</div>';
+    document.body.classList.add('pmob-printing');
+    let done = false;
+    const cleanup = () => {
+        if (done) return;
+        done = true;
+        document.body.classList.remove('pmob-printing');
+        area.innerHTML = '';
+        window.removeEventListener('afterprint', cleanup);
+    };
+    window.addEventListener('afterprint', cleanup);
+    setTimeout(() => { try { window.print(); } catch (_) {} }, 60);
+    setTimeout(cleanup, 1500);
+}
+
+// «Новый чек» — очищаем снимок и возвращаемся к пустому чеку.
+function pmobSaleNew() {
+    POS._lastSale = null;
+    pmobShow('cart');
+    pmobToast('Новый чек', 'Отсканируйте товар');
 }
 
 // ============================================================
@@ -12367,6 +12487,11 @@ function pmobBindEvents() {
     on('pmobRetPrint', pmobRetPrint);
     on('pmobRetView', pmobRetToggleReceipt);
     on('pmobRetAgain', posOpenReturn);
+
+    // чек продажи
+    on('pmobSaleView', pmobSaleToggleReceipt);
+    on('pmobSalePrintBtn', pmobSalePrint);
+    on('pmobSaleNewBtn', pmobSaleNew);
 
     // поиск товара
     on('pmobSearchBack', () => pmobShow('more'));

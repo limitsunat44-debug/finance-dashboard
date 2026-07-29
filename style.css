@@ -4237,6 +4237,20 @@ body.pmob-on { overflow: hidden; }
 .pmob-sug-item:active { background: var(--pm-soft); }
 .pmob-sug-name { display: block; font-size: 15px; font-weight: 700; }
 .pmob-sug-sub { display: block; margin-top: 3px; font-size: 12px; color: var(--pm-muted); }
+.pmob-sug-item b { display: block; font-size: 15px; font-weight: 700; }
+.pmob-sug-item i { display: block; margin-top: 3px; font-size: 12px; font-style: normal; color: var(--pm-muted); }
+.pmob-sug-empty { padding: 14px 4px; font-size: 13px; color: var(--pm-muted); }
+.pmob-doc-chosen {
+    display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 14px;
+    border: 1px solid #a7e3c4; border-radius: 14px; background: #f2fcf6;
+}
+.pmob-doc-chosen-ico {
+    flex: 0 0 auto; width: 40px; height: 40px; display: grid; place-items: center;
+    border-radius: 11px; background: #dcf5e6; font-size: 20px;
+}
+.pmob-doc-chosen-txt { min-width: 0; }
+.pmob-doc-chosen-txt b { display: block; font-size: 15px; font-weight: 800; color: var(--pm-ink); }
+.pmob-doc-chosen-txt i { display: block; margin-top: 3px; font-size: 12px; font-style: normal; color: var(--pm-muted); }
 .pmob-search-res { margin-top: 6px; }
 .pmob-prod-head { padding: 14px 0 4px; }
 .pmob-prod-name { font-size: 17px; font-weight: 800; line-height: 1.3; }

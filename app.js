@@ -11273,13 +11273,14 @@ const PMOB_SCREENS = {
     pay: 'pmobScreenPay',
     more: 'pmobScreenMore',
     card: 'pmobScreenCard',
+    doctor: 'pmobScreenDoctor',
     search: 'pmobScreenSearch',
     return: 'pmobScreenReturn',
     retitem: 'pmobScreenRetItem',
     retdone: 'pmobScreenRetDone',
 };
 const PMOB_NAV_OF = {
-    cart: 'cart', card: 'cart', pay: 'pay', more: 'more', search: 'more',
+    cart: 'cart', card: 'cart', doctor: 'cart', pay: 'pay', more: 'more', search: 'more',
     return: 'return', retitem: 'return', retdone: 'return',
 };
 
@@ -11347,6 +11348,7 @@ function pmobRender() {
     }
     pmobRenderLines();
     pmobRenderClient();
+    pmobRenderDoctor();
     pmobRenderCard();
     pmobUpdateFoot();
 }
@@ -11467,6 +11469,102 @@ function pmobRemoveClient() {
     posRenderCart();
     pmobShow('cart');
     pmobToast('Скидка по карте снята', '');
+}
+
+// ── Врач (ВР) — привязка к чеку по номеру или имени/фамилии ──
+// Зеркалит десктопную логику posSearchCard('doctor') / posChooseDoctor → POS.doctor.
+function pmobRenderDoctor() {
+    const bar = pmobEl('pmobDoctorBar');
+    if (!bar) return;
+    const d = POS.doctor;
+    const title = pmobEl('pmobDoctorTitle');
+    const sub = pmobEl('pmobDoctorSub');
+    const rm = pmobEl('pmobDoctorRm');
+    bar.classList.toggle('on', !!d);
+    if (d) {
+        if (title) title.textContent = 'Врач: ' + (d.full_name || '—');
+        if (sub) sub.textContent = 'Код ' + (d.card_code || '—');
+        if (rm) rm.style.display = '';
+    } else {
+        if (title) title.textContent = 'Применить врача';
+        if (sub) sub.textContent = 'Номер или имя/фамилия врача';
+        if (rm) rm.style.display = 'none';
+    }
+}
+
+// Открыть экран выбора врача
+function pmobOpenDoctor() {
+    pmobShow('doctor');
+    const inp = pmobEl('pmobDocInput');
+    const sug = pmobEl('pmobDocSug');
+    const rmBtn = pmobEl('pmobDocRemove');
+    if (sug) sug.innerHTML = '';
+    if (rmBtn) rmBtn.style.display = POS.doctor ? '' : 'none';
+    pmobRenderDocChosen();
+    if (inp) { inp.value = ''; setTimeout(() => { try { inp.focus(); } catch (_) {} }, 60); }
+}
+
+// Живой поиск по буквам (и имя, и фамилия) или по номеру/коду
+var pmobDocSearchT = null;
+function pmobDocInputHandler(e) {
+    const q = (e.target.value || '').trim();
+    clearTimeout(pmobDocSearchT);
+    const sug = pmobEl('pmobDocSug');
+    if (q.length < 2) { if (sug) sug.innerHTML = ''; return; }
+    pmobDocSearchT = setTimeout(() => pmobDocSearch(q), 260);
+}
+
+async function pmobDocSearch(q) {
+    const sug = pmobEl('pmobDocSug');
+    if (!sug) return;
+    sug.innerHTML = '<div class="pmob-sug-empty">Поиск…</div>';
+    try {
+        const r = await posApi(`?action=card&type=doctor&q=${encodeURIComponent(q)}`, { method: 'GET' });
+        const cards = (r.data && r.data.cards) || [];
+        if (!cards.length) { sug.innerHTML = '<div class="pmob-sug-empty">Ничего не найдено</div>'; return; }
+        sug.innerHTML = '';
+        cards.forEach(c => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'pmob-sug-item';
+            b.innerHTML = `<b>${posEsc(c.full_name || '—')}</b><i>код ${posEsc(c.card_code || '—')}</i>`;
+            b.onclick = () => pmobChooseDoctor(c);
+            sug.appendChild(b);
+        });
+    } catch (_) {
+        sug.innerHTML = '<div class="pmob-sug-empty">Ошибка поиска</div>';
+    }
+}
+
+function pmobChooseDoctor(c) {
+    POS.doctor = c;
+    const inp = pmobEl('pmobDocInput');
+    const sug = pmobEl('pmobDocSug');
+    if (inp) inp.value = '';
+    if (sug) sug.innerHTML = '';
+    pmobRenderDocChosen();
+    const rmBtn = pmobEl('pmobDocRemove');
+    if (rmBtn) rmBtn.style.display = '';
+    pmobRenderDoctor();
+    pmobToast('Врач применён', (c.full_name || '') + (c.card_code ? ' · код ' + c.card_code : ''));
+}
+
+function pmobRenderDocChosen() {
+    const box = pmobEl('pmobDocChosen');
+    if (!box) return;
+    const d = POS.doctor;
+    if (!d) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.style.display = '';
+    box.innerHTML = `<span class="pmob-doc-chosen-ico">🩺</span>
+        <span class="pmob-doc-chosen-txt"><b>${posEsc(d.full_name || '—')}</b><i>Код ${posEsc(d.card_code || '—')}</i></span>`;
+}
+
+function pmobRemoveDoctor() {
+    POS.doctor = null;
+    pmobRenderDocChosen();
+    const rmBtn = pmobEl('pmobDocRemove');
+    if (rmBtn) rmBtn.style.display = 'none';
+    pmobRenderDoctor();
+    pmobToast('Врач убран', '');
 }
 
 // ── Экран 2: сканирование (один экран на три режима: чек / возврат / карта) ──
@@ -12115,6 +12213,20 @@ function pmobBindEvents() {
     on('pmobCardBack', () => pmobShow('cart'));
     on('pmobCardRemove', pmobRemoveClient);
     on('pmobCardToPay', pmobOpenPay);
+
+    // врач (ВР): поиск по номеру или имени/фамилии
+    on('pmobDoctorMain', pmobOpenDoctor);
+    on('pmobDoctorRm', pmobRemoveDoctor);
+    on('pmobDocBack', () => pmobShow('cart'));
+    on('pmobDocRemove', pmobRemoveDoctor);
+    on('pmobDocClear', () => {
+        const i = pmobEl('pmobDocInput');
+        if (i) { i.value = ''; try { i.focus(); } catch (_) {} }
+        const s = pmobEl('pmobDocSug');
+        if (s) s.innerHTML = '';
+    });
+    const di = pmobEl('pmobDocInput');
+    if (di) di.addEventListener('input', pmobDocInputHandler);
 
     // возврат: 4 экрана
     on('pmobRetBack', () => pmobShow('cart'));

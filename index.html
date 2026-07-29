@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260729c-mobretsearch">
+    <link rel="stylesheet" href="style.css?v=20260729-095833">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2232,6 +2232,18 @@
                   <button type="button" class="pmob-client-rm" id="pmobClientRm" style="display:none;" aria-label="Убрать карту">×</button>
                 </div>
 
+                <div class="pmob-client-bar" id="pmobDoctorBar">
+                  <button type="button" class="pmob-client-main" id="pmobDoctorMain">
+                    <span class="pmob-client-ico" id="pmobDoctorIco">🩺</span>
+                    <span class="pmob-client-txt">
+                      <b id="pmobDoctorTitle">Применить врача</b>
+                      <i id="pmobDoctorSub">Номер или имя/фамилия врача</i>
+                    </span>
+                    <span class="pmob-chev">›</span>
+                  </button>
+                  <button type="button" class="pmob-client-rm" id="pmobDoctorRm" style="display:none;" aria-label="Убрать врача">×</button>
+                </div>
+
                 <p class="pmob-hint" id="pmobHint"></p>
               </section>
 
@@ -2286,6 +2298,23 @@
                 </div>
                 <p class="pmob-hint" id="pmobCardWho"></p>
                 <button type="button" class="pmob-pay-btn" id="pmobCardToPay" style="margin-top:18px;">Продолжить к оплате</button>
+              </section>
+
+              <!-- ЭКРАН: применение врача (поиск по номеру или имени/фамилии) -->
+              <section class="pmob-screen" id="pmobScreenDoctor" style="display:none;">
+                <div class="pmob-sub-head">
+                  <button type="button" class="pmob-back" id="pmobDocBack" aria-label="Назад">←</button>
+                  <div class="pmob-sub-title">Применить врача</div>
+                  <button type="button" class="pmob-link-red" id="pmobDocRemove" style="display:none;">Убрать</button>
+                </div>
+                <div class="pmob-search-box">
+                  <span class="pmob-search-ico">🩺</span>
+                  <input type="search" id="pmobDocInput" class="pmob-search-input" placeholder="Номер врача или имя / фамилия" autocomplete="off">
+                  <button type="button" class="pmob-search-clr" id="pmobDocClear" aria-label="Очистить">×</button>
+                </div>
+                <div class="pmob-sug" id="pmobDocSug"></div>
+                <div class="pmob-doc-chosen" id="pmobDocChosen" style="display:none;"></div>
+                <p class="pmob-hint">Введите номер врача — покажется имя и фамилия, либо начните вводить имя или фамилию — подскажем подходящих по буквам.</p>
               </section>
 
               <!-- ЭКРАН ВОЗВРАТА 1: дом -->
@@ -2900,7 +2929,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260729c-mobretsearch"></script>
+    <script src="app.js?v=20260729-095833"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

@@ -131,8 +131,9 @@ const VIEW_META = {
   shift:     { title: 'Управление сменой',  sub: 'Просмотр и управление сменами касс' },
   receipts:  { title: 'Чеки продаж',        sub: 'Список всех чеков за выбранный период' },
   returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
+  discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts'];
 
 async function bootApp() {
   // фильтры даты
@@ -197,6 +198,7 @@ function renderView(force) {
   else if (v === 'shift') renderShift(force);
   else if (v === 'receipts') renderReceipts(force);
   else if (v === 'returns') renderReturns(force);
+  else if (v === 'discounts') renderDiscounts(force);
 }
 
 // общий помощник кеширования запросов
@@ -624,6 +626,77 @@ async function renderReturns(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить возвраты: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: СКИДКИ
+// ═════════════════════════════════════════════════════
+// горизонтальные бары: список {label,value}, макс — для нормировки ширины
+function hbars(items, opt) {
+  const o = opt || {};
+  const max = Math.max(1, ...items.map(x => x.value));
+  return `<div class="ds-bars">` + items.map(x => {
+    const w = Math.max(2, (x.value / max) * 100);
+    return `<div class="ds-bar-row">
+      <div class="ds-bar-label" title="${esc(x.label)}">${esc(x.label)}</div>
+      <div class="ds-bar-track"><div class="ds-bar-fill" style="width:${w}%"></div></div>
+      <div class="ds-bar-val tnum">${o.money ? money(x.value) : fmtNum(x.value)}${x.extra ? ` <span class="muted">${esc(x.extra)}</span>` : ''}</div>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+async function renderDiscounts(force) {
+  const box = $('dsBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю скидки (тянется состав всех чеков)…</div>`;
+  try {
+    const d = await cachedApi(`disc:${state.from}:${state.to}:${state.kassa}`, `?action=discounts&from=${state.from}&to=${state.to}${kassaQS()}`);
+    const shareReceipts = d.receipts ? (d.receiptsWithDisc / d.receipts) * 100 : 0;
+
+    const pctItems = Object.entries(d.pctBuckets || {}).map(([k, v]) => ({ label: k, value: v }));
+    const sellerItems = (d.bySeller || []).slice(0, 8).map(s => ({ label: s.name, value: s.discount }));
+    const shopItems = (d.byShop || []).map(s => ({ label: s.name, value: s.discount }));
+
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+        ${kpi('%','Сумма скидок', money(d.totalDiscount||0),'g','')}
+        ${kpi('📉','Средний % скидки', (d.avgPct||0).toFixed(1)+'%','gray','от оборота до скидки')}
+        ${kpi('🧾','Чеков со скидкой', fmtInt(d.receiptsWithDisc||0),'gray', fmtInt(d.receipts||0)+' всего · '+shareReceipts.toFixed(0)+'%')}
+        ${kpi('💰','Оборот до скидки', money(d.totalBase||0),'gray','нетто '+money(d.totalNet||0))}
+      </div>
+
+      <div class="cols-2">
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Скидки по диапазонам %</h3></div>
+          ${pctItems.some(x=>x.value>0) ? hbars(pctItems, {money:true}) : '<div class="tbl-empty">Нет данных</div>'}
+        </div>
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Скидки по магазинам</h3></div>
+          ${shopItems.length ? hbars(shopItems, {money:true}) : '<div class="tbl-empty">Нет данных</div>'}
+        </div>
+      </div>
+
+      <div class="cols-2">
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Топ продавцов по скидкам</h3></div>
+          ${sellerItems.length ? hbars(sellerItems, {money:true}) : '<div class="tbl-empty">Нет данных</div>'}
+        </div>
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Топ товаров по скидкам</h3></div>
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead><tr><th style="width:30px">#</th><th>Товар</th><th class="c">Кол-во</th><th class="r">Скидка</th></tr></thead>
+              <tbody>${(d.topProducts||[]).length ? d.topProducts.map((p,i)=>`
+                <tr><td class="c muted">${i+1}</td><td class="strong">${esc(p.name)}${p.barcode?` <span class="muted rc-bc">${esc(p.barcode)}</span>`:''}</td><td class="c tnum">${fmtInt(p.qty)}</td><td class="r strong tnum">${fmtNum(p.discount)}</td></tr>`).join('')
+                : `<tr><td class="tbl-empty" colspan="4">Нет скидок за период</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить скидки: ' + (e.message || e));
   }
 }
 

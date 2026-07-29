@@ -139,8 +139,9 @@ const VIEW_META = {
   audit:     { title: 'Журнал действий', sub: 'Смены, продажи и возвраты в хронологии' },
   settings:  { title: 'Настройки РМК', sub: 'Магазины, кассы ККМ и параметры системы' },
   stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
+  monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring'];
 
 async function bootApp() {
   // фильтры даты
@@ -213,6 +214,7 @@ function renderView(force) {
   else if (v === 'audit') renderAudit(force);
   else if (v === 'settings') renderSettings(force);
   else if (v === 'stats') renderStats(force);
+  else if (v === 'monitoring') renderMonitoring(force);
 }
 
 // общий помощник кеширования запросов
@@ -1225,6 +1227,65 @@ async function renderStats(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить статистику: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: МОНИТОРИНГ МАГАЗИНОВ
+// ═════════════════════════════════════════════════════
+const MON_META = {
+  open:   { label: 'Открыта', cls: 'ok',   dot: 'g' },
+  closed: { label: 'Закрыта', cls: 'gray', dot: 'gray' },
+  idle:   { label: 'Нет смены', cls: 'off', dot: 'r' },
+};
+async function renderMonitoring(force) {
+  const box = $('monBody');
+  box.innerHTML = `<div class="loading">⏳ Проверяю статус касс…</div>`;
+  try {
+    // всегда свежие данные (статус онлайн) — без кеша
+    const d = await posApi(`?action=monitoring`);
+    const s = d.stats || {};
+    const rows = d.rows || [];
+    const srv = d.serverTime ? d.serverTime.replace('T', ' ').slice(0, 16) : '';
+
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+        ${kpi('🔓','Смен открыто', fmtInt(s.open||0),'g', 'из '+fmtInt(s.kassas||0)+' касс')}
+        ${kpi('🔒','Закрыто сегодня', fmtInt(s.closed||0),'gray','')}
+        ${kpi('⚠️','Без смены', fmtInt(s.idle||0), (s.idle?'r':'gray'),'')}
+        ${kpi('💵','Продажи сегодня', money(s.salesToday||0),'g', fmtInt(s.receiptsToday||0)+' чеков')}
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row">
+          <h3>Статус касс</h3>
+          <span class="muted">на ${esc(srv)} · <a href="#" id="monRefresh" style="color:var(--g2);font-weight:600;text-decoration:none">⭯ Обновить</a></span>
+        </div>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr>
+            <th>Касса / Магазин</th><th>Статус</th><th>Кассир</th>
+            <th>Открыта</th><th>Закрыта</th><th class="r">Чеков</th><th class="r">Продажи</th>
+          </tr></thead>
+          <tbody>${rows.map(r => {
+            const m = MON_META[r.state] || MON_META.idle;
+            return `<tr>
+              <td><b>${esc(r.kassa)}</b>${r.offline?` <span class="badge gray" style="font-size:10px">offline</span>`:''}<div class="muted" style="font-size:12px">${esc(r.shop||'—')}</div></td>
+              <td><span class="badge ${m.cls}">${m.label}</span></td>
+              <td>${esc(r.seller||'—')}</td>
+              <td>${r.openedAt?dushTime(r.openedAt,false):'—'}</td>
+              <td>${r.closedAt?dushTime(r.closedAt,false):(r.state==='open'?'<span class="muted">сейчас</span>':'—')}</td>
+              <td class="r">${fmtInt(r.receipts||0)}</td>
+              <td class="r strong">${money(r.totalSales||0)}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table></div>
+      </div>
+    `;
+    const rf = $('monRefresh');
+    if (rf) rf.onclick = (e) => { e.preventDefault(); renderMonitoring(true); };
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить мониторинг: ' + (e.message || e));
   }
 }
 

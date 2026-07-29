@@ -140,8 +140,9 @@ const VIEW_META = {
   settings:  { title: 'Настройки РМК', sub: 'Магазины, кассы ККМ и параметры системы' },
   stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
   monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
+  cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport'];
 
 async function bootApp() {
   // фильтры даты
@@ -215,6 +216,7 @@ function renderView(force) {
   else if (v === 'settings') renderSettings(force);
   else if (v === 'stats') renderStats(force);
   else if (v === 'monitoring') renderMonitoring(force);
+  else if (v === 'cashreport') renderCashReport(force);
 }
 
 // общий помощник кеширования запросов
@@ -1286,6 +1288,68 @@ async function renderMonitoring(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить мониторинг: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ОТЧЁТ ПО СНЯТИЮ ДС (наличные к инкассации)
+// ═════════════════════════════════════════════════════
+async function renderCashReport(force) {
+  const box = $('cashBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю наличные…</div>`;
+  try {
+    const d = await cachedApi(`cash:${state.from}:${state.to}:${state.kassa}`, `?action=cashreport&from=${state.from}&to=${state.to}${kassaQS()}`);
+    const k = d.kpi || {};
+    const per = state.from === state.to ? state.from : state.from + ' — ' + state.to;
+    const rows = d.rows || [];
+    const typeItems = (d.byType || []).map(t => ({ label: t.label + (t.cash ? ' 💵' : ''), value: t.amount }));
+
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+        ${kpi('💵','Наличные к снятию', money(k.totalCash||0),'g', 'за '+per)}
+        ${kpi('💳','Безналичные', money(k.totalNonCash||0),'blue','карты/QR/кошельки')}
+        ${kpi('∑','Всего оплат', money(k.totalAll||0),'gray','')}
+        ${kpi('🔒','Закрыто смен', fmtInt(k.shifts||0),'gray', fmtInt(k.receipts||0)+' чеков')}
+      </div>
+
+      <div class="cards-2">
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Наличные по кассам</h3></div>
+          ${(d.byKassa||[]).length ? `<div class="tbl-wrap"><table class="tbl">
+            <thead><tr><th>Касса</th><th class="r">Наличные</th><th class="r">Безнал</th><th class="r">Смен</th></tr></thead>
+            <tbody>${d.byKassa.map(x=>`<tr>
+              <td><b>${esc(x.kassa)}</b></td>
+              <td class="r strong" style="color:var(--g2)">${money(x.cash)}</td>
+              <td class="r">${money(x.noncash)}</td>
+              <td class="r muted">${fmtInt(x.shifts)}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>` : `<div class="tbl-empty">Нет закрытых смен за период</div>`}
+        </div>
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>По типам оплат</h3></div>
+          ${typeItems.length ? hbars(typeItems, { money: true }) : `<div class="tbl-empty">Нет данных</div>`}
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Закрытые смены</h3><span class="muted">${fmtInt(rows.length)}</span></div>
+        ${rows.length ? `<div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Касса / Магазин</th><th>Кассир</th><th>Закрыта</th><th class="r">Чеков</th><th class="r">Наличные</th><th class="r">Безнал</th><th class="r">Итого</th></tr></thead>
+          <tbody>${rows.map(r=>`<tr>
+            <td><b>${esc(r.kassa||'—')}</b><div class="muted" style="font-size:12px">${esc(r.shop||'')}</div></td>
+            <td>${esc(r.seller||'—')}</td>
+            <td>${r.closedAt?dushTime(r.closedAt,true):'—'}</td>
+            <td class="r">${fmtInt(r.receipts||0)}</td>
+            <td class="r strong" style="color:var(--g2)">${money(r.cash||0)}</td>
+            <td class="r">${money(r.noncash||0)}</td>
+            <td class="r">${money(r.total||0)}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>` : `<div class="tbl-empty">Нет закрытых смен</div>`}
+      </div>
+    `;
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить отчёт: ' + (e.message || e));
   }
 }
 

@@ -130,8 +130,9 @@ const VIEW_META = {
   overview:  { title: 'Обзор',              sub: 'Главная панель управления РМК' },
   shift:     { title: 'Управление сменой',  sub: 'Просмотр и управление сменами касс' },
   receipts:  { title: 'Чеки продаж',        sub: 'Список всех чеков за выбранный период' },
+  returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns'];
 
 async function bootApp() {
   // фильтры даты
@@ -195,6 +196,7 @@ function renderView(force) {
   if (v === 'overview') renderOverview(force);
   else if (v === 'shift') renderShift(force);
   else if (v === 'receipts') renderReceipts(force);
+  else if (v === 'returns') renderReturns(force);
 }
 
 // общий помощник кеширования запросов
@@ -529,6 +531,99 @@ async function renderReceipts(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить чеки: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ВОЗВРАТЫ
+// ═════════════════════════════════════════════════════
+let rtFilters = { seller: '', q: '', min: '', max: '' };
+async function renderReturns(force) {
+  const box = $('rtBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю возвраты…</div>`;
+  try {
+    const data = await cachedApi(`ret:${state.from}:${state.to}:${state.kassa}`, `?action=returns&from=${state.from}&to=${state.to}${kassaQS()}`);
+    let returns = (data.returns || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    const sellers = [...new Set(returns.map(r => r.seller).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
+
+    const f = rtFilters;
+    let rows = returns.filter(r => {
+      if (f.seller && r.seller !== f.seller) return false;
+      if (f.q) { const q = f.q.toLowerCase(); if (!String(r.number).toLowerCase().includes(q) && !String(r.seller).toLowerCase().includes(q) && !String(r.total).includes(q) && !String(r.reason||'').toLowerCase().includes(q)) return false; }
+      if (f.min && r.total < Number(f.min)) return false;
+      if (f.max && r.total > Number(f.max)) return false;
+      return true;
+    });
+
+    const total = rows.reduce((s, x) => s + x.total, 0);
+    const cnt = rows.length;
+    const avg = cnt ? total / cnt : 0;
+
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+        ${kpi('↩','Возвратов', fmtInt(cnt),'gray','')}
+        ${kpi('💸','Сумма возвратов', money(total),'r','')}
+        ${kpi('📊','Средний возврат', money(avg),'gray','')}
+        ${kpi('🏪','Магазинов', fmtInt(new Set(rows.map(r=>r.shop)).size),'gray','')}
+      </div>
+
+      <div class="cols-main">
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Возвраты за ${state.from === state.to ? state.from : state.from+' — '+state.to}</h3></div>
+          <div class="tbl-wrap">
+            <table class="tbl tbl-receipts">
+              <thead><tr><th style="width:34px"></th><th>№ чека</th><th>Время</th><th>Продавец</th><th>Магазин</th><th>Причина</th><th class="r">Сумма</th></tr></thead>
+              <tbody>${rows.length ? rows.map((r, i) => `
+                <tr class="rc-row" data-ref="${esc(r.ref || '')}" data-num="${esc(r.number)}" data-idx="rt${i}">
+                  <td class="c rc-caret"><span class="caret">›</span></td>
+                  <td class="strong">${esc(r.number)}</td>
+                  <td class="muted">${dushTime(r.date,false)}</td>
+                  <td>${esc(r.seller)}</td>
+                  <td class="muted">${esc(r.shop)}</td>
+                  <td class="muted">${r.reason ? esc(r.reason) : '—'}</td>
+                  <td class="r strong tnum" style="color:var(--red,#dc2626)">−${fmtNum(r.total)}</td>
+                </tr>
+                <tr class="rc-detail" id="rcDet-rt${i}" style="display:none"><td colspan="7" class="rc-detail-cell"><div class="rc-detail-inner" id="rcDetBody-rt${i}"></div></td></tr>`).join('')
+                : `<tr><td class="tbl-empty" colspan="7">За выбранный период возвратов нет</td></tr>`}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Фильтры</h3><a class="link" id="rtReset">Сбросить</a></div>
+          <div class="filters">
+            <label><div class="flabel">Поиск по чеку/продавцу/причине</div><input class="finput" id="rtQ" value="${esc(f.q)}" placeholder="Например: Обмен"></label>
+            <label><div class="flabel">Продавец</div>
+              <select class="fselect" id="rtSeller">
+                <option value="">Все продавцы</option>
+                ${sellers.map(s => `<option value="${esc(s)}" ${f.seller===s?'selected':''}>${esc(s)}</option>`).join('')}
+              </select>
+            </label>
+            <div style="display:flex;gap:10px">
+              <label style="flex:1"><div class="flabel">Сумма от</div><input class="finput" id="rtMin" type="number" value="${esc(f.min)}" placeholder="0"></label>
+              <label style="flex:1"><div class="flabel">Сумма до</div><input class="finput" id="rtMax" type="number" value="${esc(f.max)}" placeholder="0"></label>
+            </div>
+            <button class="btn btn-primary btn-block" id="rtApply">Применить фильтры</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    $('rtApply').addEventListener('click', () => {
+      rtFilters = { q: $('rtQ').value.trim(), seller: $('rtSeller').value, min: $('rtMin').value, max: $('rtMax').value };
+      renderReturns();
+    });
+    $('rtReset').addEventListener('click', () => { rtFilters = { seller:'', q:'', min:'', max:'' }; renderReturns(); });
+    $('rtQ').addEventListener('keydown', e => { if (e.key === 'Enter') $('rtApply').click(); });
+
+    box.querySelectorAll('.rc-row').forEach(tr => {
+      tr.addEventListener('click', () => toggleReceipt(tr));
+    });
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить возвраты: ' + (e.message || e));
   }
 }
 

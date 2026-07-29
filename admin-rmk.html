@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260729-204035">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260729-211434">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -67,7 +67,7 @@
         <button class="sb-item" data-view="stats"><span class="sb-ic">📈</span> Статистика</button>
         <button class="sb-item" data-view="monitoring"><span class="sb-ic">🖥</span> Мониторинг магазинов</button>
         <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
-        <button class="sb-item soon" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
+        <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
       </nav>
 
       <button class="sb-logout" id="btnLogout"><span class="sb-ic">⤶</span> Выйти</button>
@@ -176,6 +176,11 @@
           <div id="cashBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ПОСТУПЛЕНИЕ ТОВАРОВ ═══ -->
+        <section class="view" id="view-receiving">
+          <div id="recvBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ЗАГЛУШКИ ═══ -->
         <section class="view" id="view-stub">
           <div class="stub">
@@ -189,6 +194,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260729-204035"></script>
+  <script src="admin-rmk.js?v=20260729-211434"></script>
 </body>
 </html>

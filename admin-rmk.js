@@ -806,26 +806,84 @@ const STATUS_META = {
   written_off: { label: 'Списан',    cls: 'r' },
 };
 let scLast = '';
+const psState = { q: '', wh: '', page: 0, per: 30, whList: null };
+
+// Селект складов (общий для поиска/истории). sel — текущее значение.
+function whOptions(list, sel) {
+  return `<option value="" ${!sel?'selected':''}>Все склады</option>` +
+    (list || []).map(w => `<option value="${esc(w.id)}" ${sel===w.id?'selected':''}>${esc(w.name)}</option>`).join('');
+}
+
 async function renderSearch(force) {
   const box = $('scBody');
-  // статичный каркас — рисуем один раз
-  if (!box.dataset.ready) {
+  box.innerHTML = `<div class="loading">⏳ Загружаю товары…</div>`;
+  try {
+    const off = psState.page * psState.per;
+    const qs = `?action=product-search&limit=${psState.per}&offset=${off}`
+      + (psState.q ? `&q=${encodeURIComponent(psState.q)}` : '')
+      + (psState.wh ? `&wh=${encodeURIComponent(psState.wh)}` : '');
+    const d = await posApi(qs, { method: 'GET' });
+    if (d.warehouses) psState.whList = d.warehouses;
+    const rows = d.products || [];
+    const total = d.total || 0;
+    const totalPages = Math.max(1, Math.ceil(total / psState.per));
+    const pageNow = psState.page + 1;
+
     box.innerHTML = `
       <div class="card card-pad">
         <div class="sc-search">
-          <input class="finput" id="scInput" inputmode="numeric" autocomplete="off"
-                 placeholder="Отсканируйте или введите штрихкод…">
-          <button class="btn btn-primary" id="scGo">Найти</button>
+          <input class="finput" id="scScan" inputmode="numeric" autocomplete="off"
+                 placeholder="Быстрый скан штрихкода — карточка товара…">
+          <button class="btn btn-ghost" id="scScanGo">Скан</button>
         </div>
-        <div class="muted" style="font-size:12.5px;margin-top:8px">Сканер обычно сам добавляет Enter — поиск запустится автоматически.</div>
+        <div id="scResult" style="margin-top:12px"></div>
       </div>
-      <div id="scResult" style="margin-top:16px"></div>`;
-    box.dataset.ready = '1';
-    const go = () => scanOne($('scInput').value.trim());
-    $('scGo').addEventListener('click', go);
-    $('scInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+
+      <div class="card card-pad" style="margin-top:16px">
+        <div class="card-h-row"><h3>Каталог товаров${psState.q||psState.wh?` — найдено ${fmtInt(total)}`:` — ${fmtInt(total)}`}</h3></div>
+        <div class="filters filters-row">
+          <input class="finput" id="psQ" value="${esc(psState.q)}" placeholder="Поиск по названию товара…" style="flex:2;min-width:220px">
+          <select class="fselect" id="psWh" style="flex:1;min-width:170px">${whOptions(psState.whList, psState.wh)}</select>
+          <button class="btn btn-primary" id="psSearch">Найти</button>
+          <button class="btn" id="psReset">Сброс</button>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th style="width:30px">#</th><th>Товар</th><th class="c">Цена</th><th class="c">Остаток</th><th>По складам</th></tr></thead>
+            <tbody>${rows.length ? rows.map((p,i)=>{
+              const priceTxt = p.priceMin>0 ? (p.priceMax>p.priceMin ? money(p.priceMin)+'–'+money(p.priceMax) : money(p.priceMin)) : '—';
+              const whTxt = (p.byWarehouse||[]).length ? (p.byWarehouse||[]).map(w=>`${esc(w.name)}: <b>${fmtInt(w.stock)}</b>`).join(' · ') : '<span class="muted">нет остатка</span>';
+              return `<tr>
+                <td class="c muted">${off+i+1}</td>
+                <td><div class="strong">${esc(p.name)}</div>${p.category?`<div class="muted" style="font-size:12px">${esc(p.category)}</div>`:''}</td>
+                <td class="c tnum">${priceTxt}</td>
+                <td class="c tnum"><span class="badge ${p.totalStock>0?'g':'gray'}">${fmtInt(p.totalStock)} шт</span></td>
+                <td style="font-size:12.5px">${whTxt}</td>
+              </tr>`;
+            }).join('') : `<tr><td class="tbl-empty" colspan="5">Товары не найдены</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button class="btn" id="psPrev" ${psState.page<=0?'disabled':''}>← Назад</button>
+          <span class="pager-info">Стр. ${pageNow} из ${totalPages}</span>
+          <button class="btn" id="psNext" ${pageNow>=totalPages?'disabled':''}>Вперёд →</button>
+        </div>
+      </div>`;
+
+    const doSearch = () => { psState.q = $('psQ').value.trim(); psState.wh = $('psWh').value; psState.page = 0; renderSearch(); };
+    $('psSearch').addEventListener('click', doSearch);
+    $('psQ').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+    $('psWh').addEventListener('change', doSearch);
+    $('psReset').addEventListener('click', () => { psState.q=''; psState.wh=''; psState.page=0; renderSearch(); });
+    $('psPrev').addEventListener('click', () => { if (psState.page>0){ psState.page--; renderSearch(); } });
+    $('psNext').addEventListener('click', () => { if (pageNow<totalPages){ psState.page++; renderSearch(); } });
+    const scanGo = () => scanOne($('scScan').value.trim());
+    $('scScanGo').addEventListener('click', scanGo);
+    $('scScan').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); scanGo(); } });
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить товары: ' + (e.message || e));
   }
-  setTimeout(() => { const el = $('scInput'); if (el) el.focus(); }, 60);
 }
 
 async function scanOne(code) {
@@ -884,29 +942,111 @@ const EV_META = {
   written_off: { ic: '🗑️', cls: 'r' },
 };
 let htLast = '';
+const hnState = { q: '', wh: '', whList: null };
+const UNIT_STATUS_META = {
+  in_stock: { label: 'В наличии', cls: 'g' },
+  sold: { label: 'Продан', cls: 'r' },
+  reserved: { label: 'Резерв', cls: 'amber' },
+  written_off: { label: 'Списан', cls: 'r' },
+};
+const EV_LABEL_CLS = { 'Поступление':'g','Напечатан':'gray','Перемещён':'blue','Продан':'g','Возврат':'amber','Списан':'r' };
+
 async function renderHistory(force) {
   const box = $('htBody');
-  if (!box.dataset.ready) {
-    box.innerHTML = `
-      <div class="card card-pad">
-        <div class="sc-search">
-          <input class="finput" id="htInput" inputmode="numeric" autocomplete="off"
-                 placeholder="Отсканируйте или введите штрихкод экземпляра…">
-          <button class="btn btn-primary" id="htGo">Показать</button>
-        </div>
-        <div class="muted" style="font-size:12.5px;margin-top:8px">История доступна только для экземпляров с уникальным штрихкодом.</div>
-      </div>
-      <div id="htResult" style="margin-top:16px"></div>`;
-    box.dataset.ready = '1';
-    const go = () => histOne($('htInput').value.trim());
-    $('htGo').addEventListener('click', go);
-    $('htInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  box.innerHTML = `<div class="loading">⏳ Загрузка…</div>`;
+  // первая отрисовка — тянем только список складов (если ещё нет)
+  if (!hnState.whList) {
+    try { const w = await posApi(`?action=history-name&q=`, { method:'GET' }); if (w.warehouses) hnState.whList = w.warehouses; } catch(_){}
   }
-  setTimeout(() => { const el = $('htInput'); if (el) el.focus(); }, 60);
+  box.innerHTML = `
+    <div class="card card-pad">
+      <div class="sc-search">
+        <input class="finput" id="hnQ" value="${esc(hnState.q)}" autocomplete="off"
+               placeholder="Поиск по названию товара…" style="flex:2">
+        <select class="fselect" id="hnWh" style="flex:1;min-width:170px">${whOptions(hnState.whList, hnState.wh)}</select>
+        <button class="btn btn-primary" id="hnGo">Найти</button>
+      </div>
+      <div class="sc-search" style="margin-top:10px">
+        <input class="finput" id="htInput" inputmode="numeric" autocomplete="off"
+               placeholder="…или отсканируйте штрихкод экземпляра — полный таймлайн…" style="flex:2">
+        <button class="btn btn-ghost" id="htGo">Таймлайн</button>
+      </div>
+    </div>
+    <div id="htResult" style="margin-top:16px"></div>`;
+  const goName = () => { hnState.q = $('hnQ').value.trim(); hnState.wh = $('hnWh').value; histByName(); };
+  $('hnGo').addEventListener('click', goName);
+  $('hnQ').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); goName(); } });
+  $('hnWh').addEventListener('change', goName);
+  const goScan = () => histOne($('htInput').value.trim());
+  $('htGo').addEventListener('click', goScan);
+  $('htInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); goScan(); } });
+  setTimeout(() => { const el = $('hnQ'); if (el) el.focus(); }, 60);
+  // если был активный поиск — повторим
+  if (hnState.q) histByName();
 }
 
-async function histOne(code) {
+// Поиск истории по названию — список экземпляров (фильтр по складу).
+async function histByName() {
   const rbox = $('htResult');
+  const q = hnState.q;
+  if (!q) { rbox.innerHTML = ''; return; }
+  rbox.innerHTML = `<div class="loading">⏳ Ищу «${esc(q)}»…</div>`;
+  try {
+    const qs = `?action=history-name&q=${encodeURIComponent(q)}&limit=300`
+      + (hnState.wh ? `&wh=${encodeURIComponent(hnState.wh)}` : '');
+    const d = await posApi(qs, { method: 'GET' });
+    const items = d.items || [];
+    if (!d.found || !items.length) {
+      rbox.innerHTML = `<div class="card card-pad sc-empty">
+        <div class="sc-empty-ic">❗</div>
+        <div><div class="strong">Ничего не найдено</div>
+        <div class="muted">По запросу <b>${esc(q)}</b>${hnState.wh?' на выбранном складе':''} экземпляров нет.</div></div></div>`;
+      return;
+    }
+    const prodNames = (d.products || []).slice(0, 6).join(', ') + ((d.products||[]).length>6?'…':'');
+    rbox.innerHTML = `
+      <div class="card card-pad">
+        <div class="card-h-row">
+          <h3>Экземпляры — ${fmtInt(d.count||items.length)}${d.limited?' (показаны первые 300)':''}</h3>
+        </div>
+        <div class="muted" style="font-size:12.5px;margin-bottom:10px">Товары: ${esc(prodNames)}. Клик по строке — полный таймлайн.</div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Штрихкод</th><th>Товар</th><th class="c">Размер</th><th class="c">Статус</th><th>Склад</th><th>Посл. событие</th></tr></thead>
+            <tbody>${items.map(it=>{
+              const st = UNIT_STATUS_META[it.status] || { label: it.status||'—', cls:'gray' };
+              const evCls = EV_LABEL_CLS[it.lastEvent] || 'gray';
+              const place = it.lastEvent==='Продан' && it.soldShop ? ` · ${esc(it.soldShop)}` : '';
+              return `<tr class="ht-row" data-bc="${esc(it.barcode)}" style="cursor:pointer">
+                <td class="strong rc-bc">${esc(it.barcode)}</td>
+                <td>${esc(it.name)}</td>
+                <td class="c">${esc(it.sizeLabel || '—')}</td>
+                <td class="c"><span class="badge ${st.cls}">${esc(st.label)}</span></td>
+                <td>${esc(it.warehouse || '—')}</td>
+                <td style="font-size:12.5px"><span class="badge ${evCls}">${esc(it.lastEvent)}</span> <span class="muted">${it.lastAt?dushTime(it.lastAt,true):''}${place}</span></td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+      <div id="htTimeline" style="margin-top:16px"></div>`;
+    // клик по строке → таймлайн экземпляра
+    rbox.querySelectorAll('.ht-row').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const bc = tr.getAttribute('data-bc');
+        histOne(bc, 'htTimeline');
+        const tl = $('htTimeline'); if (tl) tl.scrollIntoView({ behavior:'smooth', block:'start' });
+      });
+    });
+    bumpSync();
+  } catch (e) {
+    rbox.innerHTML = errBar('Ошибка поиска: ' + (e.message || e));
+  }
+}
+
+async function histOne(code, targetId) {
+  const rbox = $(targetId || 'htResult');
+  if (!rbox) return;
   if (!code) { rbox.innerHTML = ''; return; }
   htLast = code;
   rbox.innerHTML = `<div class="loading">⏳ Загружаю историю «${esc(code)}»…</div>`;

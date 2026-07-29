@@ -53,6 +53,16 @@ let changed = 0;
   if (src !== before) { writeFileSync(p, src); changed++; }
 }
 
+// 4) admin-rmk.html — ?v= у admin-rmk.css и admin-rmk.js (опционально: файл может отсутствовать)
+try {
+  const p = join(DIR, 'admin-rmk.html');
+  let src = readFileSync(p, 'utf8');
+  const before = src;
+  src = src.replace(/(admin-rmk\.css\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  src = src.replace(/(admin-rmk\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  if (src !== before) { writeFileSync(p, src); changed++; }
+} catch (_) { /* admin-rmk.html может не существовать — пропускаем */ }
+
 console.error(`✓ Версия проставлена: ${VERSION} (файлов изменено: ${changed})`);
 // В stdout — только версия, чтобы деплой-скрипт мог её захватить.
 console.log(VERSION);

@@ -1596,6 +1596,9 @@ function restoreSession() {
 // Для админов (allowedTabs === '*') показываем всё и не меняем активную вкладку.
 function applyTabAccess() {
     const tabs = document.querySelectorAll('.nav-tab');
+    // Ссылка на админку РМК — только для полноправных админов.
+    const admLink = document.getElementById('adminRmkLink');
+    if (admLink) admLink.style.display = (currentAllowedTabs === '*') ? '' : 'none';
     if (currentAllowedTabs === '*') {
         tabs.forEach(tab => { tab.style.display = ''; });
         return;
@@ -1615,6 +1618,8 @@ function applyTabAccess() {
 // Вернуть все кнопки навигации в видимое состояние (после logout).
 function resetTabAccess() {
     document.querySelectorAll('.nav-tab').forEach(tab => { tab.style.display = ''; });
+    const admLink = document.getElementById('adminRmkLink');
+    if (admLink) admLink.style.display = 'none';
 }
 
 function switchTab(tabName) {

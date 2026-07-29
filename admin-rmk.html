@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>РМК · Администратор</title>
+  <link rel="icon" href="favicon-32.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260729-185147">
+  <!-- Supabase JS (тот же CDN, что и в дашборде) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Chart.js для графика продаж по часам и донатов -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ══════════════ ЭКРАН ЛОГИНА ══════════════ -->
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">
+        <span class="login-logo-badge">РМК</span>
+      </div>
+      <h1 class="login-title">Администратор РМК</h1>
+      <p class="login-sub">Панель управления рабочими местами кассиров</p>
+      <form id="loginForm" autocomplete="off">
+        <label class="fld">
+          <span>Логин</span>
+          <input type="text" id="loginUser" required autocomplete="username">
+        </label>
+        <label class="fld">
+          <span>Пароль</span>
+          <input type="password" id="loginPass" required autocomplete="current-password">
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Войти</button>
+        <div id="loginError" class="login-error" style="display:none;"></div>
+      </form>
+      <a class="login-back" href="index.html">← Вернуться в дашборд</a>
+    </div>
+  </div>
+
+  <!-- ══════════════ ПРИЛОЖЕНИЕ ══════════════ -->
+  <div id="app" class="app" style="display:none;">
+
+    <!-- ─────── SIDEBAR ─────── -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-brand">
+        <span class="sb-brand-badge">РМК</span>
+        <div class="sb-brand-txt">
+          <div class="sb-brand-title">РМК</div>
+          <div class="sb-brand-sub">Администратор</div>
+        </div>
+      </div>
+
+      <nav class="sb-nav">
+        <button class="sb-item active" data-view="overview"><span class="sb-ic">▦</span> Обзор</button>
+        <button class="sb-item" data-view="shift"><span class="sb-ic">▤</span> Смена</button>
+        <button class="sb-item" data-view="receipts"><span class="sb-ic">🧾</span> Чеки продаж</button>
+        <button class="sb-item soon" data-view="returns"><span class="sb-ic">↩</span> Возвраты</button>
+        <button class="sb-item soon" data-view="cashbox"><span class="sb-ic">🗄</span> Денежный ящик</button>
+        <button class="sb-item soon" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
+        <button class="sb-item soon" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
+        <button class="sb-item soon" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
+        <button class="sb-item soon" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
+        <button class="sb-item soon" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
+        <button class="sb-item soon" data-view="audit"><span class="sb-ic">📋</span> Журнал действий</button>
+        <button class="sb-item soon" data-view="settings"><span class="sb-ic">⚙</span> Настройки РМК</button>
+        <button class="sb-item soon" data-view="stats"><span class="sb-ic">📈</span> Статистика</button>
+        <button class="sb-item soon" data-view="monitoring"><span class="sb-ic">🖥</span> Мониторинг магазинов</button>
+        <button class="sb-item soon" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
+        <button class="sb-item soon" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
+      </nav>
+
+      <button class="sb-logout" id="btnLogout"><span class="sb-ic">⤶</span> Выйти</button>
+    </aside>
+
+    <!-- ─────── MAIN ─────── -->
+    <main class="main">
+
+      <!-- Шапка -->
+      <header class="topbar">
+        <div class="topbar-title">
+          <h1 id="viewTitle">Обзор</h1>
+          <p id="viewSub">Главная панель управления РМК</p>
+        </div>
+        <div class="topbar-tools">
+          <div class="tool date-tool">
+            <span class="tool-ic">🗓</span>
+            <input type="date" id="fltFrom" class="tool-date">
+            <span class="date-sep">—</span>
+            <input type="date" id="fltTo" class="tool-date">
+          </div>
+          <div class="tool kassa-tool">
+            <span class="tool-ic">🏪</span>
+            <select id="fltKassa" class="tool-select"><option value="">Все магазины</option></select>
+          </div>
+          <button class="tool sync-tool" id="btnSync" title="Обновить">
+            <span class="tool-ic">⟳</span>
+            <div class="sync-txt">
+              <span class="sync-label">Последняя синхронизация</span>
+              <span class="sync-time" id="syncTime">—</span>
+            </div>
+          </button>
+        </div>
+      </header>
+
+      <!-- Контент разделов -->
+      <div class="views">
+
+        <!-- ═══ ОБЗОР ═══ -->
+        <section class="view active" id="view-overview">
+          <div id="ovBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
+        <!-- ═══ СМЕНА ═══ -->
+        <section class="view" id="view-shift">
+          <div id="shBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
+        <!-- ═══ ЧЕКИ ПРОДАЖ ═══ -->
+        <section class="view" id="view-receipts">
+          <div id="rcBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
+        <!-- ═══ ЗАГЛУШКИ ═══ -->
+        <section class="view" id="view-stub">
+          <div class="stub">
+            <div class="stub-ic">🛠</div>
+            <h2 id="stubTitle">Раздел в разработке</h2>
+            <p>Этот раздел появится на следующем этапе. Сейчас готовы: Обзор, Смена и Чеки продаж.</p>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="admin-rmk.js?v=20260729-185147"></script>
+</body>
+</html>

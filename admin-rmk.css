@@ -237,6 +237,27 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .legend-item{display:flex;align-items:center;gap:8px;font-size:13px}
 .legend-item .lg-dot{width:10px;height:10px;border-radius:3px}
 
+/* ═══════════ РАСКРЫТИЕ СОСТАВА ЧЕКА ═══════════ */
+.tbl-receipts .rc-row{cursor:pointer}
+.tbl-receipts .rc-row:hover{background:var(--g-soft)}
+.tbl-receipts .rc-row.open{background:var(--g-soft)}
+.tbl-receipts .rc-row.open td{border-bottom-color:transparent}
+.rc-caret .caret{display:inline-block;font-size:16px;font-weight:700;color:var(--tx3);transition:transform .15s,color .15s}
+.tbl-receipts .rc-row.open .caret{color:var(--g2)}
+.rc-detail-cell{padding:0!important;background:#fafcfb}
+.rc-detail-inner{padding:6px 14px 16px 46px}
+.rc-det-head{font-size:13px;font-weight:700;color:var(--g3);margin:10px 0 8px}
+.rc-det-loading,.rc-det-empty,.rc-det-err{padding:16px;color:var(--tx2);font-size:13px}
+.rc-det-err{color:var(--red)}
+table.tbl.rc-items{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table.tbl.rc-items th{background:#f4f7f6;font-size:11px;padding:8px 10px}
+table.tbl.rc-items td{padding:9px 10px;font-size:13px}
+table.tbl.rc-items tbody tr:hover{background:#fafcfb}
+.rc-size{display:inline-block;font-size:11px;font-weight:600;color:var(--g3);background:var(--g-soft);padding:1px 7px;border-radius:6px;margin-left:6px}
+.rc-bc{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px}
+.rc-disc{color:var(--amber);font-weight:600}
+table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
+
 .stub{max-width:520px;margin:60px auto;text-align:center;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:50px 40px;box-shadow:var(--shadow)}
 .stub-ic{font-size:44px;margin-bottom:14px}
 .stub h2{font-size:20px;font-weight:800;margin-bottom:8px}

@@ -475,18 +475,20 @@ async function renderReceipts(force) {
         <div class="card card-pad">
           <div class="card-h-row"><h3>Чеки за ${state.from === state.to ? state.from : state.from+' — '+state.to}</h3></div>
           <div class="tbl-wrap">
-            <table class="tbl">
-              <thead><tr><th>№ чека</th><th>Время</th><th>Продавец</th><th>Магазин</th><th class="r">Сумма</th><th class="c">Статус</th></tr></thead>
-              <tbody>${rows.length ? rows.map(r => `
-                <tr>
+            <table class="tbl tbl-receipts">
+              <thead><tr><th style="width:34px"></th><th>№ чека</th><th>Время</th><th>Продавец</th><th>Магазин</th><th class="r">Сумма</th><th class="c">Статус</th></tr></thead>
+              <tbody>${rows.length ? rows.map((r, i) => `
+                <tr class="rc-row" data-ref="${esc(r.ref || '')}" data-num="${esc(r.number)}" data-idx="${i}">
+                  <td class="c rc-caret"><span class="caret">›</span></td>
                   <td class="strong">${esc(r.number)}</td>
                   <td class="muted">${dushTime(r.date,false)}</td>
                   <td>${esc(r.seller)}</td>
                   <td class="muted">${esc(r.shop)}</td>
                   <td class="r strong tnum">${fmtNum(r.total)}</td>
                   <td class="c"><span class="badge ok">Оплачен</span></td>
-                </tr>`).join('')
-                : `<tr><td class="tbl-empty" colspan="6">За выбранный период чеков нет</td></tr>`}
+                </tr>
+                <tr class="rc-detail" id="rcDet-${i}" style="display:none"><td colspan="7" class="rc-detail-cell"><div class="rc-detail-inner" id="rcDetBody-${i}"></div></td></tr>`).join('')
+                : `<tr><td class="tbl-empty" colspan="7">За выбранный период чеков нет</td></tr>`}
               </tbody>
             </table>
           </div>
@@ -519,10 +521,83 @@ async function renderReceipts(force) {
     });
     $('rcReset').addEventListener('click', () => { rcFilters = { seller:'', q:'', min:'', max:'' }; renderReceipts(); });
     $('rcQ').addEventListener('keydown', e => { if (e.key === 'Enter') $('rcApply').click(); });
+
+    // раскрытие состава чека по клику по строке
+    box.querySelectorAll('.rc-row').forEach(tr => {
+      tr.addEventListener('click', () => toggleReceipt(tr));
+    });
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить чеки: ' + (e.message || e));
   }
+}
+
+// кеш состава чеков по ref (чтобы не дёргать 1С при повторном раскрытии)
+const rcItemsCache = {};
+async function toggleReceipt(tr) {
+  const idx = tr.dataset.idx;
+  const ref = tr.dataset.ref;
+  const num = tr.dataset.num;
+  const detRow = $('rcDet-' + idx);
+  const body = $('rcDetBody-' + idx);
+  const caret = tr.querySelector('.caret');
+  if (!detRow || !body) return;
+
+  // тоггл: если открыт — закрываем
+  if (detRow.style.display !== 'none') {
+    detRow.style.display = 'none';
+    tr.classList.remove('open');
+    if (caret) caret.textContent = '›';
+    return;
+  }
+  detRow.style.display = '';
+  tr.classList.add('open');
+  if (caret) caret.textContent = '‹';
+
+  if (!ref) { body.innerHTML = `<div class="rc-det-empty">⚠ У чека нет идентификатора — состав недоступен</div>`; return; }
+
+  // из кеша
+  if (rcItemsCache[ref]) { body.innerHTML = renderReceiptItems(rcItemsCache[ref], num); return; }
+
+  body.innerHTML = `<div class="rc-det-loading">⏳ Загружаю состав чека…</div>`;
+  try {
+    const d = await posApi(`?action=receipt-items&ref=${encodeURIComponent(ref)}`, { method: 'GET' });
+    rcItemsCache[ref] = d;
+    // если за время загрузки строку не закрыли
+    if (detRow.style.display !== 'none') body.innerHTML = renderReceiptItems(d, num);
+  } catch (e) {
+    body.innerHTML = `<div class="rc-det-err">⚠ Не удалось загрузить состав: ${esc(e.message || e)}</div>`;
+  }
+}
+
+function renderReceiptItems(d, num) {
+  const items = (d && d.items) || [];
+  if (!items.length) return `<div class="rc-det-empty">В чеке нет позиций</div>`;
+  const rows = items.map((it, i) => {
+    const hasDisc = (it.discountSum && it.discountSum > 0) || (it.discountPct && it.discountPct > 0);
+    const discTxt = hasDisc
+      ? `<span class="rc-disc">−${fmtNum(it.discountSum || 0)}${it.discountPct ? ` (${it.discountPct}%)` : ''}</span>`
+      : '<span class="muted">—</span>';
+    return `<tr>
+      <td class="c muted">${i + 1}</td>
+      <td class="strong">${esc(it.name)}${it.sizeLabel ? ` <span class="rc-size">${esc(it.sizeLabel)}</span>` : ''}</td>
+      <td class="muted rc-bc">${it.barcode ? esc(it.barcode) : '—'}</td>
+      <td class="c tnum">${fmtInt(it.qty)} шт</td>
+      <td class="r tnum">${fmtNum(it.priceUnit)}</td>
+      <td class="r">${discTxt}</td>
+      <td class="r strong tnum">${fmtNum(it.sum)}</td>
+    </tr>`;
+  }).join('');
+  const total = (d.itemsTotal != null ? d.itemsTotal : d.docTotal) || 0;
+  return `
+    <div class="rc-det-head">🧾 Состав чека №${esc(num || d.number || '')} — ${fmtInt(items.length)} позиций</div>
+    <div class="tbl-wrap">
+      <table class="tbl rc-items">
+        <thead><tr><th style="width:30px">#</th><th>Товар</th><th>Штрихкод</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Скидка</th><th class="r">Сумма</th></tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr class="tbl-total"><td colspan="6" class="r">Итого</td><td class="r tnum">${fmtNum(total)} ${CUR}</td></tr></tfoot>
+      </table>
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════

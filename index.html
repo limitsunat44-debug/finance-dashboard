@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260728d-session">
+    <link rel="stylesheet" href="style.css?v=20260729b-mobilepos">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2179,6 +2179,133 @@
               </div>
             </div>
 
+            <!-- ============ МОБИЛЬНЫЙ UI КАССИРА (только POS.isMobile) ============ -->
+            <div id="posMobile" class="pmob" style="display:none;">
+
+              <!-- ЭКРАН 1 / 3: чек (дом) -->
+              <section class="pmob-screen" id="pmobScreenCart">
+                <div class="pmob-head">
+                  <div class="pmob-brand">Онлайн касса</div>
+                  <button type="button" class="pmob-shift-off" id="pmobCloseShift">⏻ Закрыть смену</button>
+                </div>
+                <div class="pmob-shift-status"><span class="pmob-dot"></span><span id="pmobShiftText">Смена открыта</span></div>
+
+                <div class="pmob-seller">
+                  <span class="pmob-seller-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="8" r="3.4"/><path d="M4.6 20c0-3.6 3.3-5.7 7.4-5.7s7.4 2.1 7.4 5.7"/></svg>
+                  </span>
+                  <span class="pmob-seller-txt">
+                    <span class="pmob-seller-cap">Продавец</span>
+                    <span class="pmob-seller-name" id="pmobSeller">—</span>
+                  </span>
+                </div>
+
+                <button type="button" class="pmob-scan-card" id="pmobScanCard">
+                  <span class="pmob-scan-ico" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7.5V5.6A1.6 1.6 0 0 1 4.6 4H7"/><path d="M17 4h2.4A1.6 1.6 0 0 1 21 5.6v1.9"/><path d="M21 16.5v1.9A1.6 1.6 0 0 1 19.4 20H17"/><path d="M7 20H4.6A1.6 1.6 0 0 1 3 18.4v-1.9"/><path d="M7 8.6v6.8M10.2 8.6v6.8M13.4 8.6v6.8M17 8.6v6.8"/></svg>
+                  </span>
+                  <span class="pmob-scan-title">Отсканировать товар</span>
+                  <span class="pmob-scan-sub">Наведите камеру на штрихкод</span>
+                </button>
+
+                <button type="button" class="pmob-receipt-bar" id="pmobReceiptBar">
+                  <span class="pmob-receipt-l">
+                    <span class="pmob-receipt-cap">Текущий чек</span>
+                    <span class="pmob-badge" id="pmobCartCount">0 товаров</span>
+                  </span>
+                  <span class="pmob-receipt-r">
+                    <b id="pmobCartSum">0,00 с.</b><span class="pmob-chev">›</span>
+                  </span>
+                </button>
+
+                <div class="pmob-lines" id="pmobLines"></div>
+                <p class="pmob-hint" id="pmobHint"></p>
+              </section>
+
+              <!-- ЭКРАН 4: оплата -->
+              <section class="pmob-screen" id="pmobScreenPay" style="display:none;">
+                <div class="pmob-sub-head">
+                  <button type="button" class="pmob-back" id="pmobPayBack" aria-label="Назад">←</button>
+                  <div class="pmob-sub-title">Оплата</div>
+                  <span class="pmob-head-gap"></span>
+                </div>
+                <div class="pmob-pay-sum">
+                  <div class="pmob-pay-cap">К оплате</div>
+                  <div class="pmob-pay-grand" id="pmobPayGrand">0 с.</div>
+                </div>
+                <div class="pmob-pay-list" id="pmobPayList"></div>
+                <p class="pmob-err" id="pmobPayError" style="display:none;"></p>
+              </section>
+
+              <!-- ЭКРАН: ещё -->
+              <section class="pmob-screen" id="pmobScreenMore" style="display:none;">
+                <div class="pmob-sub-head">
+                  <button type="button" class="pmob-back" id="pmobMoreBack" aria-label="Назад">←</button>
+                  <div class="pmob-sub-title">Ещё</div>
+                  <span class="pmob-head-gap"></span>
+                </div>
+                <div class="pmob-menu">
+                  <button type="button" class="pmob-menu-item" id="pmobMoreReturn"><span class="pmob-menu-ico">↩️</span><span class="pmob-menu-txt">Возврат товара</span><span class="pmob-chev">›</span></button>
+                  <button type="button" class="pmob-menu-item" id="pmobMoreDisc"><span class="pmob-menu-ico">％</span><span class="pmob-menu-txt">Скидка −5% на чек</span><span class="pmob-menu-state" id="pmobDiscState">выкл</span></button>
+                  <button type="button" class="pmob-menu-item" id="pmobMoreDesktop"><span class="pmob-menu-ico">🖥️</span><span class="pmob-menu-txt">Классический вид</span><span class="pmob-chev">›</span></button>
+                  <button type="button" class="pmob-menu-item pmob-menu-danger" id="pmobMoreCloseShift"><span class="pmob-menu-ico">⏻</span><span class="pmob-menu-txt">Закрыть смену</span><span class="pmob-chev">›</span></button>
+                </div>
+                <div class="pmob-more-meta" id="pmobMoreMeta"></div>
+              </section>
+
+              <!-- ЗАКРЕПЛЁННЫЙ ИТОГ + КНОПКА ОПЛАТЫ -->
+              <div class="pmob-foot" id="pmobFoot" style="display:none;">
+                <div class="pmob-foot-row"><span>Итого</span><b id="pmobTotal">0 с.</b></div>
+                <button type="button" class="pmob-pay-btn" id="pmobToPay">Перейти к оплате</button>
+              </div>
+
+              <!-- НИЖНЯЯ НАВИГАЦИЯ -->
+              <nav class="pmob-nav" id="pmobNav">
+                <button type="button" class="pmob-nav-btn active" data-pmob="cart">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3z"/><path d="M9 8h6M9 12h6"/></svg>
+                  <span>Чек</span>
+                </button>
+                <button type="button" class="pmob-nav-btn" data-pmob="pay">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5.5" width="19" height="13" rx="2.5"/><path d="M2.5 10h19M6 14.5h4"/></svg>
+                  <span>Платёж</span>
+                </button>
+                <button type="button" class="pmob-nav-btn" data-pmob="return">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5 4 10l5 5"/><path d="M4 10h9a6 6 0 0 1 0 12h-2"/></svg>
+                  <span>Возврат</span>
+                </button>
+                <button type="button" class="pmob-nav-btn" data-pmob="more">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" stroke="none"><circle cx="5.5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="18.5" cy="12" r="1.9"/></svg>
+                  <span>Ещё</span>
+                </button>
+              </nav>
+
+              <!-- ЭКРАН 2: сканирование (тёмный, поверх остальных) -->
+              <section class="pmob-cam" id="pmobScreenScan" style="display:none;">
+                <div class="pmob-cam-head">
+                  <button type="button" class="pmob-cam-btn" id="pmobScanBack" aria-label="Назад">←</button>
+                  <div class="pmob-cam-title">Сканирование</div>
+                  <button type="button" class="pmob-cam-btn" id="pmobTorch" aria-label="Вспышка">⚡</button>
+                </div>
+                <div class="pmob-cam-stage">
+                  <div id="pmobReader" class="pmob-reader"></div>
+                  <div class="pmob-cam-frame" aria-hidden="true"><i class="c1"></i><i class="c2"></i><i class="c3"></i><i class="c4"></i></div>
+                </div>
+                <p class="pmob-cam-cap" id="pmobCamCap">Наведите камеру на штрихкод товара</p>
+                <div class="pmob-cam-foot">
+                  <button type="button" class="pmob-cam-cancel" id="pmobScanCancel">Отмена</button>
+                  <button type="button" class="pmob-cam-flip" id="pmobCamFlip" aria-label="Сменить камеру">
+                    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-13.7-5.1L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 13.7 5.1L20 16"/><path d="M20 20v-4h-4"/></svg>
+                  </button>
+                </div>
+              </section>
+
+              <!-- ТОСТ «товар добавлен в чек» -->
+              <div class="pmob-toast" id="pmobToast">
+                <span class="pmob-toast-ico">✓</span>
+                <span class="pmob-toast-txt"><b id="pmobToastTitle">Товар добавлен в чек</b><i id="pmobToastSub"></i></span>
+              </div>
+            </div>
+
             <!-- МОДАЛЬ: оплата -->
             <div id="posPayModal" class="pos-modal" style="display:none;">
               <div class="pos-modal-box">
@@ -2620,7 +2747,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260729a-labelprice"></script>
+    <script src="app.js?v=20260729b-mobilepos"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

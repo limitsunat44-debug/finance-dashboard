@@ -1631,6 +1631,9 @@ function switchTab(tabName) {
     document.getElementById(tabName + 'Section').classList.add('active');
     document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
 
+    // Мобильный оверлей кассы живёт только на вкладке «Касса».
+    if (typeof pmobApply === 'function') pmobApply();
+
     if (tabName === 'dashboard') {
         updateDashboard();
     } else if (tabName === 'suppliers') {
@@ -9808,6 +9811,13 @@ const POS = {
     keySeq: 1,
     docTypeSearchT: null,
     busy: false,
+    // ── мобильный UI кассира (#posMobile) ──
+    mobScreen: 'cart',      // 'cart' | 'pay' | 'more'
+    mobDesktopView: false,  // кассир вручную переключился на классический вид
+    mobFacing: 'environment',
+    mobTorch: false,
+    mobScanBusy: false,
+    mobToastTimer: null,
 };
 
 // Целочисленные суммы (сомоны без копеек) — форматирование
@@ -9835,6 +9845,8 @@ function posShowStep(n) {
         const s = document.getElementById('posStep' + i);
         if (s) s.style.display = (i === n) ? '' : 'none';
     });
+    // На телефоне область продаж рисует мобильный оверлей (#posMobile) вместо #posStep3.
+    if (typeof pmobApply === 'function') pmobApply();
 }
 
 async function posApi(path, opts) {
@@ -10206,6 +10218,7 @@ function posEnterSalesArea() {
         setTimeout(() => { const inp = document.getElementById('posScanInput'); if (inp) inp.focus(); }, 100);
     }
     posSetupHardwareScanner();
+    if (typeof pmobApply === 'function') pmobApply();   // мобильный оверлей: свежие данные смены
 }
 
 // Desktop: аппаратный сканер работает как клавиатура — ловим быстрый ввод + Enter
@@ -10282,6 +10295,7 @@ async function posHandleScannedCode(code) {
         const it = r.data.item;
         if (!it || !it.found) {
             if (hint) hint.innerHTML = `❌ Штрихкод <b>${posEsc(code)}</b> не найден в базе.`;
+            if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Штрихкод не найден', code, true);
             return;
         }
         const err = posAddToCart(it);
@@ -10292,11 +10306,18 @@ async function posHandleScannedCode(code) {
                 hint.innerHTML = `✅ Добавлено: <b>${posEsc(it.name)}</b>${it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : ''}${last4 ? ' · №' + posEsc(last4) : ''}`;
             }
         }
+        // Мобильный UI: успешный скан → камера закрывается + зелёный попап «Товар добавлен в чек».
+        if (POS.isMobile) {
+            if (err) { if (typeof pmobToast === 'function') pmobToast('Нельзя добавить', String(err).replace(/<[^>]*>/g, '').trim(), true); }
+            else if (typeof pmobScanSuccess === 'function') pmobScanSuccess();
+        }
     } catch (e) {
         if (posIsNetworkError(e)) {
             if (hint) hint.innerHTML = `📶 Нет связи — не могу проверить товар <b>${posEsc(code)}</b>. Подождите пару секунд и отсканируйте снова.`;
+            if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Нет связи', 'Подождите пару секунд и отсканируйте снова', true);
         } else {
             if (hint) hint.innerHTML = `⚠️ Ошибка поиска: ${posEsc(e.message)}`;
+            if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Ошибка поиска', e.message || '', true);
         }
     }
 }
@@ -10422,6 +10443,7 @@ function posRenderCart() {
     if (!POS.cart.length) {
         box.innerHTML = '<div class="pos-cart-empty">Корзина пуста. Отсканируйте товар.</div>';
         posToggleSaleBlocks(false);
+        if (typeof pmobRender === 'function') pmobRender();
         return;
     }
     box.innerHTML = '';
@@ -10485,6 +10507,7 @@ function posRenderCart() {
     });
     posToggleSaleBlocks(true);
     posRenderTotals();
+    if (typeof pmobRender === 'function') pmobRender();
 }
 
 function posRemoveLine(key) {
@@ -10883,6 +10906,7 @@ function posResetSale() {
     const cc = document.getElementById('posClientChosen'); if (cc) cc.style.display = 'none';
     const dr = document.getElementById('posDoctorResults'); if (dr) dr.innerHTML = '';
     posRenderCart();
+    if (typeof pmobAfterSale === 'function') pmobAfterSale();
 }
 
 // Mobile: камера через html5-qrcode
@@ -11157,6 +11181,391 @@ async function posReturnConfirm() {
     }
 }
 
+// ============================================================
+//  МОБИЛЬНЫЙ UI КАССИРА (#posMobile) — только новая презентация.
+//  Бизнес-логика переиспользуется целиком: POS.cart, posHandleScannedCode,
+//  posAddToCart, posTotals, posOpenPayment, posSetPayMode, posShowReceipt,
+//  posConfirmSale, posOpenReturn, posCloseShift, posStopCamera.
+//  ПК-версия РМК (#posStep3 + модали) не меняется.
+// ============================================================
+const PMOB_CUR = 'с.';
+
+function pmobEl(id) { return document.getElementById(id); }
+function pmobMoney(n) { return posMoney(n) + ' ' + PMOB_CUR; }
+
+function pmobPlural(n, one, few, many) {
+    const t = Math.abs(Math.round(Number(n) || 0)) % 100;
+    const d = t % 10;
+    if (t > 10 && t < 20) return many;
+    if (d > 1 && d < 5) return few;
+    if (d === 1) return one;
+    return many;
+}
+
+function pmobCartQty() {
+    return POS.cart.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+}
+
+// Мобильный интерфейс активен: телефон + открыта вкладка «Касса» + есть смена.
+function pmobActive() {
+    if (!POS.isMobile || POS.mobDesktopView) return false;
+    const sec = document.getElementById('posSection');
+    if (!sec || !sec.classList.contains('active')) return false;
+    return !!POS.shift;
+}
+
+// Показать/скрыть оверлей. Вызывается из posShowStep / posEnterSalesArea / switchTab.
+function pmobApply() {
+    const ov = pmobEl('posMobile');
+    if (!ov) return;
+    const on = pmobActive();
+    const step3 = pmobEl('posStep3');
+    ov.style.display = on ? '' : 'none';
+    document.body.classList.toggle('pmob-on', on);
+    if (on) {
+        if (step3) step3.style.display = 'none';
+        if (!POS.mobScreen) POS.mobScreen = 'cart';
+        pmobShow(POS.mobScreen);
+    } else {
+        const scan = pmobEl('pmobScreenScan');
+        if (scan) scan.style.display = 'none';
+        if (POS.isMobile && POS.shift && POS.mobDesktopView && step3) step3.style.display = '';
+    }
+    pmobRestoreBtn(!!(POS.isMobile && POS.shift && POS.mobDesktopView));
+}
+
+// Плавающая кнопка «вернуться в мобильную кассу» из классического вида.
+function pmobRestoreBtn(show) {
+    let b = pmobEl('pmobRestore');
+    if (!show) { if (b) b.remove(); return; }
+    if (b) return;
+    b = document.createElement('button');
+    b.id = 'pmobRestore';
+    b.type = 'button';
+    b.className = 'pmob-restore';
+    b.textContent = '📱 Мобильная касса';
+    b.addEventListener('click', () => { POS.mobDesktopView = false; pmobApply(); });
+    document.body.appendChild(b);
+}
+
+function pmobShow(screen) {
+    POS.mobScreen = screen;
+    const map = { cart: 'pmobScreenCart', pay: 'pmobScreenPay', more: 'pmobScreenMore' };
+    Object.keys(map).forEach(k => {
+        const el = pmobEl(map[k]);
+        if (el) el.style.display = (k === screen) ? '' : 'none';
+    });
+    const nav = pmobEl('pmobNav');
+    if (nav) nav.querySelectorAll('.pmob-nav-btn').forEach(b => b.classList.toggle('active', b.dataset.pmob === screen));
+    pmobRender();
+}
+
+function pmobUpdateFoot() {
+    const ov = pmobEl('posMobile');
+    const foot = pmobEl('pmobFoot');
+    const show = POS.mobScreen === 'cart' && POS.cart.length > 0;
+    if (foot) foot.style.display = show ? '' : 'none';
+    if (ov) ov.classList.toggle('has-foot', show);
+}
+
+function pmobRender() {
+    if (!POS.isMobile) return;
+    const ov = pmobEl('posMobile');
+    if (!ov || ov.style.display === 'none') return;
+    const sh = POS.shift || {};
+    const t = posTotals();
+    const qty = pmobCartQty();
+
+    const seller = pmobEl('pmobSeller');
+    if (seller) seller.textContent = sh.seller_name || '—';
+    const status = pmobEl('pmobShiftText');
+    if (status) status.textContent = 'Смена открыта' + (sh.kassa_name ? ' · ' + sh.kassa_name : '');
+    const cnt = pmobEl('pmobCartCount');
+    if (cnt) cnt.textContent = qty + ' ' + pmobPlural(qty, 'товар', 'товара', 'товаров');
+    const sum = pmobEl('pmobCartSum');
+    if (sum) sum.textContent = pmobMoney(t.grand);
+    const tot = pmobEl('pmobTotal');
+    if (tot) tot.textContent = pmobMoney(t.grand);
+    const grand = pmobEl('pmobPayGrand');
+    if (grand) grand.textContent = pmobMoney(t.grand);
+
+    const toPay = pmobEl('pmobToPay');
+    if (toPay) toPay.disabled = !POS.cart.length || posCartHasOutOfStock();
+
+    const discItem = pmobEl('pmobMoreDisc');
+    const discState = pmobEl('pmobDiscState');
+    const discOn = (POS.cartDiscountPct || 0) >= 5;
+    if (discState) discState.textContent = discOn ? 'вкл' : 'выкл';
+    if (discItem) discItem.classList.toggle('on', discOn);
+
+    const meta = pmobEl('pmobMoreMeta');
+    if (meta) {
+        const opened = sh.opened_at ? new Date(sh.opened_at).toLocaleString('ru-RU') : '—';
+        meta.innerHTML = `Касса: <b>${posEsc(sh.kassa_name || '—')}</b><br>` +
+            `Продавец: <b>${posEsc(sh.seller_name || '—')}</b><br>Смена открыта: ${posEsc(opened)}`;
+    }
+    pmobRenderLines();
+    pmobUpdateFoot();
+}
+
+function pmobRenderLines() {
+    const box = pmobEl('pmobLines');
+    if (!box) return;
+    if (!POS.cart.length) {
+        box.innerHTML = '<div class="pmob-empty">Чек пуст — отсканируйте товар.</div>';
+        return;
+    }
+    box.innerHTML = '';
+    POS.cart.forEach(l => {
+        const oos = posLineOutOfStock(l);
+        const scans = Array.isArray(l.scans) ? l.scans : [];
+        const code = scans.length ? String(scans[scans.length - 1]).slice(-6) : (l.barcode ? String(l.barcode).slice(-6) : '');
+        const parts = [];
+        if (l.sizeLabel) parts.push('Размер: ' + l.sizeLabel);
+        if (code) parts.push('№ ' + code);
+        if (l.discountPct) parts.push('−' + l.discountPct + '%');
+        const warn = l.warning || (oos ? 'Не числится на складе этой кассы' : '');
+        const row = document.createElement('div');
+        row.className = 'pmob-line' + (oos ? ' oos' : '');
+        row.innerHTML = `
+            <div class="pmob-line-info">
+              <div class="pmob-line-name">${posEsc(l.name)}</div>
+              ${parts.length ? `<div class="pmob-line-sub">${posEsc(parts.join(' | '))}</div>` : ''}
+              ${warn ? `<div class="pmob-line-warn">⚠️ ${posEsc(warn)}</div>` : ''}
+            </div>
+            <div class="pmob-line-right">
+              <div class="pmob-line-price">${pmobMoney(posLineNet(l))}</div>
+              <div class="pmob-line-qty">${l.qty} шт.</div>
+            </div>
+            <button type="button" class="pmob-line-rm" aria-label="Удалить позицию">×</button>`;
+        row.querySelector('.pmob-line-rm').addEventListener('click', () => posRemoveLine(l.key));
+        box.appendChild(row);
+    });
+}
+
+// ── Экран 2: сканирование ──
+async function pmobOpenScan() {
+    const scr = pmobEl('pmobScreenScan');
+    if (scr) scr.style.display = '';
+    const cap = pmobEl('pmobCamCap');
+    if (cap) cap.textContent = 'Наведите камеру на штрихкод товара';
+    await pmobStartCamera();
+}
+
+async function pmobStartCamera() {
+    const cap = pmobEl('pmobCamCap');
+    if (!window.Html5Qrcode) {
+        if (cap) cap.textContent = 'Библиотека сканера не загрузилась — обновите страницу.';
+        return;
+    }
+    if (POS.camOn) await posStopCamera();
+    try {
+        POS.html5qr = new Html5Qrcode('pmobReader', { verbose: false });
+        await POS.html5qr.start(
+            { facingMode: POS.mobFacing || 'environment' },
+            {
+                fps: 10,
+                qrbox: { width: 260, height: 160 },
+                formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+            },
+            (decodedText) => {
+                // один код за раз: пауза до окончания обработки, чтобы не задвоить экземпляр
+                if (POS.mobScanBusy) return;
+                POS.mobScanBusy = true;
+                try { if (POS.html5qr && POS.html5qr.pause) POS.html5qr.pause(true); } catch (_) {}
+                Promise.resolve(posHandleScannedCode(decodedText)).catch(() => {}).then(() => {
+                    POS.mobScanBusy = false;
+                    const s = pmobEl('pmobScreenScan');
+                    if (POS.camOn && POS.html5qr && s && s.style.display !== 'none') {
+                        try { POS.html5qr.resume(); } catch (_) {}
+                    }
+                });
+            },
+            () => {}
+        );
+        POS.camOn = true;
+    } catch (e) {
+        if (cap) cap.textContent = 'Не удалось запустить камеру: ' + ((e && e.message) || e);
+    }
+}
+
+async function pmobCloseScan() {
+    POS.mobScanBusy = false;
+    await posStopCamera();
+    pmobResetTorchBtn();
+    const scr = pmobEl('pmobScreenScan');
+    if (scr) scr.style.display = 'none';
+}
+
+function pmobResetTorchBtn() {
+    POS.mobTorch = false;
+    const t = pmobEl('pmobTorch');
+    if (t) t.classList.remove('on');
+}
+
+async function pmobFlipCamera() {
+    POS.mobFacing = (POS.mobFacing === 'user') ? 'environment' : 'user';
+    pmobResetTorchBtn();
+    await posStopCamera();
+    await pmobStartCamera();
+}
+
+async function pmobToggleTorch() {
+    if (!POS.camOn || !POS.html5qr) return;
+    const want = !POS.mobTorch;
+    try {
+        await POS.html5qr.applyVideoConstraints({ advanced: [{ torch: want }] });
+        POS.mobTorch = want;
+        const t = pmobEl('pmobTorch');
+        if (t) t.classList.toggle('on', want);
+    } catch (_) {
+        const cap = pmobEl('pmobCamCap');
+        if (cap) cap.textContent = 'Вспышка недоступна на этом устройстве.';
+    }
+}
+
+// Товар успешно добавлен: камера закрывается, показываем зелёный попап, уходим в чек.
+function pmobScanSuccess() {
+    if (!POS.isMobile) return;
+    const qty = pmobCartQty();
+    const t = posTotals();
+    POS.mobScanBusy = false;
+    posStopCamera();
+    pmobResetTorchBtn();
+    const scr = pmobEl('pmobScreenScan');
+    if (scr) scr.style.display = 'none';
+    pmobShow('cart');
+    pmobToast('Товар добавлен в чек',
+        qty + ' ' + pmobPlural(qty, 'товар', 'товара', 'товаров') + ' на сумму ' + pmobMoney(t.grand));
+}
+
+function pmobToast(title, sub, isError) {
+    const el = pmobEl('pmobToast');
+    if (!el) return;
+    const t = pmobEl('pmobToastTitle');
+    if (t) t.textContent = title;
+    const s = pmobEl('pmobToastSub');
+    if (s) s.textContent = sub || '';
+    const ico = el.querySelector('.pmob-toast-ico');
+    if (ico) ico.textContent = isError ? '!' : '✓';
+    el.classList.toggle('err', !!isError);
+    el.classList.add('show');
+    clearTimeout(POS.mobToastTimer);
+    POS.mobToastTimer = setTimeout(() => el.classList.remove('show'), isError ? 2600 : 1600);
+}
+
+// ── Экран 4: оплата (виды оплат — наши, из 1С) ──
+async function pmobOpenPay() {
+    const err = pmobEl('pmobPayError');
+    if (err) err.style.display = 'none';
+    if (!POS.cart.length) {
+        pmobShow('cart');
+        pmobToast('Чек пуст', 'Сначала отсканируйте товар', true);
+        return;
+    }
+    if (posCartHasOutOfStock()) {
+        pmobShow('cart');
+        pmobToast('Продажа невозможна', 'В чеке есть товар не со склада этой кассы', true);
+        return;
+    }
+    await posOpenPayment();                        // грузит POS.paytypes (общая логика)
+    const modal = pmobEl('posPayModal');
+    if (modal) modal.style.display = 'none';       // ПК-модаль на мобиле не показываем
+    pmobRenderPayList();
+    pmobShow('pay');
+}
+
+function pmobPayIcon(name) {
+    const n = String(name || '').toLowerCase();
+    if (/налич|cash/.test(n)) return '💵';
+    if (/qr|alif|алиф/.test(n)) return '📱';
+    return '💳';
+}
+
+function pmobRenderPayList() {
+    const box = pmobEl('pmobPayList');
+    if (!box) return;
+    const pt = POS.paytypes || {};
+    const cash = pt.cash || [];
+    const cards = pt.cards || [];
+    box.innerHTML = '';
+    if (!cash.length && !cards.length) {
+        box.innerHTML = '<div class="pmob-empty">Виды оплаты не загрузились. Проверьте связь и попробуйте снова.</div>';
+        return;
+    }
+    const add = (title, sub, mode, ref, extraClass) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pmob-pay-item' + (extraClass ? ' ' + extraClass : '');
+        b.innerHTML = `<span class="pmob-pay-ico">${pmobPayIcon(title)}</span>` +
+            `<span class="pmob-pay-name">${posEsc(title)}` +
+            (sub ? `<span class="pmob-pay-sub">${posEsc(sub)}</span>` : '') + `</span>` +
+            `<span class="pmob-chev">›</span>`;
+        b.addEventListener('click', () => pmobPickPay(mode, ref));
+        box.appendChild(b);
+    };
+    cash.forEach(c => add(c.name || 'Наличными', 'Оплата наличными', 'cash', c.ref, 'cash'));
+    cards.forEach(c => add(c.name, 'Электронная оплата', 'card', c.ref));
+}
+
+// Выбор способа → существующий flow: posSetPayMode → чек-сверка → posConfirmSale.
+function pmobPickPay(mode, ref) {
+    const err = pmobEl('pmobPayError');
+    if (err) err.style.display = 'none';
+    posSetPayMode(mode);
+    if (mode === 'card') {
+        posPopulateCardSelects();
+        const sel = pmobEl('posCardType');
+        if (sel && ref) sel.value = ref;
+    } else {
+        const cg = pmobEl('posCashGiven');
+        if (cg) cg.value = '';
+    }
+    posShowReceipt();
+    const perr = pmobEl('posPayError');
+    if (perr && perr.style.display !== 'none' && perr.textContent && err) {
+        err.style.display = 'block';
+        err.textContent = perr.textContent;
+    }
+}
+
+// Чек проведён (или ушёл в офлайн-очередь) — начинаем новый.
+function pmobAfterSale() {
+    if (!POS.isMobile) return;
+    const ov = pmobEl('posMobile');
+    if (!ov || ov.style.display === 'none') return;
+    pmobShow('cart');
+    pmobToast('Чек закрыт', 'Можно начинать новый чек');
+}
+
+function pmobBindEvents() {
+    const ov = pmobEl('posMobile');
+    if (!ov) return;
+    const on = (id, fn) => { const el = pmobEl(id); if (el) el.addEventListener('click', fn); };
+    on('pmobScanCard', pmobOpenScan);
+    on('pmobReceiptBar', () => pmobShow('cart'));
+    on('pmobScanBack', pmobCloseScan);
+    on('pmobScanCancel', pmobCloseScan);
+    on('pmobCamFlip', pmobFlipCamera);
+    on('pmobTorch', pmobToggleTorch);
+    on('pmobToPay', pmobOpenPay);
+    on('pmobPayBack', () => pmobShow('cart'));
+    on('pmobMoreBack', () => pmobShow('cart'));
+    on('pmobCloseShift', posCloseShift);
+    on('pmobMoreCloseShift', posCloseShift);
+    on('pmobMoreReturn', posOpenReturn);
+    on('pmobMoreDisc', () => { posApply5Cart(); pmobRender(); });
+    on('pmobMoreDesktop', () => { POS.mobDesktopView = true; pmobApply(); });
+    ov.querySelectorAll('.pmob-nav-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            const to = b.dataset.pmob;
+            if (to === 'return') { posOpenReturn(); return; }
+            if (to === 'pay') { pmobOpenPay(); return; }
+            pmobShow(to);
+        });
+    });
+}
+
 function posBindEvents() {
     const chk = document.getElementById('posConfirmKassa');
     if (chk) chk.addEventListener('change', posUpdateStep1Btn);
@@ -11272,6 +11681,9 @@ function posBindEvents() {
             btn.classList.add('active');
         });
     });
+
+    // ——— МОБИЛЬНЫЙ UI КАССИРА ———
+    pmobBindEvents();
 }
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', posBindEvents);

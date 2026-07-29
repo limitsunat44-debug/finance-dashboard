@@ -6412,7 +6412,8 @@ const barcodesState = {
     scanned: new Set(),      // отсканированные коды (ревизия)
     prodCategoryByC1Ref: {}, // c1_ref товара -> категория
     unitHistoryCache: {},    // unique_barcode -> { movements:[], sales:[] } (ленивая история)
-    unitRowData: {}          // unique_barcode -> поля stock_units для истории (приход/продажа)
+    unitRowData: {},         // unique_barcode -> поля stock_units для истории (приход/продажа)
+    oldPriceByChar: {}       // c1_char_ref -> price_old (старая/зачёркнутая цена из Supabase, задаётся вручную)
 };
 
 // Понятное имя склада по id
@@ -8512,7 +8513,10 @@ function bcEnrichUnit(u) {
     return enriched;
 }
 
-// Проставить цены на экземпляр из кэша (сначала по размеру, иначе — цена товара)
+// Проставить цены на экземпляр.
+// НОВАЯ (продажная) цена — текущая из 1С (последняя проведённая).
+// СТАРАЯ (зачёркнутая, «до скидки») — берётся из Supabase (product_variants.price_old, задаётся вручную).
+// Если price_old в Supabase не задана — падаем на старую цену из 1С (если была скидка).
 function bcApplyPriceToUnit(u) {
     const cache = barcodesState.priceCache || {};
     const pc = u.productC1Ref ? cache[u.productC1Ref] : null;
@@ -8521,7 +8525,14 @@ function bcApplyPriceToUnit(u) {
     if (!pair) pair = pc.productPrice || null;
     if (pair) {
         u.priceNew = (pair.new != null) ? pair.new : null;
-        u.priceOld = (pair.old != null) ? pair.old : null;
+        // Старая цена: приоритет — ручная price_old из Supabase по характеристике.
+        const manualOld = (u.charRef && barcodesState.oldPriceByChar)
+            ? barcodesState.oldPriceByChar[u.charRef] : null;
+        if (manualOld != null && Number(manualOld) > 0) {
+            u.priceOld = Number(manualOld);
+        } else {
+            u.priceOld = (pair.old != null) ? pair.old : null;
+        }
         u.currency = pc.currency || 'TJS';
     }
 }
@@ -8555,7 +8566,45 @@ async function bcFetchPrices(productC1Ref) {
 async function bcEnsurePricesForUnits(units) {
     const refs = [...new Set(units.map(u => u.productC1Ref).filter(Boolean))];
     for (const ref of refs) { await bcFetchPrices(ref); }
+    // Подгружаем ручные старые цены (price_old) из Supabase по характеристикам этих экземпляров
+    const chars = [...new Set(units.map(u => u.charRef).filter(Boolean))];
+    await bcLoadOldPricesForChars(chars);
     units.forEach(u => bcApplyPriceToUnit(u));
+}
+
+// Загрузить price_old из Supabase по списку c1_char_ref → barcodesState.oldPriceByChar.
+// price_old хранится на product_variants, а характеристика (c1_char_ref) — на stock_units,
+// поэтому связываем через stock_units → variant_id → product_variants.price_old.
+async function bcLoadOldPricesForChars(charRefs) {
+    if (!barcodesState.oldPriceByChar) barcodesState.oldPriceByChar = {};
+    const need = (charRefs || []).filter(ch => ch && !(ch in barcodesState.oldPriceByChar));
+    if (!need.length) return;
+    try {
+        // stock_units: c1_char_ref → variant_id (берём по одной строке на характеристику)
+        const { data: su } = await ortobotClient
+            .from('stock_units')
+            .select('c1_char_ref,variant_id')
+            .in('c1_char_ref', need)
+            .not('variant_id', 'is', null);
+        const varByChar = {}; // char -> variant_id
+        (su || []).forEach(r => { if (!varByChar[r.c1_char_ref]) varByChar[r.c1_char_ref] = r.variant_id; });
+        const variantIds = [...new Set(Object.values(varByChar))];
+        const oldByVariant = {};
+        if (variantIds.length) {
+            const { data: pv } = await ortobotClient
+                .from('product_variants')
+                .select('id,price_old')
+                .in('id', variantIds);
+            (pv || []).forEach(v => { oldByVariant[v.id] = (v.price_old != null ? Number(v.price_old) : null); });
+        }
+        // заполняем кэш (null тоже кэшируем, чтобы не запрашивать повторно)
+        need.forEach(ch => {
+            const vid = varByChar[ch];
+            barcodesState.oldPriceByChar[ch] = (vid != null && oldByVariant[vid] != null) ? oldByVariant[vid] : null;
+        });
+    } catch (e) {
+        console.warn('bcLoadOldPricesForChars:', e);
+    }
 }
 
 function bcShowPrintError(msg) {

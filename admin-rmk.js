@@ -138,8 +138,9 @@ const VIEW_META = {
   users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
   audit:     { title: 'Журнал действий', sub: 'Смены, продажи и возвраты в хронологии' },
   settings:  { title: 'Настройки РМК', sub: 'Магазины, кассы ККМ и параметры системы' },
+  stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats'];
 
 async function bootApp() {
   // фильтры даты
@@ -211,6 +212,7 @@ function renderView(force) {
   else if (v === 'users') renderUsers(force);
   else if (v === 'audit') renderAudit(force);
   else if (v === 'settings') renderSettings(force);
+  else if (v === 'stats') renderStats(force);
 }
 
 // общий помощник кеширования запросов
@@ -1157,6 +1159,72 @@ async function renderSettings(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить настройки: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: СТАТИСТИКА
+// ═════════════════════════════════════════════════════
+function dowShort(day) {
+  const dt = new Date(day + 'T12:00:00');
+  return ['вс','пн','вт','ср','чт','пт','сб'][dt.getDay()];
+}
+async function renderStats(force) {
+  const box = $('statBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю статистику…</div>`;
+  try {
+    const d = await cachedApi(`stat:${state.from}:${state.to}:${state.kassa}`, `?action=stats&from=${state.from}&to=${state.to}${kassaQS()}`);
+    const k = d.kpi || {};
+    const per = state.from === state.to ? state.from : state.from + ' — ' + state.to;
+    const daily = d.daily || [];
+    const dayItems = daily.map(x => ({ label: `${x.day.slice(5)} (${dowShort(x.day)})`, value: x.net, extra: x.checks + ' ч.' }));
+    const shopItems = (d.topShops || []).map(x => ({ label: x.name, value: x.net, extra: x.checks + ' ч.' }));
+    const sellerItems = (d.topSellers || []).slice(0, 10).map(x => ({ label: x.name, value: x.net, extra: x.checks + ' ч.' }));
+
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr))">
+        ${kpi('💵','Выручка (нетто)', money(k.net||0),'g', 'продажи '+money(k.salesSum||0))}
+        ${kpi('🧾','Чеков', fmtInt(k.checks||0),'blue', 'средний '+money(k.avgCheck||0))}
+        ${kpi('↩️','Возвраты', fmtInt(k.returns||0),'r', money(k.retsSum||0))}
+        ${kpi('📦','Продано единиц', k.unitsSold!=null?fmtInt(k.unitsSold)+' шт':'—','gray', k.unitsSold==null?'много чеков':'')}
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Динамика по дням (нетто)</h3><span class="muted">${per}</span></div>
+        ${dayItems.length ? hbars(dayItems, { money: true }) : `<div class="tbl-empty">Нет продаж за период</div>`}
+      </div>
+
+      <div class="cards-2">
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Топ магазины</h3></div>
+          ${shopItems.length ? hbars(shopItems, { money: true }) : `<div class="tbl-empty">Нет данных</div>`}
+        </div>
+        <div class="card card-pad">
+          <div class="card-h-row"><h3>Топ продавцы</h3></div>
+          ${sellerItems.length ? hbars(sellerItems, { money: true }) : `<div class="tbl-empty">Нет данных</div>`}
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Топ товары по выручке</h3></div>
+        ${d.productsSkipped
+          ? `<div class="tbl-empty">Слишком много чеков за период (>${fmtInt(d.productsLimit||150)}). Выберите период поменьше (напр. 1 день), чтобы увидеть топ товаров.</div>`
+          : ((d.topProducts||[]).length
+            ? `<div class="tbl-wrap"><table class="tbl">
+                <thead><tr><th>#</th><th>Товар</th><th class="r">Кол-во</th><th class="r">Выручка</th></tr></thead>
+                <tbody>${d.topProducts.map((p,i)=>`<tr>
+                  <td class="muted">${i+1}</td>
+                  <td>${esc(p.name)}${p.barcode?` <span class="rc-bc muted" style="font-size:11px">${esc(p.barcode)}</span>`:''}</td>
+                  <td class="r">${fmtNum(p.qty)} шт</td>
+                  <td class="r strong">${money(p.revenue)}</td>
+                </tr>`).join('')}</tbody>
+              </table></div>`
+            : `<div class="tbl-empty">Нет данных</div>`)}
+      </div>
+    `;
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить статистику: ' + (e.message || e));
   }
 }
 

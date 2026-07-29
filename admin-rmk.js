@@ -135,8 +135,9 @@ const VIEW_META = {
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
+  users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users'];
 
 async function bootApp() {
   // фильтры даты
@@ -205,6 +206,7 @@ function renderView(force) {
   else if (v === 'cards') renderCards(force);
   else if (v === 'search') renderSearch(force);
   else if (v === 'history') renderHistory(force);
+  else if (v === 'users') renderUsers(force);
 }
 
 // общий помощник кеширования запросов
@@ -947,6 +949,65 @@ async function histOne(code) {
     rbox.innerHTML = errBar('Ошибка загрузки истории: ' + (e.message || e));
   } finally {
     const el = $('htInput'); if (el) el.select();
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ПОЛЬЗОВАТЕЛИ
+// ═════════════════════════════════════════════════════
+const ROLE_CLS = { admin: 'amber', warehouse: 'g', cashier: 'blue', manager: 'blue' };
+async function renderUsers(force) {
+  const box = $('usBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю пользователей…</div>`;
+  try {
+    const d = await cachedApi('users', '?action=pos-users');
+    const s = d.stats || {};
+    const pos = d.posAccounts || [];
+    const web = d.webAdmins || [];
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+        ${kpi('👥','Учёток касс/складов', fmtInt(s.posTotal||0),'g', fmtInt(s.posActive||0)+' активных')}
+        ${kpi('🛡️','Веб-админы', fmtInt(s.webTotal||0),'gray','доступ к дашборду')}
+        ${kpi('🔑','Админы админки РМК', '3','gray','полный доступ')}
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Учётки касс и складов</h3></div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Логин</th><th>Наименование</th><th class="c">Роль</th><th>Магазин/склад</th><th class="c">Статус</th><th>Последний вход</th></tr></thead>
+            <tbody>${pos.length ? pos.map(u=>`
+              <tr>
+                <td class="strong rc-bc">${esc(u.username)}</td>
+                <td>${esc(u.name)}</td>
+                <td class="c"><span class="badge ${ROLE_CLS[u.role]||'gray'}">${esc(u.roleLabel)}</span></td>
+                <td>${esc(u.warehouse || '—')}</td>
+                <td class="c"><span class="badge ${u.active?'ok':'off'}">${u.active?'Активен':'Отключён'}</span></td>
+                <td class="muted">${u.lastLogin?dushTime(u.lastLogin,true):'—'}</td>
+              </tr>`).join('') : `<tr><td class="tbl-empty" colspan="6">Нет учёток</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Админы админки РМК</h3></div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th>Логин</th><th>Имя</th><th class="c">Доступ</th></tr></thead>
+            <tbody>
+              <tr><td class="strong rc-bc">Sunnat</td><td>Sunnat</td><td class="c"><span class="badge g">Полный</span></td></tr>
+              <tr><td class="strong rc-bc">Iskandar</td><td>Iskandar</td><td class="c"><span class="badge g">Полный</span></td></tr>
+              <tr><td class="strong rc-bc">Shahida</td><td>Shahida</td><td class="c"><span class="badge g">Полный</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="muted" style="font-size:12.5px;margin-top:10px">Учётки админки заданы в конфиге приложения (не в БД). Веб-админы ниже — из таблицы app_users.</div>
+        ${web.length ? `<div style="margin-top:12px"><div class="muted" style="font-size:12.5px;margin-bottom:6px">app_users:</div>${web.map(u=>`<span class="badge gray" style="margin:0 6px 6px 0">${esc(u.username)} · ${esc(u.roleLabel)}</span>`).join('')}</div>` : ''}
+      </div>
+    `;
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить пользователей: ' + (e.message || e));
   }
 }
 

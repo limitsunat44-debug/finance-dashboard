@@ -11598,13 +11598,21 @@ async function pmobStartCamera() {
     if (POS.camOn) await posStopCamera();
     try {
         POS.html5qr = new Html5Qrcode('pmobReader', { verbose: false });
+        const cfg = { fps: 10, qrbox: { width: 260, height: 160 } };
+        // Форматы указываем ТОЛЬКО если библиотека их экспортирует.
+        // Если Html5QrcodeSupportedFormats недоступен (гонка загрузки скрипта) —
+        // запускаем БЕЗ ограничения (авто-детект всех символик), а не падаем.
+        // Расширенный список: карты/этикетки могут быть не только EAN/CODE_128.
+        if (typeof Html5QrcodeSupportedFormats !== 'undefined' && Html5QrcodeSupportedFormats) {
+            const F = Html5QrcodeSupportedFormats;
+            cfg.formatsToSupport = [
+                F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E,
+                F.CODE_128, F.CODE_39, F.CODE_93, F.ITF, F.CODABAR, F.QR_CODE,
+            ].filter(v => v !== undefined);
+        }
         await POS.html5qr.start(
             { facingMode: POS.mobFacing || 'environment' },
-            {
-                fps: 10,
-                qrbox: { width: 260, height: 160 },
-                formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
-            },
+            cfg,
             (decodedText) => {
                 // один код за раз: пауза до окончания обработки, чтобы не задвоить экземпляр
                 if (POS.mobScanBusy) return;

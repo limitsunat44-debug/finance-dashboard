@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260729-200309">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260729-200722">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -60,7 +60,7 @@
         <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
         <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
         <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
-        <button class="sb-item soon" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
+        <button class="sb-item" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
         <button class="sb-item soon" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
         <button class="sb-item soon" data-view="audit"><span class="sb-ic">📋</span> Журнал действий</button>
         <button class="sb-item soon" data-view="settings"><span class="sb-ic">⚙</span> Настройки РМК</button>
@@ -141,6 +141,11 @@
           <div id="scBody"></div>
         </section>
 
+        <!-- ═══ ИСТОРИЯ ТОВАРА ═══ -->
+        <section class="view" id="view-history">
+          <div id="htBody"></div>
+        </section>
+
         <!-- ═══ ЗАГЛУШКИ ═══ -->
         <section class="view" id="view-stub">
           <div class="stub">
@@ -154,6 +159,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260729-200309"></script>
+  <script src="admin-rmk.js?v=20260729-200722"></script>
 </body>
 </html>

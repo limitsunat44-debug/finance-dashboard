@@ -134,8 +134,9 @@ const VIEW_META = {
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
+  history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history'];
 
 async function bootApp() {
   // фильтры даты
@@ -203,6 +204,7 @@ function renderView(force) {
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
   else if (v === 'search') renderSearch(force);
+  else if (v === 'history') renderHistory(force);
 }
 
 // общий помощник кеширования запросов
@@ -855,6 +857,96 @@ async function scanOne(code) {
     rbox.innerHTML = errBar('Ошибка поиска: ' + (e.message || e));
   } finally {
     const el = $('scInput'); if (el) { el.select(); }
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ИСТОРИЯ ТОВАРА (таймлайн экземпляра)
+// ═════════════════════════════════════════════════════
+const EV_META = {
+  received:    { ic: '📦', cls: 'g'  },
+  printed:     { ic: '🖨️', cls: 'gray' },
+  moved:       { ic: '🚚', cls: 'blue' },
+  sold:        { ic: '💰', cls: 'g'  },
+  returned:    { ic: '↩️', cls: 'amber' },
+  written_off: { ic: '🗑️', cls: 'r' },
+};
+let htLast = '';
+async function renderHistory(force) {
+  const box = $('htBody');
+  if (!box.dataset.ready) {
+    box.innerHTML = `
+      <div class="card card-pad">
+        <div class="sc-search">
+          <input class="finput" id="htInput" inputmode="numeric" autocomplete="off"
+                 placeholder="Отсканируйте или введите штрихкод экземпляра…">
+          <button class="btn btn-primary" id="htGo">Показать</button>
+        </div>
+        <div class="muted" style="font-size:12.5px;margin-top:8px">История доступна только для экземпляров с уникальным штрихкодом.</div>
+      </div>
+      <div id="htResult" style="margin-top:16px"></div>`;
+    box.dataset.ready = '1';
+    const go = () => histOne($('htInput').value.trim());
+    $('htGo').addEventListener('click', go);
+    $('htInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  }
+  setTimeout(() => { const el = $('htInput'); if (el) el.focus(); }, 60);
+}
+
+async function histOne(code) {
+  const rbox = $('htResult');
+  if (!code) { rbox.innerHTML = ''; return; }
+  htLast = code;
+  rbox.innerHTML = `<div class="loading">⏳ Загружаю историю «${esc(code)}»…</div>`;
+  try {
+    const d = await posApi(`?action=unit-history&barcode=${encodeURIComponent(code)}`, { method: 'GET' });
+    if (htLast !== code) return;
+    if (!d.found) {
+      rbox.innerHTML = `<div class="card card-pad sc-empty">
+        <div class="sc-empty-ic">❗</div>
+        <div><div class="strong">Экземпляр не найден</div>
+        <div class="muted">Штрихкод <b>${esc(code)}</b> не принадлежит ни одному экземпляру.</div></div></div>`;
+      return;
+    }
+    const u = d.unit || {};
+    const st = STATUS_META[u.status] || { label: u.status || '—', cls: 'gray' };
+    const evs = d.events || [];
+    const timeline = evs.length ? evs.map(e => {
+      const m = EV_META[e.type] || { ic: '•', cls: 'gray' };
+      const meta = [];
+      if (e.doc) meta.push(`док: <b>${esc(e.doc)}</b>`);
+      if (e.place) meta.push(esc(e.place));
+      if (e.who) meta.push('продавец: ' + esc(e.who));
+      if (e.reason) meta.push('причина: ' + esc(e.reason));
+      return `<div class="ht-ev">
+        <div class="ht-dot ${m.cls}">${m.ic}</div>
+        <div class="ht-body">
+          <div class="ht-ev-h"><span class="ht-ev-label">${esc(e.label)}</span><span class="ht-ev-time">${dushTime(e.at, true)}</span></div>
+          ${meta.length ? `<div class="ht-ev-meta">${meta.join(' · ')}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('') : `<div class="muted" style="padding:12px">Нет зафиксированных событий.</div>`;
+
+    rbox.innerHTML = `
+      <div class="card card-pad sc-card">
+        <div class="sc-head">
+          <div class="sc-title">${esc(u.name || 'Без названия')}</div>
+          <span class="badge ${st.cls}">${esc(st.label)}</span>
+        </div>
+        <div class="sc-grid" style="margin-bottom:20px">
+          <div class="sc-cell"><div class="sc-k">Цена</div><div class="sc-v big">${money(u.price||0)}</div></div>
+          <div class="sc-cell"><div class="sc-k">Размер</div><div class="sc-v">${esc(u.sizeLabel || '—')}</div></div>
+          <div class="sc-cell"><div class="sc-k">Текущий склад</div><div class="sc-v">${esc(u.warehouse || '—')}</div></div>
+          <div class="sc-cell"><div class="sc-k">Штрихкод</div><div class="sc-v rc-bc">${esc(code)}</div></div>
+        </div>
+        <div class="ht-timeline">${timeline}</div>
+        ${u.note ? `<div class="sc-warn" style="margin-top:16px">📝 ${esc(u.note)}</div>` : ''}
+      </div>`;
+  } catch (e) {
+    if (htLast !== code) return;
+    rbox.innerHTML = errBar('Ошибка загрузки истории: ' + (e.message || e));
+  } finally {
+    const el = $('htInput'); if (el) el.select();
   }
 }
 

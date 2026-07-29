@@ -311,3 +311,19 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
 .sc-warn{margin-top:14px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:var(--radius-sm);padding:10px 14px;font-size:13.5px;font-weight:600}
 .sc-empty{display:flex;align-items:center;gap:16px}
 .sc-empty-ic{font-size:32px}
+
+/* ═══ РАЗДЕЛ: История товара (таймлайн) ═══ */
+.ht-timeline{position:relative;padding-left:8px}
+.ht-ev{display:flex;gap:14px;position:relative;padding-bottom:18px}
+.ht-ev:not(:last-child)::before{content:'';position:absolute;left:17px;top:36px;bottom:0;width:2px;background:var(--line)}
+.ht-dot{flex:0 0 36px;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;background:var(--bg);border:2px solid var(--line);z-index:1}
+.ht-dot.g{background:var(--g-soft2);border-color:var(--g)}
+.ht-dot.blue{background:#e0edff;border-color:#3b82f6}
+.ht-dot.amber{background:#fef3c7;border-color:#d97706}
+.ht-dot.r{background:var(--red-soft);border-color:var(--red)}
+.ht-dot.gray{background:#f1f5f4;border-color:var(--line)}
+.ht-body{flex:1;padding-top:4px}
+.ht-ev-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ht-ev-label{font-size:15px;font-weight:700;color:var(--tx)}
+.ht-ev-time{font-size:12.5px;color:var(--tx2);white-space:nowrap}
+.ht-ev-meta{font-size:13px;color:var(--tx2);margin-top:3px}

@@ -3779,7 +3779,11 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
     --pm-line: #e6ecec;
     --pm-bg: #ffffff;
     --pm-soft: #f4f7f7;
-    --pm-nav-h: 66px;
+    /* Высота контента навигации (иконка+подпись) без safe-area. */
+    --pm-nav-content: 60px;
+    /* Полная высота навигации = контент + нижняя safe-area (home indicator).
+       Именно эту величину резервируют экран и футер, чтобы ничего не перекрывалось. */
+    --pm-nav-h: calc(60px + env(safe-area-inset-bottom, 0px));
     position: fixed;
     inset: 0;
     z-index: 1500;
@@ -3800,7 +3804,8 @@ body.pmob-on { overflow: hidden; }
     padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px 24px;
     background: var(--pm-bg);
 }
-.pmob.has-foot .pmob-screen { padding-bottom: 132px; }
+/* Когда показан закреплённый футер (итог+оплата) — добавляем его высоту к отступу. */
+.pmob.has-foot .pmob-screen { padding-bottom: 140px; }
 
 /* — шапка «Онлайн касса» + Закрыть смену — */
 .pmob-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -3909,6 +3914,7 @@ body.pmob-on { overflow: hidden; }
     padding: 12px 16px 14px;
     background: var(--pm-bg); border-top: 1px solid var(--pm-line);
     box-shadow: 0 -6px 18px rgba(20, 32, 31, .07);
+    z-index: 2;
 }
 .pmob-foot-row {
     display: flex; align-items: baseline; justify-content: space-between;
@@ -3925,18 +3931,24 @@ body.pmob-on { overflow: hidden; }
 .pmob-pay-btn:disabled { opacity: .5; box-shadow: none; }
 
 /* — нижняя навигация — */
+/* Высота = контент + safe-area; кнопки центрируются только в зоне контента,
+   а safe-area (home indicator) остаётся пустым отступом снизу — подписи не прижаты к полосе. */
 .pmob-nav {
     position: absolute; left: 0; right: 0; bottom: 0;
     height: var(--pm-nav-h, 66px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
     display: flex; align-items: stretch;
     background: var(--pm-bg); border-top: 1px solid var(--pm-line);
+    z-index: 3;
 }
 .pmob-nav-btn {
-    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    padding: 6px 2px;
     border: none; background: none; cursor: pointer;
-    color: #62777a; font-size: 11px; font-weight: 700;
+    color: #62777a; font-size: 11px; font-weight: 700; line-height: 1.1;
 }
+.pmob-nav-btn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pmob-nav-btn svg { flex: 0 0 auto; }
 .pmob-nav-btn.active { color: var(--pm-green); }
 .pmob-nav-btn:active { background: var(--pm-soft); }
 

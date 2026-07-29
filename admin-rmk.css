@@ -279,3 +279,14 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
 .ds-bar-track{height:10px;background:var(--g-soft);border-radius:6px;overflow:hidden}
 .ds-bar-fill{height:100%;background:linear-gradient(90deg,var(--g),var(--g2));border-radius:6px;transition:width .4s ease}
 .ds-bar-val{font-size:13px;font-weight:700;color:var(--tx);white-space:nowrap;text-align:right;min-width:70px}
+
+/* ═══ Badge-цвета для типов карт ═══ */
+.badge.g{background:var(--g-soft2);color:var(--g3)}
+.badge.blue{background:#e0edff;color:#1e40af}
+.badge.amber{background:#fef3c7;color:#92400e}
+
+/* ═══ Строка фильтров и пагинатор (Дисконтные карты) ═══ */
+.filters.filters-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:14px}
+.pager{display:flex;align-items:center;justify-content:center;gap:16px;margin-top:14px}
+.pager-info{font-size:13px;color:var(--tx2);font-weight:600;min-width:120px;text-align:center}
+.pager .btn[disabled]{opacity:.45;cursor:not-allowed}

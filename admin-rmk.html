@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260729-195234">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260729-195933">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -58,7 +58,7 @@
         <button class="sb-item" data-view="returns"><span class="sb-ic">↩</span> Возвраты</button>
         <button class="sb-item soon" data-view="cashbox"><span class="sb-ic">🗄</span> Денежный ящик</button>
         <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
-        <button class="sb-item soon" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
+        <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
         <button class="sb-item soon" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
         <button class="sb-item soon" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
         <button class="sb-item soon" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
@@ -131,6 +131,11 @@
           <div id="dsBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ДИСКОНТНЫЕ КАРТЫ ═══ -->
+        <section class="view" id="view-cards">
+          <div id="cdBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ЗАГЛУШКИ ═══ -->
         <section class="view" id="view-stub">
           <div class="stub">
@@ -144,6 +149,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260729-195234"></script>
+  <script src="admin-rmk.js?v=20260729-195933"></script>
 </body>
 </html>

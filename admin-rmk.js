@@ -132,8 +132,9 @@ const VIEW_META = {
   receipts:  { title: 'Чеки продаж',        sub: 'Список всех чеков за выбранный период' },
   returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
+  cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards'];
 
 async function bootApp() {
   // фильтры даты
@@ -199,6 +200,7 @@ function renderView(force) {
   else if (v === 'receipts') renderReceipts(force);
   else if (v === 'returns') renderReturns(force);
   else if (v === 'discounts') renderDiscounts(force);
+  else if (v === 'cards') renderCards(force);
 }
 
 // общий помощник кеширования запросов
@@ -697,6 +699,84 @@ async function renderDiscounts(force) {
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить скидки: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ДИСКОНТНЫЕ КАРТЫ
+// ═════════════════════════════════════════════════════
+const cdState = { q: '', type: '', page: 0, per: 50 };
+const CARD_TYPE_CLASS = { client: 'g', doctor: 'blue', employee: 'amber' };
+async function renderCards(force) {
+  const box = $('cdBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю карты…</div>`;
+  try {
+    const off = cdState.page * cdState.per;
+    const qs = `?action=cards&limit=${cdState.per}&offset=${off}`
+      + (cdState.q ? `&q=${encodeURIComponent(cdState.q)}` : '')
+      + (cdState.type ? `&type=${encodeURIComponent(cdState.type)}` : '');
+    const d = await posApi(qs, { method: 'GET' });
+    const s = d.stats || { total: 0, active: 0, byType: {} };
+    const bt = s.byType || {};
+    const totalPages = Math.max(1, Math.ceil((d.count || 0) / cdState.per));
+    const pageNow = cdState.page + 1;
+
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+        ${kpi('💳','Всего карт', fmtInt(s.total||0),'gray', fmtInt(s.active||0)+' активных')}
+        ${kpi('👤','Клиентские', fmtInt((bt.client||{}).count||0),'g','скидка 10%')}
+        ${kpi('🩺','Врачебные', fmtInt((bt.doctor||{}).count||0),'blue','без скидки')}
+        ${kpi('👷','Сотрудники', fmtInt((bt.employee||{}).count||0),'amber','скидка 10%')}
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row">
+          <h3>Карты${cdState.q||cdState.type ? ` — найдено ${fmtInt(d.count||0)}` : ''}</h3>
+        </div>
+        <div class="filters filters-row">
+          <input class="finput" id="cdQ" value="${esc(cdState.q)}" placeholder="Поиск по имени или коду карты…" style="flex:2;min-width:220px">
+          <select class="fselect" id="cdType" style="flex:1;min-width:150px">
+            <option value="" ${cdState.type===''?'selected':''}>Все типы</option>
+            <option value="client" ${cdState.type==='client'?'selected':''}>Клиентские</option>
+            <option value="doctor" ${cdState.type==='doctor'?'selected':''}>Врачебные</option>
+            <option value="employee" ${cdState.type==='employee'?'selected':''}>Сотрудники</option>
+          </select>
+          <button class="btn btn-primary" id="cdSearch">Найти</button>
+          <button class="btn" id="cdReset">Сброс</button>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl">
+            <thead><tr><th style="width:30px">#</th><th>Код карты</th><th>Имя</th><th class="c">Тип</th><th class="c">Скидка</th><th>Создана</th></tr></thead>
+            <tbody>${(d.cards||[]).length ? d.cards.map((c,i)=>`
+              <tr>
+                <td class="c muted">${off+i+1}</td>
+                <td class="strong rc-bc">${esc(c.code||'—')}</td>
+                <td>${esc(c.name||'Без имени')}</td>
+                <td class="c"><span class="badge ${CARD_TYPE_CLASS[c.type]||''}">${esc(c.typeLabel)}</span></td>
+                <td class="c tnum">${c.discountPct?c.discountPct+'%':'—'}</td>
+                <td class="muted">${c.createdAt?dushTime(c.createdAt,true):'—'}</td>
+              </tr>`).join('')
+              : `<tr><td class="tbl-empty" colspan="6">Карты не найдены</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div class="pager">
+          <button class="btn" id="cdPrev" ${cdState.page<=0?'disabled':''}>← Назад</button>
+          <span class="pager-info">Стр. ${pageNow} из ${totalPages}</span>
+          <button class="btn" id="cdNext" ${pageNow>=totalPages?'disabled':''}>Вперёд →</button>
+        </div>
+      </div>
+    `;
+
+    const doSearch = () => { cdState.q = $('cdQ').value.trim(); cdState.type = $('cdType').value; cdState.page = 0; renderCards(); };
+    $('cdSearch').addEventListener('click', doSearch);
+    $('cdQ').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+    $('cdType').addEventListener('change', doSearch);
+    $('cdReset').addEventListener('click', () => { cdState.q=''; cdState.type=''; cdState.page=0; renderCards(); });
+    $('cdPrev').addEventListener('click', () => { if (cdState.page>0){ cdState.page--; renderCards(); } });
+    $('cdNext').addEventListener('click', () => { if (pageNow<totalPages){ cdState.page++; renderCards(); } });
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить карты: ' + (e.message || e));
   }
 }
 

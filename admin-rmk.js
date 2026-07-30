@@ -1988,6 +1988,15 @@ async function trHandleScan(barcode) {
       if (hint) { hint.textContent = 'Товар не найден: ' + barcode; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),2000); }
       TR.busy = false; return;
     }
+    // БЛОКИРОВКА: нельзя перемещать экземпляр, который не числится
+    // (in_stock) на складе-отправителе. Сервер всё равно проверит при проведении,
+    // но отсекаем сразу на скане, чтобы кассир не добавлял лишнее.
+    if (d.inSourceWh !== true) {
+      const msg = d.warning || (d.status && d.status !== 'in_stock'
+        ? 'Экземпляр не в наличии' : 'Экземпляр не числится на складе «' + TR.fromName + '»');
+      if (hint) { hint.textContent = '⛔ ' + msg + ' — перемещение невозможно'; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),3200); }
+      TR.busy = false; return;
+    }
     const it = {
       barcode: d.uniqueBarcode || barcode,
       name: d.name || '—',

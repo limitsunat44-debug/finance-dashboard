@@ -141,8 +141,9 @@ const VIEW_META = {
   stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
   monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
   cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
+  transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer'];
 
 async function bootApp() {
   // фильтры даты
@@ -217,6 +218,7 @@ function renderView(force) {
   else if (v === 'stats') renderStats(force);
   else if (v === 'monitoring') renderMonitoring(force);
   else if (v === 'cashreport') renderCashReport(force);
+  else if (v === 'transfer') renderTransfer(force);
 }
 
 // общий помощник кеширования запросов
@@ -1590,6 +1592,448 @@ function renderReceiptItems(d, num) {
         <tfoot><tr class="tbl-total"><td colspan="6" class="r">Итого</td><td class="r tnum">${fmtNum(total)} ${CUR}</td></tr></tfoot>
       </table>
     </div>`;
+}
+
+
+// ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: ПЕРЕМЕЩЕНИЕ ТОВАРОВ (склад → склад, со сканером и документом 1С)
+//  Пошаговый мастер: 1) выбор складов → 2) сканер → 3) товар добавлен →
+//  4) список → 5) сверка → 6) подтверждение → 7) успех (+PDF)
+// ══════════════════════════════════════════════════════════
+const TR = {
+  step: 'setup',       // setup | scan | added | list | check | confirm | done
+  fromRef: '', fromName: '',
+  toRef: '',   toName: '',
+  comment: '',
+  warehouses: [],      // [{id,name,c1Ref}]
+  items: [],           // [{barcode, name, sizeLabel, price, productC1Ref, charC1Ref, qty}]
+  lastAdded: null,     // последний добавленный товар (экран «Товар добавлен»)
+  sender: '', receiver: '',
+  scanner: null,       // Html5Qrcode инстанс
+  scanning: false,
+  busy: false,
+  result: null,        // ответ transfer-create {number, ref, date, ...}
+};
+
+async function renderTransfer(force) {
+  const box = $('trBody');
+  if (force) { TR.step = 'setup'; TR.items = []; TR.result = null; }
+  // загрузим склады один раз
+  if (!TR.warehouses.length) {
+    box.innerHTML = `<div class="loading">⏳ Загружаю склады…</div>`;
+    try {
+      const d = await posApi('?action=transfer-warehouses', { method: 'GET' });
+      TR.warehouses = d.warehouses || [];
+    } catch (e) { box.innerHTML = errBar('Не удалось загрузить склады: ' + e.message); return; }
+  }
+  trPaint();
+}
+
+// единый рендер по текущему шагу
+function trPaint() {
+  const box = $('trBody');
+  if (!box) return;
+  // если уходим со сканера — гасим камеру
+  if (TR.step !== 'scan') trStopScanner();
+  if (TR.step === 'setup')   box.innerHTML = trSetupHTML();
+  else if (TR.step === 'scan')    box.innerHTML = trScanHTML();
+  else if (TR.step === 'added')   box.innerHTML = trAddedHTML();
+  else if (TR.step === 'list')    box.innerHTML = trListHTML();
+  else if (TR.step === 'check')   box.innerHTML = trCheckHTML();
+  else if (TR.step === 'confirm') box.innerHTML = trConfirmHTML();
+  else if (TR.step === 'done')    box.innerHTML = trDoneHTML();
+  trBind();
+  if (TR.step === 'scan') trStartScanner();
+}
+
+const trUnits = () => TR.items.reduce((s, it) => s + (Number(it.qty) || 1), 0);
+const trUniqCodes = () => new Set(TR.items.map(i => i.barcode)).size;
+const last4 = (bc) => String(bc || '').slice(-4);
+
+// ── Экран 1: выбор складов ──
+function trSetupHTML() {
+  const opts = (sel) => TR.warehouses.map(w =>
+    `<option value="${esc(w.c1Ref)}" ${sel === w.c1Ref ? 'selected' : ''}>${esc(w.name)}</option>`).join('');
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card tr-setup">
+      <div class="tr-card-head"><span class="tr-ic">🔄</span><div><h2>Новое перемещение</h2><p>Выберите склады отправителя и получателя</p></div></div>
+      <label class="tr-fld"><span>Откуда (склад-отправитель)</span>
+        <select id="trFrom" class="tr-select"><option value="">— выберите склад —</option>${opts(TR.fromRef)}</select></label>
+      <label class="tr-fld"><span>Куда (склад-получатель)</span>
+        <select id="trTo" class="tr-select"><option value="">— выберите склад —</option>${opts(TR.toRef)}</select></label>
+      <label class="tr-fld"><span>Комментарий (необязательно)</span>
+        <input type="text" id="trComment" class="tr-input" maxlength="200" placeholder="Напр. плановое пополнение" value="${esc(TR.comment)}"></label>
+      <div class="tr-info">
+        <span class="tr-info-ic">ℹ️</span>
+        <div>После выбора складов откроется камера для сканирования штрихкодов товаров. Каждый отсканированный товар добавится в список перемещения. Документ будет создан и проведён в 1С.</div>
+      </div>
+      <div id="trSetupErr"></div>
+      <button class="tr-btn tr-btn-primary tr-btn-block" id="trStart">📷 Начать сканирование</button>
+    </div>
+  </div>`;
+}
+
+// ── Экран 2: сканер ──
+function trScanHTML() {
+  return `
+  <div class="tr-scan-screen">
+    <div class="tr-scan-top">
+      <button class="tr-scan-x" id="trScanClose">✕</button>
+      <div class="tr-scan-route">${esc(TR.fromName)} → ${esc(TR.toName)}</div>
+      <div class="tr-scan-count">${fmtInt(TR.items.length)} тов.</div>
+    </div>
+    <div class="tr-scan-view">
+      <div id="trReader" class="tr-reader"></div>
+      <div class="tr-scan-frame"></div>
+    </div>
+    <div class="tr-scan-hint" id="trScanHint">Отсканируйте штрихкод товара</div>
+    <div class="tr-scan-manual">
+      <input type="text" id="trManual" class="tr-input" inputmode="numeric" placeholder="Или введите штрихкод вручную">
+      <button class="tr-btn tr-btn-ghost" id="trManualAdd">Добавить</button>
+    </div>
+    <button class="tr-btn tr-btn-outline tr-btn-block" id="trScanFinish">Завершить сканирование (${fmtInt(TR.items.length)})</button>
+  </div>`;
+}
+
+// ── Экран 3: товар добавлен ──
+function trAddedHTML() {
+  const it = TR.lastAdded || {};
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card tr-added">
+      <div class="tr-added-badge">✓</div>
+      <h2 class="tr-added-title">Товар добавлен</h2>
+      <div class="tr-prod-card">
+        <div class="tr-prod-name">${esc(it.name || '—')}</div>
+        <div class="tr-prod-sub">${esc(it.productCode || '')}</div>
+        <div class="tr-prod-grid">
+          <div><span>Код (посл. 4)</span><b>${esc(last4(it.barcode))}</b></div>
+          <div><span>Размер</span><b>${esc(it.sizeLabel || '—')}</b></div>
+          <div><span>Кол-во</span><b>${fmtInt(it.qty || 1)}</b></div>
+        </div>
+      </div>
+      <button class="tr-btn tr-btn-primary tr-btn-block" id="trAddNext">📷 Добавить следующий товар</button>
+      <button class="tr-btn tr-btn-outline tr-btn-block" id="trGoList">Завершить сканирование (${fmtInt(TR.items.length)})</button>
+    </div>
+  </div>`;
+}
+
+// ── Экран 4: список товаров ──
+function trListHTML() {
+  const rows = TR.items.map((it, i) => `
+    <tr>
+      <td class="tr-td-name"><div class="tr-nm">${esc(it.name || '—')}</div><div class="tr-nm-sub">${esc(it.productCode || '')}</div></td>
+      <td class="c"><span class="tr-code">${esc(last4(it.barcode))}</span></td>
+      <td class="c">${esc(it.sizeLabel || '—')}</td>
+      <td class="c">${fmtInt(it.qty || 1)}</td>
+      <td class="c"><button class="tr-del" data-del="${i}" title="Убрать">✕</button></td>
+    </tr>`).join('');
+  return `
+  <div class="tr-wrap">
+    <div class="tr-kpis">
+      <div class="tr-kpi"><span>Товаров</span><b>${fmtInt(TR.items.length)}</b></div>
+      <div class="tr-kpi"><span>Всего единиц</span><b>${fmtInt(trUnits())}</b></div>
+    </div>
+    <div class="tr-card">
+      <div class="tr-card-head sm"><span class="tr-ic">📋</span><div><h2>Список товаров</h2><p>${esc(TR.fromName)} → ${esc(TR.toName)}</p></div></div>
+      <div class="tbl-wrap">
+        <table class="tbl tr-tbl">
+          <thead><tr><th>Товар</th><th class="c">Код</th><th class="c">Размер</th><th class="c">Кол-во</th><th class="c"></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="tr-empty">Список пуст</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="tr-actions">
+        <button class="tr-btn tr-btn-outline" id="trBackScan">📷 Ещё сканировать</button>
+        <button class="tr-btn tr-btn-primary" id="trToCheck" ${TR.items.length ? '' : 'disabled'}>Перейти к сверке →</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Экран 5: сверка ──
+function trCheckHTML() {
+  const codes = TR.items.map(i => i.barcode);
+  const dupMap = {};
+  codes.forEach(c => { dupMap[c] = (dupMap[c] || 0) + 1; });
+  const dups = Object.keys(dupMap).filter(c => dupMap[c] > 1);
+  const notFound = TR.items.filter(i => !i.productC1Ref).length;
+  const matched = TR.items.filter(i => i.productC1Ref).length;
+  return `
+  <div class="tr-wrap">
+    <div class="tr-kpis three">
+      <div class="tr-kpi"><span>Товаров</span><b>${fmtInt(TR.items.length)}</b></div>
+      <div class="tr-kpi"><span>Единиц по факту</span><b>${fmtInt(trUnits())}</b></div>
+      <div class="tr-kpi"><span>Уникальных кодов</span><b>${fmtInt(trUniqCodes())}</b></div>
+    </div>
+    <div class="tr-card">
+      <div class="tr-card-head sm"><span class="tr-ic">✅</span><div><h2>Сверка товаров</h2><p>Проверьте коды и количество перед проведением</p></div></div>
+      <div class="tr-check-block">
+        <div class="tr-check-title">Проверка кодов</div>
+        <div class="tr-check-row ok"><span>Совпадают (найдены в 1С)</span><b>${fmtInt(matched)}</b></div>
+        <div class="tr-check-row ${notFound ? 'warn' : ''}"><span>Не найдены</span><b>${fmtInt(notFound)}</b></div>
+        <div class="tr-check-row ${dups.length ? 'warn' : ''}"><span>Дублируются</span><b>${fmtInt(dups.length)}</b></div>
+      </div>
+      <div class="tr-check-block">
+        <div class="tr-check-title">Проверка количества</div>
+        <div class="tr-check-row ok"><span>Совпадает</span><b>${fmtInt(TR.items.length)}</b></div>
+        <div class="tr-check-row"><span>Излишки</span><b>0</b></div>
+        <div class="tr-check-row"><span>Недостача</span><b>0</b></div>
+      </div>
+      ${dups.length ? `<div class="tr-info warn"><span class="tr-info-ic">⚠️</span><div>Обнаружены повторяющиеся штрихкоды: ${dups.map(d=>last4(d)).join(', ')}. Один экземпляр = один уникальный штрихкод.</div></div>` : ''}
+      <div class="tr-actions">
+        <button class="tr-btn tr-btn-outline" id="trBackList">← Назад к списку</button>
+        <button class="tr-btn tr-btn-primary" id="trToConfirm">Подтвердить перемещение →</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Экран 6: подтверждение ──
+function trConfirmHTML() {
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card">
+      <div class="tr-card-head sm"><span class="tr-ic">📝</span><div><h2>Подтверждение перемещения</h2><p>Проверьте данные и укажите ответственных</p></div></div>
+      <div class="tr-conf-info">
+        <div class="tr-conf-row"><span>Откуда</span><b>${esc(TR.fromName)}</b></div>
+        <div class="tr-conf-row"><span>Куда</span><b>${esc(TR.toName)}</b></div>
+        <div class="tr-conf-row"><span>Товаров</span><b>${fmtInt(TR.items.length)}</b></div>
+        <div class="tr-conf-row"><span>Единиц</span><b>${fmtInt(trUnits())}</b></div>
+        <div class="tr-conf-row"><span>Уникальных кодов</span><b>${fmtInt(trUniqCodes())}</b></div>
+        ${TR.comment ? `<div class="tr-conf-row"><span>Комментарий</span><b>${esc(TR.comment)}</b></div>` : ''}
+      </div>
+      <div class="tr-resp">
+        <div class="tr-resp-title">Ответственные</div>
+        <label class="tr-fld"><span>Отправил</span><input type="text" id="trSender" class="tr-input" placeholder="ФИО отправившего" value="${esc(TR.sender)}"></label>
+        <label class="tr-fld"><span>Принял</span><input type="text" id="trReceiver" class="tr-input" placeholder="ФИО принявшего" value="${esc(TR.receiver)}"></label>
+      </div>
+      <div class="tr-info"><span class="tr-info-ic">ℹ️</span><div>При нажатии будет создан и проведён документ «Перемещение товаров» в 1С. Экземпляры автоматически перевесятся на склад-получатель.</div></div>
+      <div id="trConfirmErr"></div>
+      <div class="tr-actions">
+        <button class="tr-btn tr-btn-outline" id="trBackCheck">← Назад</button>
+        <button class="tr-btn tr-btn-primary" id="trDoTransfer">🔄 Переместить товары</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── Экран 7: успех ──
+function trDoneHTML() {
+  const r = TR.result || {};
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card tr-added tr-done">
+      <div class="tr-added-badge">✓</div>
+      <h2 class="tr-added-title">Перемещение выполнено успешно</h2>
+      <div class="tr-done-num">№ ${esc(r.number || '—')}</div>
+      <div class="tr-done-date">${esc(r.dateLabel || nowDushLabel())}</div>
+      <div class="tr-done-sub">${esc(TR.fromName)} → ${esc(TR.toName)} · ${fmtInt(TR.items.length)} тов. / ${fmtInt(trUnits())} ед.</div>
+      <button class="tr-btn tr-btn-primary tr-btn-block" id="trPdf">📄 Скачать документ (PDF)</button>
+      <button class="tr-btn tr-btn-outline tr-btn-block" id="trHome">На главную</button>
+    </div>
+  </div>`;
+}
+
+// ── обработчики ──
+function trBind() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  if (TR.step === 'setup') {
+    on('trFrom', 'change', e => { TR.fromRef = e.target.value; TR.fromName = trWhName(e.target.value); });
+    on('trTo', 'change', e => { TR.toRef = e.target.value; TR.toName = trWhName(e.target.value); });
+    on('trComment', 'input', e => { TR.comment = e.target.value; });
+    on('trStart', 'click', () => {
+      const err = $('trSetupErr');
+      if (!TR.fromRef || !TR.toRef) { err.innerHTML = errBar('Выберите оба склада'); return; }
+      if (TR.fromRef === TR.toRef) { err.innerHTML = errBar('Склады отправителя и получателя должны отличаться'); return; }
+      TR.step = 'scan'; trPaint();
+    });
+  } else if (TR.step === 'scan') {
+    on('trScanClose', 'click', () => { TR.step = TR.items.length ? 'list' : 'setup'; trPaint(); });
+    on('trScanFinish', 'click', () => { TR.step = TR.items.length ? 'list' : 'setup'; trPaint(); });
+    on('trManualAdd', 'click', () => { const v = ($('trManual').value || '').trim(); if (v) trHandleScan(v); });
+    on('trManual', 'keydown', e => { if (e.key === 'Enter') { const v = (e.target.value||'').trim(); if (v) trHandleScan(v); } });
+  } else if (TR.step === 'added') {
+    on('trAddNext', 'click', () => { TR.step = 'scan'; trPaint(); });
+    on('trGoList', 'click', () => { TR.step = 'list'; trPaint(); });
+  } else if (TR.step === 'list') {
+    on('trBackScan', 'click', () => { TR.step = 'scan'; trPaint(); });
+    on('trToCheck', 'click', () => { if (TR.items.length) { TR.step = 'check'; trPaint(); } });
+    document.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+      TR.items.splice(Number(b.dataset.del), 1); trPaint();
+    }));
+  } else if (TR.step === 'check') {
+    on('trBackList', 'click', () => { TR.step = 'list'; trPaint(); });
+    on('trToConfirm', 'click', () => { TR.step = 'confirm'; trPaint(); });
+  } else if (TR.step === 'confirm') {
+    on('trSender', 'input', e => { TR.sender = e.target.value; });
+    on('trReceiver', 'input', e => { TR.receiver = e.target.value; });
+    on('trBackCheck', 'click', () => { TR.step = 'check'; trPaint(); });
+    on('trDoTransfer', 'click', trDoTransfer);
+  } else if (TR.step === 'done') {
+    on('trPdf', 'click', trBuildPDF);
+    on('trHome', 'click', () => { TR.step = 'setup'; TR.items = []; TR.result = null; TR.comment=''; TR.sender=''; TR.receiver=''; trPaint(); });
+  }
+}
+
+function trWhName(ref) { const w = TR.warehouses.find(x => x.c1Ref === ref); return w ? w.name : ''; }
+
+// ── сканер ──
+function trStartScanner() {
+  const el = $('trReader');
+  if (!el || TR.scanning) return;
+  if (typeof Html5Qrcode === 'undefined') { const h = $('trScanHint'); if (h) h.textContent = 'Сканер недоступен — введите штрихкод вручную'; return; }
+  try {
+    TR.scanner = new Html5Qrcode('trReader', { verbose: false });
+    TR.scanning = true;
+    const fmts = (window.Html5QrcodeSupportedFormats) ? [
+      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128,
+    ] : undefined;
+    TR.scanner.start({ facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 260, height: 160 }, ...(fmts ? { formatsToSupport: fmts } : {}) },
+      (txt) => { const bc = String(txt || '').trim(); if (bc) trHandleScan(bc); },
+      () => {}
+    ).catch(err => { const h = $('trScanHint'); if (h) h.textContent = 'Нет доступа к камере — введите штрихкод вручную'; TR.scanning = false; });
+  } catch (e) { TR.scanning = false; }
+}
+function trStopScanner() {
+  if (TR.scanner && TR.scanning) {
+    try { TR.scanner.stop().then(() => { try { TR.scanner.clear(); } catch(_){} }).catch(()=>{}); } catch(_){}
+  }
+  TR.scanning = false; TR.scanner = null;
+}
+
+let trScanLock = false;
+async function trHandleScan(barcode) {
+  if (TR.busy || trScanLock) return;
+  trScanLock = true;
+  setTimeout(() => { trScanLock = false; }, 900); // антидребезг
+  const hint = $('trScanHint');
+  // дубликат экземпляра — один штрихкод = один экземпляр
+  if (TR.items.some(i => i.barcode === barcode)) {
+    if (hint) { hint.textContent = 'Этот штрихкод уже добавлен'; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),1500); }
+    return;
+  }
+  if (hint) hint.textContent = 'Ищу товар…';
+  TR.busy = true;
+  try {
+    const d = await posApi(`?action=transfer-scan&barcode=${encodeURIComponent(barcode)}&warehouse=${encodeURIComponent(TR.fromRef)}`, { method: 'GET' });
+    if (!d.found) {
+      if (hint) { hint.textContent = 'Товар не найден: ' + barcode; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),2000); }
+      TR.busy = false; return;
+    }
+    const it = {
+      barcode: d.uniqueBarcode || barcode,
+      name: d.name || '—',
+      productCode: d.productCode || '',
+      sizeLabel: (d.sizeLabel || '').replace(/^размер:\s*/i, ''),
+      price: Number(d.price) || 0,
+      productC1Ref: d.productC1Ref || null,
+      charC1Ref: d.charC1Ref || null,
+      qty: 1,
+    };
+    TR.items.push(it);
+    TR.lastAdded = it;
+    TR.busy = false;
+    TR.step = 'added';
+    trPaint();
+  } catch (e) {
+    TR.busy = false;
+    if (hint) { hint.textContent = 'Ошибка: ' + e.message; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),2000); }
+  }
+}
+
+// ── проведение (WRITE в 1С — только по явному нажатию пользователя) ──
+async function trDoTransfer() {
+  if (TR.busy) return;
+  const err = $('trConfirmErr');
+  const btn = $('trDoTransfer');
+  TR.busy = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Создаю документ в 1С…'; }
+  try {
+    const body = {
+      fromC1Ref: TR.fromRef, toC1Ref: TR.toRef, comment: TR.comment,
+      senderName: TR.sender, receiverName: TR.receiver,
+      items: TR.items.map(i => ({ barcode: i.barcode, productC1Ref: i.productC1Ref, charC1Ref: i.charC1Ref, price: i.price, qty: i.qty })),
+      dryRun: false,
+    };
+    const d = await posApi('?action=transfer-create', { method: 'POST', body: JSON.stringify(body) });
+    TR.result = { number: d.number, ref: d.ref, date: d.date, dateLabel: d.date ? dushTime(d.date, true) : nowDushLabel(), sumTotal: d.sumTotal };
+    TR.busy = false;
+    TR.step = 'done';
+    trPaint();
+  } catch (e) {
+    TR.busy = false;
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Переместить товары'; }
+    if (err) err.innerHTML = errBar('Не удалось провести перемещение: ' + e.message);
+  }
+}
+
+// ── PDF документа перемещения ──
+function trBuildPDF() {
+  const r = TR.result || {};
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const W = 210, M = 14;
+    let y = 18;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
+    doc.text('PEREMESHCHENIE TOVAROV', M, y);
+    doc.setFontSize(11); doc.setFont('helvetica', 'normal');
+    doc.text('Dokument №: ' + (r.number || '-'), M, y + 7);
+    doc.text('Data: ' + (r.dateLabel || nowDushLabel()), M, y + 13);
+    y += 22;
+    doc.setDrawColor(210); doc.line(M, y, W - M, y); y += 8;
+
+    doc.setFont('helvetica', 'bold'); doc.text('Otkuda:', M, y);
+    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.fromName), M + 24, y);
+    y += 7;
+    doc.setFont('helvetica', 'bold'); doc.text('Kuda:', M, y);
+    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.toName), M + 24, y);
+    y += 9;
+    doc.setFont('helvetica', 'bold'); doc.text('Otpravil:', M, y);
+    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.sender || '____________________'), M + 24, y);
+    doc.setFont('helvetica', 'bold'); doc.text('Prinyal:', W/2, y);
+    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.receiver || '____________________'), W/2 + 22, y);
+    y += 6;
+
+    const rows = TR.items.map((it, i) => [
+      String(i + 1), trTranslit(it.name || '-'), last4(it.barcode), it.sizeLabel || '-', String(it.qty || 1),
+    ]);
+    doc.autoTable({
+      startY: y + 2,
+      head: [['#', 'Tovar', 'Kod (posl.4)', 'Razmer', 'Kol-vo']],
+      body: rows,
+      styles: { font: 'helvetica', fontSize: 9, cellPadding: 2 },
+      headStyles: { fillColor: [16, 185, 129], textColor: 255, halign: 'center' },
+      columnStyles: { 0: { halign: 'center', cellWidth: 12 }, 2: { halign: 'center' }, 3: { halign: 'center' }, 4: { halign: 'center' } },
+      margin: { left: M, right: M },
+    });
+    let yy = doc.lastAutoTable.finalY + 8;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
+    doc.text('Itogo edinic: ' + trUnits(), M, yy);
+    doc.text('Unik. kodov: ' + trUniqCodes(), M + 70, yy);
+    yy += 14;
+    doc.setDrawColor(16, 185, 129); doc.setLineWidth(0.6);
+    doc.roundedRect(M, yy - 6, W - 2*M, 12, 2, 2);
+    doc.setTextColor(16, 133, 96);
+    doc.text('PEREMESHCHENIE PODTVERZHDENO', W/2, yy + 2, { align: 'center' });
+    doc.setTextColor(0,0,0);
+
+    doc.save(`peremeshchenie_${r.number || 'doc'}.pdf`);
+  } catch (e) {
+    alert('Не удалось сформировать PDF: ' + e.message);
+  }
+}
+
+// транслит кириллицы для PDF (helvetica не содержит кириллицы)
+function trTranslit(s) {
+  const map = { 'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya' };
+  return String(s || '').split('').map(ch => {
+    const low = ch.toLowerCase();
+    if (map[low] != null) { const t = map[low]; return ch === low ? t : (t.charAt(0).toUpperCase() + t.slice(1)); }
+    return ch;
+  }).join('');
 }
 
 // ══════════════════════════════════════════════════════════

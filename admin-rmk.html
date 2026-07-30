@@ -6,11 +6,16 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260730-112604">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260730-134032">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <!-- html5-qrcode — сканер штрихкодов камерой (перемещение товаров) -->
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <!-- jsPDF — генерация PDF документа перемещения -->
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 
@@ -68,6 +73,7 @@
         <button class="sb-item" data-view="monitoring"><span class="sb-ic">🖥</span> Мониторинг магазинов</button>
         <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
         <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
+        <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
       </nav>
 
       <button class="sb-logout" id="btnLogout"><span class="sb-ic">⤶</span> Выйти</button>
@@ -181,6 +187,11 @@
           <div id="recvBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ПЕРЕМЕЩЕНИЕ ТОВАРОВ ═══ -->
+        <section class="view" id="view-transfer">
+          <div id="trBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ЗАГЛУШКИ ═══ -->
         <section class="view" id="view-stub">
           <div class="stub">
@@ -194,6 +205,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260730-112604"></script>
+  <script src="admin-rmk.js?v=20260730-134032"></script>
 </body>
 </html>

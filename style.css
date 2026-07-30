@@ -4539,9 +4539,13 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
     text-align: center; font-variant-numeric: tabular-nums;
     font-weight: 700; color: var(--pm-muted); font-size: 12px;
 }
-.pmob-hist-row .c-size { text-align: center; font-weight: 700; color: var(--pm-ink); }
+.pmob-hist-row .c-size {
+    text-align: center; font-weight: 700; color: var(--pm-ink); font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
 .pmob-hist-row .c-time {
-    text-align: center; font-variant-numeric: tabular-nums; color: var(--pm-muted); font-size: 12px;
+    text-align: center; font-variant-numeric: tabular-nums; color: var(--pm-muted);
+    font-size: 12px; white-space: nowrap;
 }
 .pmob-hist-row .c-pay { text-align: right; }
 /* Бейдж способа оплаты */

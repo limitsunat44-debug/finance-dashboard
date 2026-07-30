@@ -12643,10 +12643,14 @@ function pmobPayBadge(pay) {
     return `<span class="pmob-pay-badge pmob-pay-${m.cls}">${m.ico} ${posEsc(p || 'Прочее')}</span>`;
 }
 
-// размер: «размер:38» → «38»; пусто → «—»
+// размер: «размер:38» → «38»; мусор («кол-во: 1шт») / пусто → «—»
 function pmobHistSize(sz) {
     if (!sz) return '—';
-    return String(sz).replace(/^\s*размер\s*:\s*/i, '').trim() || '—';
+    let v = String(sz).replace(/^\s*размер\s*:\s*/i, '').trim();
+    if (!v) return '—';
+    // отсекаем не-размерные подписи (кол-во/шт/упаковка и т.п.)
+    if (/кол-?во|шт\.?|упак|компл/i.test(v)) return '—';
+    return v;
 }
 
 function pmobOpenHistory() {

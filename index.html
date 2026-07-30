@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260730-093435">
+    <link rel="stylesheet" href="style.css?v=20260730-111657">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2292,6 +2292,7 @@
                 <div class="pmob-menu">
                   <button type="button" class="pmob-menu-item" id="pmobMoreReturn"><span class="pmob-menu-ico">↩️</span><span class="pmob-menu-txt">Возврат товара</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreSearch"><span class="pmob-menu-ico">🔎</span><span class="pmob-menu-txt">Поиск товара</span><span class="pmob-chev">›</span></button>
+                  <button type="button" class="pmob-menu-item" id="pmobMoreHistory"><span class="pmob-menu-ico">🧾</span><span class="pmob-menu-txt">История продаж</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreDisc"><span class="pmob-menu-ico">％</span><span class="pmob-menu-txt">Скидка −5% на чек</span><span class="pmob-menu-state" id="pmobDiscState">выкл</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreDesktop"><span class="pmob-menu-ico">🖥️</span><span class="pmob-menu-txt">Классический вид</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item pmob-menu-danger" id="pmobMoreCloseShift"><span class="pmob-menu-ico">⏻</span><span class="pmob-menu-txt">Закрыть смену</span><span class="pmob-chev">›</span></button>
@@ -2483,6 +2484,43 @@
                 </div>
                 <div class="pmob-sug" id="pmobSearchSug"></div>
                 <div class="pmob-search-res" id="pmobSearchRes"></div>
+              </section>
+
+              <!-- ЭКРАН: история продаж (позиции за день, без фото) -->
+              <section class="pmob-screen" id="pmobScreenHistory" style="display:none;">
+                <div class="pmob-sub-head">
+                  <button type="button" class="pmob-back" id="pmobHistBack" aria-label="Назад">←</button>
+                  <div class="pmob-sub-title">История продаж</div>
+                  <span class="pmob-head-gap"></span>
+                </div>
+                <!-- выбор даты -->
+                <label class="pmob-hist-date" for="pmobHistDate">
+                  <span class="pmob-hist-date-ico">🗓️</span>
+                  <span class="pmob-hist-date-txt" id="pmobHistDateTxt">Сегодня</span>
+                  <input type="date" id="pmobHistDate" class="pmob-hist-date-input">
+                  <span class="pmob-hist-date-chev">⌄</span>
+                </label>
+                <!-- KPI -->
+                <div class="pmob-hist-kpis">
+                  <div class="pmob-hist-kpi">
+                    <span class="pmob-hist-kpi-cap">Продано товаров</span>
+                    <b class="pmob-hist-kpi-val"><span id="pmobHistCount">0</span> <small>шт</small></b>
+                  </div>
+                  <div class="pmob-hist-kpi">
+                    <span class="pmob-hist-kpi-cap">Выручка</span>
+                    <b class="pmob-hist-kpi-val" id="pmobHistRevenue">0 с.</b>
+                  </div>
+                </div>
+                <!-- поиск по товару/коду -->
+                <div class="pmob-search-box">
+                  <span class="pmob-search-ico">🔎</span>
+                  <input type="search" id="pmobHistSearch" class="pmob-search-input" placeholder="Поиск по товару или коду" autocomplete="off">
+                  <button type="button" class="pmob-search-clr" id="pmobHistSearchClear" aria-label="Очистить">×</button>
+                </div>
+                <!-- шапка таблицы + список позиций -->
+                <div class="pmob-hist-list" id="pmobHistList">
+                  <div class="pmob-empty">Загрузка…</div>
+                </div>
               </section>
 
               <!-- ЗАКРЕПЛЁННЫЙ ИТОГ + КНОПКА ОПЛАТЫ -->
@@ -2982,7 +3020,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260730-093435"></script>
+    <script src="app.js?v=20260730-111657"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

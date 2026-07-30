@@ -11316,13 +11316,14 @@ const PMOB_SCREENS = {
     card: 'pmobScreenCard',
     doctor: 'pmobScreenDoctor',
     search: 'pmobScreenSearch',
+    history: 'pmobScreenHistory',
     return: 'pmobScreenReturn',
     retitem: 'pmobScreenRetItem',
     retdone: 'pmobScreenRetDone',
     saledone: 'pmobScreenSaleDone',
 };
 const PMOB_NAV_OF = {
-    cart: 'cart', card: 'cart', doctor: 'cart', pay: 'pay', more: 'more', search: 'more',
+    cart: 'cart', card: 'cart', doctor: 'cart', pay: 'pay', more: 'more', search: 'more', history: 'more',
     return: 'return', retitem: 'return', retdone: 'return', saledone: 'cart',
 };
 
@@ -12623,6 +12624,131 @@ function pmobOpenSearch() {
     setTimeout(() => { const i = pmobEl('pmobSearchInput'); if (i) i.focus(); }, 120);
 }
 
+// ─────────────── ИСТОРИЯ ПРОДАЖ (мобильный кассир) ───────────────
+// Показывает ПОЗИЦИИ (проданные товары) за выбранный день по своей кассе.
+// Без фото: товар, код (посл.4), размер, время, способ оплаты.
+POS.hist = POS.hist || { date: null, items: [], filter: '', loading: false };
+
+// бейдж способа оплаты → css-класс + иконка
+function pmobPayBadge(pay) {
+    const p = String(pay || '').trim();
+    const map = {
+        'Наличные': { cls: 'cash',    ico: '💵' },
+        'Alif QR':    { cls: 'alifqr',  ico: '📱' },
+        'Alif кошелёк': { cls: 'alifwlt', ico: '👛' },
+        'DC кошелёк':   { cls: 'dcwlt',   ico: '👛' },
+        'DC QR':      { cls: 'dcqr',    ico: '📱' },
+    };
+    const m = map[p] || { cls: 'other', ico: '💳' };
+    return `<span class="pmob-pay-badge pmob-pay-${m.cls}">${m.ico} ${posEsc(p || 'Прочее')}</span>`;
+}
+
+// размер: «размер:38» → «38»; пусто → «—»
+function pmobHistSize(sz) {
+    if (!sz) return '—';
+    return String(sz).replace(/^\s*размер\s*:\s*/i, '').trim() || '—';
+}
+
+function pmobOpenHistory() {
+    const inp = pmobEl('pmobHistDate');
+    if (inp && !inp.value) inp.value = repToday();
+    const today = repToday();
+    const cur = (inp && inp.value) || today;
+    pmobHistUpdateDateTxt(cur);
+    pmobShow('history');
+    // грузим только если ещё не грузили эту дату
+    if (POS.hist.date !== cur) pmobHistLoad(cur);
+    else pmobHistRender();
+}
+
+function pmobHistUpdateDateTxt(iso) {
+    const el = pmobEl('pmobHistDateTxt');
+    if (!el) return;
+    const today = repToday();
+    if (iso === today) { el.textContent = 'Сегодня'; return; }
+    // 'YYYY-MM-DD' → 'DD.MM.YYYY'
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
+    el.textContent = m ? `${m[3]}.${m[2]}.${m[1]}` : (iso || '—');
+}
+
+// касса текущей смены (своя касса)
+function pmobHistKassa() {
+    const sh = POS.shift || {};
+    return sh.kassa_c1_ref || sh.kassaC1Ref || (POS.chosen && POS.chosen.ref) || '';
+}
+
+async function pmobHistLoad(iso) {
+    const date = iso || repToday();
+    POS.hist.loading = true;
+    POS.hist.date = date;
+    const list = pmobEl('pmobHistList');
+    if (list) list.innerHTML = '<div class="pmob-empty">Загрузка…</div>';
+    const cnt = pmobEl('pmobHistCount'); if (cnt) cnt.textContent = '0';
+    const rev = pmobEl('pmobHistRevenue'); if (rev) rev.textContent = '0 с.';
+    try {
+        const kassa = pmobHistKassa();
+        const qp = `?action=sales-items&from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}` +
+            (kassa ? `&kassa=${encodeURIComponent(kassa)}` : '');
+        const r = await posApi(qp, { method: 'GET' });
+        if (!r.ok || !r.data || !r.data.ok) throw new Error((r.data && r.data.error) || `HTTP ${r.status}`);
+        POS.hist.items = Array.isArray(r.data.items) ? r.data.items : [];
+        POS.hist.count = Number(r.data.count) || 0;
+        POS.hist.revenue = Number(r.data.revenue) || 0;
+    } catch (e) {
+        console.error('pmobHistLoad:', e);
+        POS.hist.items = [];
+        POS.hist.count = 0; POS.hist.revenue = 0;
+        if (list) list.innerHTML = `<div class="pmob-empty">Не удалось загрузить историю. ${posEsc(e.message || '')}</div>`;
+    } finally {
+        POS.hist.loading = false;
+    }
+    pmobHistRender();
+}
+
+function pmobHistRender() {
+    const list = pmobEl('pmobHistList');
+    if (!list) return;
+    if (POS.hist.loading) return;
+    const cnt = pmobEl('pmobHistCount'); if (cnt) cnt.textContent = posMoney(POS.hist.count || 0);
+    const rev = pmobEl('pmobHistRevenue'); if (rev) rev.textContent = posMoney(POS.hist.revenue || 0) + ' с.';
+
+    const q = (POS.hist.filter || '').trim().toLowerCase();
+    let rows = POS.hist.items || [];
+    if (q) {
+        rows = rows.filter(it =>
+            String(it.name || '').toLowerCase().includes(q) ||
+            String(it.code4 || '').toLowerCase().includes(q) ||
+            String(it.barcode || '').toLowerCase().includes(q)
+        );
+    }
+    if (!rows.length) {
+        list.innerHTML = q
+            ? '<div class="pmob-empty">Ничего не найдено по запросу.</div>'
+            : '<div class="pmob-empty">Нет продаж за этот день.</div>';
+        return;
+    }
+    const head =
+        '<div class="pmob-hist-thead">' +
+        '<span class="c-name">Товар</span>' +
+        '<span class="c-code">Код</span>' +
+        '<span class="c-size">Разм.</span>' +
+        '<span class="c-time">Время</span>' +
+        '<span class="c-pay">Оплата</span>' +
+        '</div>';
+    const body = rows.map(it => {
+        const size = pmobHistSize(it.size);
+        const time = repDushTime(it.date, false);
+        return '<div class="pmob-hist-row">' +
+            `<span class="c-name">${posEsc(it.name || 'Товар')}</span>` +
+            `<span class="c-code">${posEsc(it.code4 || '—')}</span>` +
+            `<span class="c-size">${posEsc(size)}</span>` +
+            `<span class="c-time">${posEsc(time)}</span>` +
+            `<span class="c-pay">${pmobPayBadge(it.pay)}</span>` +
+            '</div>';
+    }).join('');
+    list.innerHTML = head + body;
+}
+
 function pmobBindEvents() {
     const ov = pmobEl('posMobile');
     if (!ov) return;
@@ -12647,6 +12773,25 @@ function pmobBindEvents() {
     on('pmobMoreCloseShift', posCloseShift);
     on('pmobMoreReturn', posOpenReturn);
     on('pmobMoreSearch', pmobOpenSearch);
+    on('pmobMoreHistory', pmobOpenHistory);
+    on('pmobHistBack', () => pmobShow('more'));
+    const histDate = pmobEl('pmobHistDate');
+    if (histDate) histDate.addEventListener('change', () => {
+        const v = histDate.value || repToday();
+        pmobHistUpdateDateTxt(v);
+        pmobHistLoad(v);
+    });
+    const histSearch = pmobEl('pmobHistSearch');
+    if (histSearch) histSearch.addEventListener('input', () => {
+        POS.hist.filter = histSearch.value || '';
+        pmobHistRender();
+    });
+    on('pmobHistSearchClear', () => {
+        const i = pmobEl('pmobHistSearch');
+        if (i) i.value = '';
+        POS.hist.filter = '';
+        pmobHistRender();
+    });
     on('pmobMoreDisc', () => { posApply5Cart(); pmobRender(); });
     on('pmobMoreDesktop', () => { POS.mobDesktopView = true; pmobApply(); });
 

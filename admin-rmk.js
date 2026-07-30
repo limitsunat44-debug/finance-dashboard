@@ -9,12 +9,25 @@ const BARCODE_SVC_URL = 'https://1c-sync-barcodes.vercel.app';
 const BARCODE_SVC_SECRET = 'TySog2bN1bMJHsssoTvyCZO3IKOef1z0';
 
 // ─────────── Аккаунты (синхронно с дашбордом) ───────────
-// В админку пускаем ТОЛЬКО полноправных админов (allowedTabs === '*').
+// allowedTabs: '*' — полный доступ ко всем вкладкам;
+// массив ключей VIEW_META — доступ ТОЛЬКО к перечисленным вкладкам.
 const ADMIN_ACCOUNTS = {
   'Sunnat':   { password: 'Sunna0909', displayName: 'Sunnat',   allowedTabs: '*' },
   'Iskandar': { password: '1111',      displayName: 'Iskandar', allowedTabs: '*' },
   'Shahida':  { password: 's2364170',  displayName: 'Shahida',  allowedTabs: '*' },
+  // Ограниченный доступ: только вкладка «Перемещение товаров»
+  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer'] },
 };
+// true, если у аккаунта есть хоть какой-то доступ в админку
+function accHasAccess(acc) {
+  return !!acc && (acc.allowedTabs === '*' || (Array.isArray(acc.allowedTabs) && acc.allowedTabs.length > 0));
+}
+// true, если аккаунту доступна конкретная вкладка
+function accCanView(acc, view) {
+  if (!acc) return false;
+  if (acc.allowedTabs === '*') return true;
+  return Array.isArray(acc.allowedTabs) && acc.allowedTabs.includes(view);
+}
 const LS_KEY = 'orto_admin_rmk_auth';
 
 // ─────────── Утилиты ───────────
@@ -67,6 +80,7 @@ async function posApi(path, opts) {
 // ─────────── Состояние ───────────
 const state = {
   user: null,
+  allowedTabs: '*',    // '*' | ['transfer', ...]
   view: 'overview',
   from: dushToday(),
   to: dushToday(),
@@ -84,8 +98,10 @@ function tryRestoreAuth() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return false;
     const { user } = JSON.parse(raw);
-    if (user && ADMIN_ACCOUNTS[user] && ADMIN_ACCOUNTS[user].allowedTabs === '*') {
-      state.user = ADMIN_ACCOUNTS[user].displayName;
+    const acc = user && ADMIN_ACCOUNTS[user];
+    if (accHasAccess(acc)) {
+      state.user = acc.displayName;
+      state.allowedTabs = acc.allowedTabs;
       return true;
     }
   } catch (_) {}
@@ -107,13 +123,14 @@ function initLogin() {
       errEl.style.display = 'block';
       return;
     }
-    if (acc.allowedTabs !== '*') {
+    if (!accHasAccess(acc)) {
       errEl.textContent = 'Нет доступа к админ-панели РМК';
       errEl.style.display = 'block';
       return;
     }
     localStorage.setItem(LS_KEY, JSON.stringify({ user: u, ts: Date.now() }));
     state.user = acc.displayName;
+    state.allowedTabs = acc.allowedTabs;
     enterApp();
   });
 }
@@ -161,10 +178,14 @@ async function bootApp() {
   if (burger) burger.addEventListener('click', () => toggleSidebar());
   if (overlay) overlay.addEventListener('click', () => toggleSidebar(false));
 
+  // Ограничение доступа: скрываем неразрешённые пункты меню и выбираем стартовый
+  applyTabAccess();
+
   // навигация
   document.querySelectorAll('.sb-item').forEach(btn => {
     btn.addEventListener('click', () => {
       const v = btn.dataset.view;
+      if (!accCanView({ allowedTabs: state.allowedTabs }, v)) return; // запрет на неразрешённые
       document.querySelectorAll('.sb-item').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.view = v;
@@ -178,6 +199,28 @@ async function bootApp() {
 
   renderView();
   bumpSync();
+}
+
+// Применить ограничения доступа к вкладкам: скрыть неразрешённые пункты, выбрать первый доступный.
+function applyTabAccess() {
+  if (state.allowedTabs === '*') return; // полный доступ — ничего не прячем
+  const items = document.querySelectorAll('.sb-item');
+  let firstAllowed = null;
+  items.forEach(btn => {
+    const v = btn.dataset.view;
+    if (accCanView({ allowedTabs: state.allowedTabs }, v)) {
+      if (!firstAllowed) firstAllowed = v;
+      btn.classList.remove('active');
+    } else {
+      btn.style.display = 'none'; // скрыть недоступную вкладку
+    }
+  });
+  // стартовая вкладка — первая разрешённая
+  if (firstAllowed) {
+    state.view = firstAllowed;
+    const activeBtn = document.querySelector('.sb-item[data-view="' + firstAllowed + '"]');
+    if (activeBtn) activeBtn.classList.add('active');
+  }
 }
 
 // Открыть/закрыть боковое меню на мобильных. force=true — открыть, false — закрыть, undefined — переключить.
@@ -210,6 +253,11 @@ async function loadKassas() {
 }
 
 function renderView(force) {
+  // Защита доступа: если текущая вкладка не разрешена — переключаемся на первую доступную
+  if (!accCanView({ allowedTabs: state.allowedTabs }, state.view)) {
+    const fallback = document.querySelector('.sb-item:not([style*="display: none"])');
+    if (fallback) { state.view = fallback.dataset.view; }
+  }
   const v = state.view;
   const isReady = READY_VIEWS.includes(v);
   // переключаем секции

@@ -3720,23 +3720,20 @@ td.prod-cell.prod-stock-low { background: rgba(var(--color-warning-rgb), 0.12); 
    возвращаем видимость только #labelPrintArea и его содержимому.
    Так печать этикеток не зависит от того, какие секции остались display:block. */
 @media print {
-  body.printing-labels * {
-    visibility: hidden !important;
-  }
-  body.printing-labels #labelPrintArea,
-  body.printing-labels #labelPrintArea * {
-    visibility: visible !important;
-  }
-  /* #pmobPrintArea не должен всплыть при печати этикеток */
-  body.printing-labels #pmobPrintArea {
+  /* ВАЖНО: в режиме печати этикеток полностью УБИРАЕМ дашборд из потока
+     через display:none. Раньше был visibility:hidden — он оставляет элементы
+     в раскладке, и длинный дашборд растягивался на десятки ПУСТЫХ листов.
+     Скрываем ПРЯМЫХ детей <body>, а область этикеток выносим fixed поверх. */
+  body.printing-labels > * {
     display: none !important;
   }
   body.printing-labels #labelPrintArea {
     display: block !important;
-    position: absolute !important;
+    position: fixed !important;
     left: 0; top: 0;
     width: 100%;
     margin: 0; padding: 0;
+    background: #fff;
   }
   body.printing-labels .label-tag {
     display: flex !important;

@@ -541,3 +541,72 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
   .fin-donut-wrap{flex-direction:column}
   .fin-donut-wrap .chart-box{flex:0 0 auto;width:100%;max-width:220px}
 }
+
+/* ═══ Расширение «Выручка-Расходы»: Обзор · Поставщики · Сотрудники ═══ */
+.fin-h3{font-size:15px;font-weight:700;margin:0 0 12px;color:var(--tx)}
+.fin-note{font-size:12px;color:var(--tx3);font-weight:400}
+.fin-sec-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px}
+.btn-xs{padding:4px 9px;font-size:12px;border-radius:8px}
+.fin-actions{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}
+.fin-btn-danger{color:var(--red)}
+.fin-btn-danger:hover{border-color:var(--red);background:var(--red-soft)}
+
+/* таблицы обзора/поставщиков/сотрудников */
+.fin-tbl td,.fin-tbl th{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line2);vertical-align:middle}
+.fin-tbl th{font-size:12px;color:var(--tx2);font-weight:600;text-transform:uppercase;letter-spacing:.02em}
+.fin-tbl td.num,.fin-tbl th.num{text-align:right;font-variant-numeric:tabular-nums}
+.fin-tbl tbody tr:hover{background:var(--g-soft)}
+
+/* Финансовый результат */
+.fin-fr{display:flex;flex-direction:column;gap:2px}
+.fin-fr-row{display:flex;align-items:center;justify-content:space-between;padding:8px 4px;font-size:14px}
+.fin-fr-lbl{color:var(--tx2)}
+.fin-fr-val{font-variant-numeric:tabular-nums;font-weight:600}
+.fin-fr-plus{color:var(--g2)}
+.fin-fr-minus{color:var(--red)}
+.fin-fr-sep{height:1px;background:var(--line);margin:6px 0}
+.fin-fr-strong{padding:12px 4px;background:var(--g-soft);border-radius:10px;margin-top:4px}
+.fin-fr-strong .fin-fr-lbl{font-weight:800;color:var(--tx);font-size:15px}
+.fin-fr-strong .fin-fr-val{font-size:18px;font-weight:800}
+
+/* мини-бар выручки по магазинам */
+.fin-bar-bg{background:var(--line2);border-radius:6px;height:10px;overflow:hidden}
+.fin-bar-fill{background:linear-gradient(90deg,var(--g),var(--g2));height:100%;border-radius:6px}
+
+/* курсы валют */
+.fin-fx-bar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 16px;margin-bottom:14px}
+.fin-fx-item{font-size:13px;color:var(--tx2)}
+.fin-fx-item b{color:var(--tx);font-size:15px}
+
+/* поставщики */
+.fin-sup-ph{width:36px;height:36px;border-radius:8px;object-fit:cover;display:block}
+.fin-sup-ph-empty{display:flex;align-items:center;justify-content:center;background:var(--g-soft);font-size:18px}
+.fin-debt-yes{color:var(--red)}
+.fin-debt-over{color:var(--g2)}
+.fin-debt-zero{color:var(--tx3)}
+
+/* сотрудники */
+.fin-emp-dism{opacity:.55}
+
+/* модалки */
+.fin-modal-bg{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;z-index:100;overflow:auto}
+.fin-modal{background:var(--card);border-radius:18px;box-shadow:var(--shadow-lg);width:100%;max-width:440px;animation:finModalIn .18s ease}
+.fin-modal-wide{max-width:680px}
+@keyframes finModalIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+.fin-modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
+.fin-modal-head h3{margin:0;font-size:16px;font-weight:700}
+.fin-modal-x{border:none;background:none;font-size:18px;color:var(--tx3);cursor:pointer;line-height:1;padding:4px}
+.fin-modal-x:hover{color:var(--red)}
+.fin-modal-body{padding:20px 22px;display:flex;flex-direction:column;gap:14px}
+.fin-modal-foot{display:flex;align-items:center;justify-content:space-between;padding:14px 22px;border-top:1px solid var(--line);gap:10px}
+.fin-modal-foot>div{display:flex;gap:8px}
+.fin-modal .fld{display:flex;flex-direction:column;gap:6px}
+.fin-modal .fld>span{font-size:13px;color:var(--tx2);font-weight:600}
+.fin-modal .fld input,.fin-modal .fld select{padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;background:var(--card);color:var(--tx)}
+.fin-modal .fld input:focus,.fin-modal .fld select:focus{outline:none;border-color:var(--g);box-shadow:0 0 0 3px var(--g-soft)}
+.fin-modal .fld-inline{flex-direction:row;align-items:center;justify-content:space-between;gap:12px}
+.fin-modal .fld-inline>span{flex:1}
+.fin-modal .fld-inline input{width:140px;text-align:right}
+.fin-modal .fld-check{flex-direction:row;align-items:center;gap:8px;font-size:14px;color:var(--tx)}
+.fin-modal .fld-check input{width:auto}
+.fin-modal .errbar{margin:0 22px 16px}

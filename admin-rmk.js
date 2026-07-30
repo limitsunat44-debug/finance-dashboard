@@ -159,7 +159,7 @@ const VIEW_META = {
   monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
   cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
-  finance:   { title: 'Движение денежных средств', sub: 'Финансовый учёт и контроль движения денежных средств' },
+  finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
 };
 const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer', 'finance'];
 
@@ -2114,11 +2114,17 @@ const FIN = {
   cats: [],        // категории
   salons: [],      // [{warehouse_id,name}]
   expenses: [],    // расходы за период
-  sub: 'expenses', // под-вкладка: expenses | fixed | compare | revenue
+  sub: 'overview', // под-вкладка: overview | expenses | fixed | compare | revenue | suppliers | employees
   page: 1,
   perPage: 25,
   flt: { cat: '', salon: '', kind: '', q: '' },
   form: { kind: 'variable' }, // состояние панели добавления
+  // расширение «Выручка-Расходы»
+  profit: null,      // сводка прибыли (fin-profit)
+  suppliers: null,   // [{...,debt_tjs,debt_foreign}]
+  employees: null,   // [{...,salaries:[]}]
+  fx: null,          // {USD:{rate,date},CNY:{...}}
+  supOpsOpen: null,  // id открытого поставщика (история операций)
 };
 
 // первый и последний день текущего месяца по Душанбе (для дефолтного периода)
@@ -2232,8 +2238,11 @@ function finPaint() {
 
     <!-- Под-вкладки -->
     <div class="fin-chips">
-      ${subChip('expenses', 'Расходы')}
-      ${subChip('fixed', 'Постоянные по категориям')}
+      ${subChip('overview', '📊 Обзор')}
+      ${subChip('expenses', 'Постоянные/переменные расходы')}
+      ${subChip('fixed', 'Расходы по категориям')}
+      ${subChip('suppliers', '🏷 Долги поставщикам')}
+      ${subChip('employees', '👥 Сотрудники и зарплаты')}
       ${subChip('compare', 'Сравнение 6 мес')}
       ${subChip('revenue', 'Выручка (ручной ввод)')}
     </div>
@@ -2258,6 +2267,9 @@ function finPaint() {
 }
 
 function finPaintSub(pre) {
+  if (FIN.sub === 'overview') return finPaintOverview();
+  if (FIN.sub === 'suppliers') return finPaintSuppliers();
+  if (FIN.sub === 'employees') return finPaintEmployees();
   if (FIN.sub === 'compare') return finPaintCompare();
   if (FIN.sub === 'revenue') return finPaintRevenue();
   // expenses / fixed → одинаковая раскладка (fixed отфильтрован в finFiltered)
@@ -2796,6 +2808,527 @@ function finExportCsv() {
   URL.revokeObjectURL(url);
 }
 
+
+
+// ══════════════════════════════════════════════════════════
+//  РАСШИРЕНИЕ «Выручка-Расходы»: Обзор · Поставщики · Сотрудники
+// ══════════════════════════════════════════════════════════
+
+const FIN_COUNTRY_LABEL = { turkey: '🇹🇷 Турция', china: '🇨🇳 Китай', uzbekistan: '🇺🇿 Узбекистан', tajikistan: '🇹🇯 Таджикистан' };
+const FIN_SALARY_LABEL = {
+  fixed_per_salon: 'Оклад по салонам',
+  percent_network: '% от выручки сети',
+  salary_plus_personal_percent: 'Оклад + % личных продаж',
+};
+
+// ————————————————————————————————————————————————
+//  ОБЗОР: 5 KPI + Финансовый результат + Выручка по магазинам + график
+// ————————————————————————————————————————————————
+async function finPaintOverview() {
+  const host = $('finSubBody');
+  host.innerHTML = `<div class="loading">⏳ Считаю финансовый результат…</div>`;
+  try {
+    const from = FIN._from, to = FIN._to;
+    const d = await posApi(`?action=fin-profit&from=${from}&to=${to}`, { method: 'GET' });
+    FIN.profit = d;
+    const s = d.summary;
+    const bySalon = d.by_salon || [];
+    const prorated = d.range && d.range.prorated;
+
+    // 5 KPI: Выручка / Постоянные / Переменные / Зарплаты / Чистая прибыль
+    const profitTone = s.net_profit >= 0 ? 'green' : 'red';
+    const kpiRow = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px">
+        ${kpi('💰','Выручка (из 1С)', money(s.revenue),'green', 'чистая, продажи − возвраты')}
+        ${kpi('📌','Постоянные расходы', money(s.expenses_fixed),'amber', 'аренда, оклады и т.д.')}
+        ${kpi('🧾','Переменные расходы', money(s.expenses_variable),'amber', 'закуп, логистика и т.д.')}
+        ${kpi('👥','Зарплаты', money(s.payroll_total),'blue', `оклад ${fmtInt(s.payroll_oklad)} + % ${fmtInt(s.payroll_percent)}`)}
+        ${kpi(s.net_profit>=0?'📈':'📉','Чистая прибыль', money(s.net_profit), profitTone, s.net_profit>=0?'прибыль за период':'убыток за период')}
+      </div>`;
+
+    // Финансовый результат — прозрачная расшифровка формулы
+    const line = (label, val, sign, strong) => {
+      const cls = sign < 0 ? 'fin-fr-minus' : (sign > 0 ? 'fin-fr-plus' : '');
+      const pref = sign < 0 ? '− ' : (sign > 0 ? '' : '');
+      return `<div class="fin-fr-row ${strong ? 'fin-fr-strong' : ''}">
+        <span class="fin-fr-lbl">${label}</span>
+        <span class="fin-fr-val ${cls}">${pref}${money(Math.abs(val))}</span></div>`;
+    };
+    const frBlock = `
+      <div class="card card-pad" style="margin-bottom:14px">
+        <h3 class="fin-h3">Финансовый результат ${prorated ? '<span class="fin-note">(пропорц. дням периода)</span>' : ''}</h3>
+        <div class="fin-fr">
+          ${line('Выручка (net из 1С)', s.revenue, 1, false)}
+          ${line(`Себестоимость товара (${Math.round(s.cogs_rate*100)}%)`, s.cogs, -1, false)}
+          ${line('Постоянные расходы', s.expenses_fixed, -1, false)}
+          ${line('Переменные расходы', s.expenses_variable, -1, false)}
+          ${line('Выплаты поставщикам', s.supplier_payments, -1, false)}
+          ${line('Зарплаты (оклад + %)', s.payroll_total, -1, false)}
+          <div class="fin-fr-sep"></div>
+          ${line('ЧИСТАЯ ПРИБЫЛЬ', s.net_profit, s.net_profit>=0?1:-1, true)}
+        </div>
+        <p class="fin-note" style="margin-top:8px">Закупки у поставщиков в долг прибыль не уменьшают — учитываются только фактические выплаты (кассовый метод). Справочно за период добавлено долга: <b>${money(s.supplier_new_debt)}</b>.</p>
+      </div>`;
+
+    // Выручка по магазинам
+    const maxRev = Math.max(1, ...bySalon.map(r => r.revenue));
+    const salonRows = bySalon.map(r => `
+      <tr>
+        <td>${esc(r.name)}</td>
+        <td class="num">${money(r.revenue)}</td>
+        <td class="num">${money(r.expenses)}</td>
+        <td class="num"><b class="${r.profit>=0?'fin-fr-plus':'fin-fr-minus'}">${money(r.profit)}</b></td>
+        <td style="width:120px"><div class="fin-bar-bg"><div class="fin-bar-fill" style="width:${Math.round(r.revenue/maxRev*100)}%"></div></div></td>
+      </tr>`).join('');
+    const salonBlock = `
+      <div class="card card-pad" style="margin-bottom:14px">
+        <h3 class="fin-h3">Выручка по магазинам</h3>
+        <table class="tbl fin-tbl">
+          <thead><tr><th>Магазин</th><th class="num">Выручка</th><th class="num">Постоянные расходы</th><th class="num">Прибыль</th><th></th></tr></thead>
+          <tbody>${salonRows || '<tr><td colspan="5" class="muted">Нет данных</td></tr>'}</tbody>
+        </table>
+        <p class="fin-note">Прибыль салона = выручка − (собственные постоянные + доля общих постоянных пропорц. выручке). Без себестоимости, зарплат-% и выплат поставщикам — они считаются по сети.</p>
+      </div>`;
+
+    // График динамики: выручка / расходы / чистая прибыль по дням
+    const trendBlock = `
+      <div class="card card-pad">
+        <h3 class="fin-h3">Динамика за период</h3>
+        <div style="position:relative;height:280px"><canvas id="finOverviewTrend"></canvas></div>
+      </div>`;
+
+    host.innerHTML = kpiRow + frBlock + salonBlock + trendBlock;
+    finDrawOverviewTrend('finOverviewTrend', from, to);
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось посчитать обзор: ' + (e.message || e));
+  }
+}
+
+// График: 3 линии (выручка/расходы/чистая прибыль) по дням периода.
+async function finDrawOverviewTrend(canvasId, from, to) {
+  const el = $(canvasId); if (!el) return;
+  destroyChart(canvasId);
+  try {
+    // Выручка по дням из 1С (через отдельный публичный проект — читаем на бэке нельзя по дням, берём агрегат).
+    // Простая версия: расходы по дням (shop_expenses.expense_date) + выручка распределяем равномерно.
+    const s = FIN.profit ? FIN.profit.summary : null;
+    const days = [];
+    for (let t = new Date(from + 'T00:00:00Z'); t.toISOString().slice(0,10) <= to; t = new Date(t.getTime() + 86400000)) days.push(t.toISOString().slice(0,10));
+    if (!days.length) return;
+    // расходы по дням
+    const byDayExp = new Map();
+    for (const e of (FIN.expenses || [])) {
+      const dd = (e.expense_date || (e.period_month||'')).slice(0,10);
+      if (dd) byDayExp.set(dd, (byDayExp.get(dd)||0) + (+e.amount||0));
+    }
+    const n = days.length;
+    const revPerDay = s ? s.revenue / n : 0;
+    const cogsPerDay = s ? s.cogs / n : 0;
+    const supPerDay = s ? s.supplier_payments / n : 0;
+    const payrollPerDay = s ? s.payroll_total / n : 0;
+    const revArr = days.map(() => Math.round(revPerDay));
+    const expArr = days.map(dd => Math.round((byDayExp.get(dd)||0) + cogsPerDay + supPerDay + payrollPerDay));
+    const profitArr = days.map((dd,i) => revArr[i] - expArr[i]);
+    state.charts[canvasId] = new Chart(el, {
+      type: 'line',
+      data: {
+        labels: days.map(d => d.slice(5)),
+        datasets: [
+          { label: 'Выручка', data: revArr, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.10)', fill: true, tension: .3, pointRadius: 2 },
+          { label: 'Расходы', data: expArr, borderColor: '#e11d48', backgroundColor: 'rgba(225,29,72,.06)', fill: false, tension: .3, pointRadius: 2 },
+          { label: 'Чистая прибыль', data: profitArr, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.06)', fill: false, tension: .3, pointRadius: 2, borderDash: [5,3] },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: true, position: 'top' }, tooltip: { callbacks: { label: c => `${c.dataset.label}: ${fmtNum(c.parsed.y)} с.` } } },
+        scales: { y: { ticks: { callback: v => fmtInt(v) } } } },
+    });
+  } catch (e) { /* график необязателен */ }
+}
+
+// ————————————————————————————————————————————————
+//  ДОЛГИ ПОСТАВЩИКАМ
+// ————————————————————————————————————————————————
+async function finPaintSuppliers() {
+  const host = $('finSubBody');
+  host.innerHTML = `<div class="loading">⏳ Загружаю поставщиков…</div>`;
+  try {
+    const [supR, fxR] = await Promise.all([
+      posApi('?action=fin-suppliers&all=1', { method: 'GET' }),
+      posApi('?action=fin-fx', { method: 'GET' }),
+    ]);
+    FIN.suppliers = supR.suppliers || [];
+    FIN.fx = fxR.rates || {};
+
+    const sups = FIN.suppliers;
+    const totalDebt = sups.reduce((s, x) => s + (+x.debt_tjs || 0), 0);
+    const activeCnt = sups.filter(x => x.is_active).length;
+    const usd = FIN.fx.USD, cny = FIN.fx.CNY;
+
+    const fxLine = `
+      <div class="fin-fx-bar">
+        <span class="fin-fx-item">💵 USD: <b>${usd ? fmtNum(usd.rate) : '—'}</b> с. <span class="fin-note">${usd ? usd.date : ''}</span></span>
+        <span class="fin-fx-item">💴 CNY: <b>${cny ? fmtNum(cny.rate) : '—'}</b> с. <span class="fin-note">${cny ? cny.date : ''}</span></span>
+        <button class="btn btn-ghost btn-sm" id="finFxRefresh">↻ Обновить курс (Алиф)</button>
+        <button class="btn btn-ghost btn-sm" id="finFxManual">✎ Ввести вручную</button>
+      </div>`;
+
+    const rows = sups.map(x => {
+      const debtCls = x.debt_tjs > 0.5 ? 'fin-debt-yes' : (x.debt_tjs < -0.5 ? 'fin-debt-over' : 'fin-debt-zero');
+      const foreign = x.currency !== 'TJS' && Math.abs(x.debt_foreign) > 0.01 ? ` <span class="fin-note">(${fmtNum(x.debt_foreign)} ${x.currency})</span>` : '';
+      return `<tr data-sup="${x.id}">
+        <td>${x.photo_url ? `<img class="fin-sup-ph" src="${esc(x.photo_url)}" alt="">` : '<span class="fin-sup-ph fin-sup-ph-empty">🏷</span>'}</td>
+        <td><b>${esc(x.name)}</b>${x.is_active ? '' : ' <span class="badge off">архив</span>'}</td>
+        <td>${FIN_COUNTRY_LABEL[x.country] || x.country}</td>
+        <td>${x.currency}</td>
+        <td class="num"><b class="${debtCls}">${money(x.debt_tjs)}</b>${foreign}</td>
+        <td class="fin-actions">
+          <button class="btn btn-ghost btn-xs fin-sup-ops" data-id="${x.id}">Операции</button>
+          <button class="btn btn-ghost btn-xs fin-sup-pay" data-id="${x.id}">＋ Выплата</button>
+          <button class="btn btn-ghost btn-xs fin-sup-buy" data-id="${x.id}">＋ Закуп</button>
+          <button class="btn btn-ghost btn-xs fin-sup-edit" data-id="${x.id}">✎</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    host.innerHTML = `
+      ${fxLine}
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:14px">
+        ${kpi('🏷','Всего поставщиков', String(sups.length), 'blue', `${activeCnt} активных`)}
+        ${kpi('💳','Общий долг', money(totalDebt), totalDebt>0?'red':'green', 'сумма долгов в сомони')}
+      </div>
+      <div class="card card-pad">
+        <div class="fin-sec-head">
+          <h3 class="fin-h3">Поставщики и долги</h3>
+          <button class="btn btn-primary btn-sm" id="finSupAdd">＋ Поставщик</button>
+        </div>
+        <table class="tbl fin-tbl">
+          <thead><tr><th></th><th>Поставщик</th><th>Страна</th><th>Валюта</th><th class="num">Долг</th><th></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" class="muted">Нет поставщиков</td></tr>'}</tbody>
+        </table>
+        <p class="fin-note">Долг = сумма закупок − сумма выплат. Красный — мы должны; зелёный — переплата/аванс.</p>
+      </div>
+      <div id="finSupModal"></div>`;
+
+    // события
+    $('finSupAdd').addEventListener('click', () => finSupForm(null));
+    $('finFxRefresh').addEventListener('click', finFxRefresh);
+    $('finFxManual').addEventListener('click', finFxManualForm);
+    host.querySelectorAll('.fin-sup-edit').forEach(b => b.addEventListener('click', () => finSupForm(b.dataset.id)));
+    host.querySelectorAll('.fin-sup-ops').forEach(b => b.addEventListener('click', () => finSupOps(b.dataset.id)));
+    host.querySelectorAll('.fin-sup-pay').forEach(b => b.addEventListener('click', () => finSupOpForm(b.dataset.id, 'payment')));
+    host.querySelectorAll('.fin-sup-buy').forEach(b => b.addEventListener('click', () => finSupOpForm(b.dataset.id, 'purchase')));
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось загрузить поставщиков: ' + (e.message || e));
+  }
+}
+
+function finSupById(id) { return (FIN.suppliers || []).find(x => x.id === id); }
+
+// модалка: создание/редактирование поставщика
+function finSupForm(id) {
+  const sup = id ? finSupById(id) : null;
+  const m = $('finSupModal');
+  const cOpts = Object.keys(FIN_COUNTRY_LABEL).map(c => `<option value="${c}" ${sup && sup.country===c?'selected':''}>${FIN_COUNTRY_LABEL[c]}</option>`).join('');
+  m.innerHTML = `
+    <div class="fin-modal-bg" id="finSupModalBg">
+      <div class="fin-modal">
+        <div class="fin-modal-head"><h3>${sup ? 'Редактировать поставщика' : 'Новый поставщик'}</h3><button class="fin-modal-x" id="finSupClose">✕</button></div>
+        <div class="fin-modal-body">
+          <label class="fld"><span>Название</span><input id="fsName" value="${sup ? esc(sup.name) : ''}" placeholder="Напр. Forelli"></label>
+          <label class="fld"><span>Страна</span><select id="fsCountry">${cOpts}</select></label>
+          <label class="fld"><span>Валюта</span><select id="fsCur">
+            <option value="USD" ${sup&&sup.currency==='USD'?'selected':''}>USD</option>
+            <option value="CNY" ${sup&&sup.currency==='CNY'?'selected':''}>CNY</option>
+            <option value="TJS" ${sup&&sup.currency==='TJS'?'selected':''}>TJS (сомони)</option>
+          </select></label>
+          <label class="fld"><span>Фото (URL, необязательно)</span><input id="fsPhoto" value="${sup && sup.photo_url ? esc(sup.photo_url) : ''}" placeholder="https://…"></label>
+          ${sup ? '' : `<label class="fld"><span>Начальный долг (в валюте, необязательно)</span><input id="fsDebt" type="number" step="0.01" placeholder="0"></label>`}
+          ${sup ? `<label class="fld fld-check"><input type="checkbox" id="fsActive" ${sup.is_active?'checked':''}> Активен</label>` : ''}
+        </div>
+        <div class="fin-modal-foot">
+          ${sup ? `<button class="btn btn-ghost btn-sm fin-btn-danger" id="fsDelete">Удалить</button>` : '<span></span>'}
+          <div><button class="btn btn-ghost btn-sm" id="fsCancel">Отмена</button>
+          <button class="btn btn-primary btn-sm" id="fsSave">Сохранить</button></div>
+        </div>
+        <div id="fsMsg"></div>
+      </div>
+    </div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('finSupClose').addEventListener('click', close);
+  $('fsCancel').addEventListener('click', close);
+  $('finSupModalBg').addEventListener('click', e => { if (e.target.id === 'finSupModalBg') close(); });
+  // при смене страны — подставим валюту по умолчанию
+  $('fsCountry').addEventListener('change', () => {
+    const def = { turkey:'USD', china:'CNY', uzbekistan:'TJS', tajikistan:'TJS' }[$('fsCountry').value];
+    if (def) $('fsCur').value = def;
+  });
+  if ($('fsDelete')) $('fsDelete').addEventListener('click', async () => {
+    if (!confirm('Удалить поставщика вместе со всеми операциями?')) return;
+    try { await posApi('?action=fin-supplier-delete', { method:'POST', body: JSON.stringify({ id }) }); close(); finPaintSuppliers(); }
+    catch (e) { $('fsMsg').innerHTML = errBar(e.message||e); }
+  });
+  $('fsSave').addEventListener('click', async () => {
+    const body = {
+      name: $('fsName').value.trim(),
+      country: $('fsCountry').value,
+      currency: $('fsCur').value,
+      photo_url: $('fsPhoto').value.trim() || null,
+    };
+    if (!body.name) { $('fsMsg').innerHTML = errBar('Укажите название'); return; }
+    try {
+      if (sup) {
+        body.id = id; body.is_active = $('fsActive').checked;
+        await posApi('?action=fin-supplier-update', { method:'POST', body: JSON.stringify(body) });
+      } else {
+        const dv = parseFloat($('fsDebt') ? $('fsDebt').value : '');
+        if (dv > 0) body.initial_debt = dv;
+        await posApi('?action=fin-supplier-create', { method:'POST', body: JSON.stringify(body) });
+      }
+      close(); finPaintSuppliers();
+    } catch (e) { $('fsMsg').innerHTML = errBar(e.message||e); }
+  });
+}
+
+// модалка: операция (закуп/выплата)
+function finSupOpForm(id, type) {
+  const sup = finSupById(id); if (!sup) return;
+  const m = $('finSupModal');
+  const isPay = type === 'payment';
+  const foreignCur = sup.currency;
+  const canPayTjs = foreignCur !== 'TJS' && isPay;
+  const rate = FIN.fx && FIN.fx[foreignCur] ? FIN.fx[foreignCur].rate : '';
+  m.innerHTML = `
+    <div class="fin-modal-bg" id="finSupOpBg">
+      <div class="fin-modal">
+        <div class="fin-modal-head"><h3>${isPay?'Выплата':'Закуп'} — ${esc(sup.name)}</h3><button class="fin-modal-x" id="finOpClose">✕</button></div>
+        <div class="fin-modal-body">
+          ${canPayTjs ? `<label class="fld fld-check"><input type="checkbox" id="foTjs"> Выплата в сомони (TJS)</label>` : ''}
+          <label class="fld"><span>Сумма <span id="foCurLbl">(${foreignCur})</span></span><input id="foAmount" type="number" step="0.01" placeholder="0"></label>
+          <div id="foRateWrap" style="display:${foreignCur!=='TJS'?'block':'none'}"><label class="fld"><span>Курс ${foreignCur}→TJS</span><input id="foRate" type="number" step="0.0001" value="${rate}"></label></div>
+          <label class="fld"><span>Дата</span><input id="foDate" type="date" value="${dushToday()}"></label>
+          <label class="fld"><span>Комментарий</span><input id="foComment" placeholder="необязательно"></label>
+        </div>
+        <div class="fin-modal-foot"><span></span><div>
+          <button class="btn btn-ghost btn-sm" id="foCancel">Отмена</button>
+          <button class="btn btn-primary btn-sm" id="foSave">Сохранить</button></div></div>
+        <div id="foMsg"></div>
+      </div>
+    </div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('finOpClose').addEventListener('click', close);
+  $('foCancel').addEventListener('click', close);
+  $('finSupOpBg').addEventListener('click', e => { if (e.target.id === 'finSupOpBg') close(); });
+  if ($('foTjs')) $('foTjs').addEventListener('change', () => {
+    const tjs = $('foTjs').checked;
+    $('foCurLbl').textContent = tjs ? '(сомони)' : `(${foreignCur})`;
+    $('foRateWrap').style.display = tjs ? 'block' : (foreignCur!=='TJS'?'block':'none');
+  });
+  $('foSave').addEventListener('click', async () => {
+    const amount = parseFloat($('foAmount').value);
+    if (!(amount >= 0)) { $('foMsg').innerHTML = errBar('Укажите сумму'); return; }
+    const body = { supplier_id: id, type, amount_foreign: amount, operation_date: $('foDate').value, comment: $('foComment').value.trim() || null };
+    if ($('foTjs') && $('foTjs').checked) body.payment_currency = 'TJS';
+    if ($('foRate') && $('foRate').value) body.fx_rate = parseFloat($('foRate').value);
+    try { await posApi('?action=fin-supplier-op-create', { method:'POST', body: JSON.stringify(body) }); close(); finPaintSuppliers(); }
+    catch (e) { $('foMsg').innerHTML = errBar(e.message||e); }
+  });
+}
+
+// модалка: история операций поставщика
+async function finSupOps(id) {
+  const sup = finSupById(id); if (!sup) return;
+  const m = $('finSupModal');
+  m.innerHTML = `<div class="fin-modal-bg" id="finOpsBg"><div class="fin-modal fin-modal-wide"><div class="fin-modal-head"><h3>Операции — ${esc(sup.name)}</h3><button class="fin-modal-x" id="finOpsClose">✕</button></div><div class="fin-modal-body"><div class="loading">⏳ Загружаю…</div></div></div></div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('finOpsClose').addEventListener('click', close);
+  $('finOpsBg').addEventListener('click', e => { if (e.target.id === 'finOpsBg') close(); });
+  try {
+    const d = await posApi(`?action=fin-supplier-ops&supplier_id=${id}`, { method:'GET' });
+    const ops = d.operations || [];
+    const rows = ops.map(o => `<tr>
+      <td>${(o.operation_date||'').slice(0,10)}</td>
+      <td>${o.type==='payment'?'<span class="fin-fr-minus">Выплата</span>':'<span class="fin-fr-plus">Закуп</span>'}</td>
+      <td class="num">${fmtNum(o.amount_foreign)} ${sup.currency}</td>
+      <td class="num">${money(o.amount_tjs)}</td>
+      <td class="fin-note">${esc(o.comment||'')}</td>
+      <td><button class="btn btn-ghost btn-xs fin-op-del" data-id="${o.id}">✕</button></td>
+    </tr>`).join('');
+    m.querySelector('.fin-modal-body').innerHTML = `
+      <table class="tbl fin-tbl"><thead><tr><th>Дата</th><th>Тип</th><th class="num">Валюта</th><th class="num">Сомони</th><th>Комментарий</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="6" class="muted">Нет операций</td></tr>'}</tbody></table>`;
+    m.querySelectorAll('.fin-op-del').forEach(b => b.addEventListener('click', async () => {
+      if (!confirm('Удалить операцию?')) return;
+      try { await posApi('?action=fin-supplier-op-delete', { method:'POST', body: JSON.stringify({ id: b.dataset.id }) }); finSupOps(id); FIN.suppliers=null; }
+      catch (e) { alert(e.message||e); }
+    }));
+  } catch (e) { m.querySelector('.fin-modal-body').innerHTML = errBar(e.message||e); }
+}
+
+async function finFxRefresh() {
+  const btn = $('finFxRefresh'); if (btn) { btn.disabled = true; btn.textContent = '↻ Обновляю…'; }
+  try { await posApi('?action=fin-fx-refresh', { method:'POST', body: '{}' }); finPaintSuppliers(); }
+  catch (e) { alert('Не удалось обновить курс: ' + (e.message||e)); if (btn){btn.disabled=false;btn.textContent='↻ Обновить курс (Алиф)';} }
+}
+
+function finFxManualForm() {
+  const m = $('finSupModal');
+  const usd = FIN.fx && FIN.fx.USD ? FIN.fx.USD.rate : '';
+  const cny = FIN.fx && FIN.fx.CNY ? FIN.fx.CNY.rate : '';
+  m.innerHTML = `<div class="fin-modal-bg" id="finFxBg"><div class="fin-modal"><div class="fin-modal-head"><h3>Курс валют (вручную)</h3><button class="fin-modal-x" id="finFxClose">✕</button></div>
+    <div class="fin-modal-body">
+      <label class="fld"><span>USD → TJS</span><input id="fxUsd" type="number" step="0.0001" value="${usd}"></label>
+      <label class="fld"><span>CNY → TJS</span><input id="fxCny" type="number" step="0.0001" value="${cny}"></label>
+    </div>
+    <div class="fin-modal-foot"><span></span><div><button class="btn btn-ghost btn-sm" id="fxCancel">Отмена</button><button class="btn btn-primary btn-sm" id="fxSave">Сохранить</button></div></div>
+    <div id="fxMsg"></div></div></div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('finFxClose').addEventListener('click', close);
+  $('fxCancel').addEventListener('click', close);
+  $('finFxBg').addEventListener('click', e => { if (e.target.id === 'finFxBg') close(); });
+  $('fxSave').addEventListener('click', async () => {
+    const body = {};
+    if ($('fxUsd').value) body.USD = parseFloat($('fxUsd').value);
+    if ($('fxCny').value) body.CNY = parseFloat($('fxCny').value);
+    try { await posApi('?action=fin-fx-set', { method:'POST', body: JSON.stringify(body) }); close(); finPaintSuppliers(); }
+    catch (e) { $('fxMsg').innerHTML = errBar(e.message||e); }
+  });
+}
+
+// ————————————————————————————————————————————————
+//  СОТРУДНИКИ И ЗАРПЛАТЫ
+// ————————————————————————————————————————————————
+async function finPaintEmployees() {
+  const host = $('finSubBody');
+  host.innerHTML = `<div class="loading">⏳ Загружаю сотрудников…</div>`;
+  try {
+    const d = await posApi('?action=fin-employees', { method:'GET' });
+    FIN.employees = d.employees || [];
+    const emps = FIN.employees;
+    const active = emps.filter(e => e.status !== 'dismissed');
+    const okladTotal = active.reduce((s, e) => s + (e.salaries||[]).reduce((a,x)=>a+(+x.amount||0),0), 0);
+
+    const rows = emps.map(e => {
+      const oklad = (e.salaries||[]).reduce((a,x)=>a+(+x.amount||0),0);
+      const salByShop = (e.salaries||[]).map(x => `${x.warehouse_id?finSalonName(x.warehouse_id):'Офис/сеть'}: ${fmtInt(x.amount)}`).join(', ');
+      const dism = e.status === 'dismissed';
+      return `<tr class="${dism?'fin-emp-dism':''}">
+        <td><b>${esc(e.full_name)}</b>${dism?' <span class="badge off">уволен</span>':''}<div class="fin-note">${esc(e.position||'')}</div></td>
+        <td>${FIN_SALARY_LABEL[e.salary_type]||e.salary_type}${e.percent_rate?` <b>${fmtNum(e.percent_rate)}%</b>`:''}</td>
+        <td class="num"><b>${fmtInt(oklad)}</b> <span class="cur">с.</span><div class="fin-note">${esc(salByShop)}</div></td>
+        <td class="fin-actions">
+          <button class="btn btn-ghost btn-xs fin-emp-sal" data-id="${e.id}">Оклады</button>
+          <button class="btn btn-ghost btn-xs fin-emp-edit" data-id="${e.id}">✎</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+    host.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));margin-bottom:14px">
+        ${kpi('👥','Сотрудников', String(active.length), 'blue', `${emps.length} всего с уволенными`)}
+        ${kpi('💵','Фонд окладов', money(okladTotal), 'amber', 'сумма окладов в месяц')}
+      </div>
+      <div class="card card-pad">
+        <div class="fin-sec-head"><h3 class="fin-h3">Сотрудники</h3><button class="btn btn-primary btn-sm" id="finEmpAdd">＋ Сотрудник</button></div>
+        <table class="tbl fin-tbl">
+          <thead><tr><th>Сотрудник</th><th>Тип оплаты</th><th class="num">Оклад / мес</th><th></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="4" class="muted">Нет сотрудников</td></tr>'}</tbody>
+        </table>
+        <p class="fin-note">Зарплата = оклад (по салонам) + % от продаж. «% от выручки сети» — от общей net-выручки; «Оклад + % личных продаж» — от личных продаж сотрудника.</p>
+      </div>
+      <div id="finEmpModal"></div>`;
+
+    $('finEmpAdd').addEventListener('click', () => finEmpForm(null));
+    host.querySelectorAll('.fin-emp-edit').forEach(b => b.addEventListener('click', () => finEmpForm(b.dataset.id)));
+    host.querySelectorAll('.fin-emp-sal').forEach(b => b.addEventListener('click', () => finEmpSalaries(b.dataset.id)));
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось загрузить сотрудников: ' + (e.message || e));
+  }
+}
+
+function finEmpById(id) { return (FIN.employees || []).find(e => e.id === id); }
+
+function finEmpForm(id) {
+  const emp = id ? finEmpById(id) : null;
+  const m = $('finEmpModal');
+  const stOpts = Object.keys(FIN_SALARY_LABEL).map(k => `<option value="${k}" ${emp&&emp.salary_type===k?'selected':''}>${FIN_SALARY_LABEL[k]}</option>`).join('');
+  m.innerHTML = `
+    <div class="fin-modal-bg" id="finEmpBg"><div class="fin-modal">
+      <div class="fin-modal-head"><h3>${emp?'Редактировать':'Новый сотрудник'}</h3><button class="fin-modal-x" id="finEmpClose">✕</button></div>
+      <div class="fin-modal-body">
+        <label class="fld"><span>ФИО</span><input id="feName" value="${emp?esc(emp.full_name):''}"></label>
+        <label class="fld"><span>Должность</span><input id="fePos" value="${emp&&emp.position?esc(emp.position):''}"></label>
+        <label class="fld"><span>Тип оплаты</span><select id="feType">${stOpts}</select></label>
+        <label class="fld"><span>% от продаж (если применимо)</span><input id="feRate" type="number" step="0.1" value="${emp&&emp.percent_rate?emp.percent_rate:''}" placeholder="0"></label>
+        <label class="fld"><span>Кошелёк / карта</span><input id="feWallet" value="${emp&&emp.wallet?esc(emp.wallet):''}"></label>
+        <label class="fld"><span>Телефон</span><input id="fePhone" value="${emp&&emp.phone?esc(emp.phone):''}"></label>
+        ${emp?`<label class="fld"><span>Статус</span><select id="feStatus"><option value="active" ${emp.status!=='dismissed'?'selected':''}>Активен</option><option value="dismissed" ${emp.status==='dismissed'?'selected':''}>Уволен</option></select></label>`:''}
+      </div>
+      <div class="fin-modal-foot">
+        ${emp?`<button class="btn btn-ghost btn-sm fin-btn-danger" id="feDelete">Удалить</button>`:'<span></span>'}
+        <div><button class="btn btn-ghost btn-sm" id="feCancel">Отмена</button><button class="btn btn-primary btn-sm" id="feSave">Сохранить</button></div>
+      </div><div id="feMsg"></div>
+    </div></div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('finEmpClose').addEventListener('click', close);
+  $('feCancel').addEventListener('click', close);
+  $('finEmpBg').addEventListener('click', e => { if (e.target.id === 'finEmpBg') close(); });
+  if ($('feDelete')) $('feDelete').addEventListener('click', async () => {
+    if (!confirm('Удалить сотрудника?')) return;
+    try { await posApi('?action=fin-employee-delete', { method:'POST', body: JSON.stringify({ id }) }); close(); finPaintEmployees(); }
+    catch (e) { $('feMsg').innerHTML = errBar(e.message||e); }
+  });
+  $('feSave').addEventListener('click', async () => {
+    const body = {
+      full_name: $('feName').value.trim(), position: $('fePos').value.trim() || null,
+      salary_type: $('feType').value, percent_rate: parseFloat($('feRate').value) || 0,
+      wallet: $('feWallet').value.trim() || null, phone: $('fePhone').value.trim() || null,
+    };
+    if (!body.full_name) { $('feMsg').innerHTML = errBar('Укажите ФИО'); return; }
+    try {
+      if (emp) { body.id = id; body.status = $('feStatus').value; await posApi('?action=fin-employee-update', { method:'POST', body: JSON.stringify(body) }); }
+      else await posApi('?action=fin-employee-create', { method:'POST', body: JSON.stringify(body) });
+      close(); finPaintEmployees();
+    } catch (e) { $('feMsg').innerHTML = errBar(e.message||e); }
+  });
+}
+
+// модалка: оклады по салонам
+function finEmpSalaries(id) {
+  const emp = finEmpById(id); if (!emp) return;
+  const m = $('finEmpModal');
+  const salMap = {}; for (const s of (emp.salaries||[])) salMap[s.warehouse_id||'net'] = s.amount;
+  const salonRows = FIN.salons.map(s => `
+    <label class="fld fld-inline"><span>${esc(s.name)}</span><input class="fin-sal-inp" data-wh="${s.warehouse_id}" type="number" step="0.01" value="${salMap[s.warehouse_id]||''}" placeholder="0"></label>`).join('');
+  m.innerHTML = `
+    <div class="fin-modal-bg" id="finSalBg"><div class="fin-modal">
+      <div class="fin-modal-head"><h3>Оклады — ${esc(emp.full_name)}</h3><button class="fin-modal-x" id="finSalClose">✕</button></div>
+      <div class="fin-modal-body">
+        <p class="fin-note">Оклад по каждому салону, где работает сотрудник. Пусто/0 — оклада нет.</p>
+        ${salonRows}
+        <label class="fld fld-inline"><span>Офис / сеть (без салона)</span><input class="fin-sal-inp" data-wh="net" type="number" step="0.01" value="${salMap['net']||''}" placeholder="0"></label>
+      </div>
+      <div class="fin-modal-foot"><span></span><div><button class="btn btn-ghost btn-sm" id="fsalCancel">Отмена</button><button class="btn btn-primary btn-sm" id="fsalSave">Сохранить</button></div></div>
+      <div id="fsalMsg"></div>
+    </div></div>`;
+  const close = () => { m.innerHTML = ''; };
+  $('finSalClose').addEventListener('click', close);
+  $('fsalCancel').addEventListener('click', close);
+  $('finSalBg').addEventListener('click', e => { if (e.target.id === 'finSalBg') close(); });
+  $('fsalSave').addEventListener('click', async () => {
+    const msg = $('fsalMsg'); msg.innerHTML = '<div class="muted">Сохраняю…</div>';
+    try {
+      for (const inp of m.querySelectorAll('.fin-sal-inp')) {
+        const wh = inp.dataset.wh;
+        const raw = inp.value.trim();
+        const amount = raw === '' ? 0 : parseFloat(raw);
+        if (!(amount >= 0)) continue;
+        await posApi('?action=fin-employee-salary-set', { method:'POST', body: JSON.stringify({ employee_id: id, warehouse_id: wh === 'net' ? null : wh, amount }) });
+      }
+      close(); finPaintEmployees();
+    } catch (e) { msg.innerHTML = errBar(e.message||e); }
+  });
+}
 
 // ══════════════════════════════════════════════════════════
 //  СТАРТ

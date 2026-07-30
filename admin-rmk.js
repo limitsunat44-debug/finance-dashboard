@@ -159,8 +159,9 @@ const VIEW_META = {
   monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
   cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
+  finance:   { title: 'Движение денежных средств', sub: 'Финансовый учёт и контроль движения денежных средств' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer', 'finance'];
 
 async function bootApp() {
   // фильтры даты
@@ -285,6 +286,7 @@ function renderView(force) {
   else if (v === 'monitoring') renderMonitoring(force);
   else if (v === 'cashreport') renderCashReport(force);
   else if (v === 'transfer') renderTransfer(force);
+  else if (v === 'finance') renderFinance(force);
 }
 
 // общий помощник кеширования запросов
@@ -2102,6 +2104,698 @@ function trBuildPDF() {
     alert('Не удалось сформировать PDF: ' + e.message);
   }
 }
+
+
+// ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: ДВИЖЕНИЕ ДЕНЕЖНЫХ СРЕДСТВ (расходы/выручка + ИИ)
+// ══════════════════════════════════════════════════════════
+const FIN = {
+  loaded: false,
+  cats: [],        // категории
+  salons: [],      // [{warehouse_id,name}]
+  expenses: [],    // расходы за период
+  sub: 'expenses', // под-вкладка: expenses | fixed | compare | revenue
+  page: 1,
+  perPage: 25,
+  flt: { cat: '', salon: '', kind: '', q: '' },
+  form: { kind: 'variable' }, // состояние панели добавления
+};
+
+// первый и последний день текущего месяца по Душанбе (для дефолтного периода)
+function finMonthBounds() {
+  const t = dushToday();               // YYYY-MM-DD
+  const ym = t.slice(0, 7);
+  const first = ym + '-01';
+  const y = +ym.slice(0, 4), m = +ym.slice(5, 7);
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const last = `${ym}-${String(lastDay).padStart(2, '0')}`;
+  return { first, last, ym };
+}
+function finKindLabel(k) { return k === 'fixed' ? 'Постоянный' : 'Переменный'; }
+function finOwnerLabel(o) { return o === 'salon' ? 'Салон' : (o === 'office' ? 'Офис' : 'Общий'); }
+function finSalonName(id) { const s = FIN.salons.find(x => x.warehouse_id === id); return s ? s.name : '—'; }
+function finCatName(id) { const c = FIN.cats.find(x => x.id === id); return c ? c.name : null; }
+function finCatIcon(id) { const c = FIN.cats.find(x => x.id === id); return c && c.icon ? c.icon : '📌'; }
+// период расхода для отображения: expense_date или период-месяц
+function finExpDate(e) { return e.expense_date || (e.period_month ? e.period_month : ''); }
+
+async function renderFinance(force) {
+  const box = $('finBody');
+  if (force) FIN.loaded = false;
+  if (!FIN.loaded) {
+    box.innerHTML = `<div class="loading">⏳ Загружаю финансовые данные…</div>`;
+    try {
+      const b = finMonthBounds();
+      if (!FIN._from) { FIN._from = b.first; FIN._to = b.last; }
+      const [catsR, salonsR] = await Promise.all([
+        cachedApi('fin:cats', '?action=fin-categories'),
+        cachedApi('fin:salons', '?action=fin-salons'),
+      ]);
+      FIN.cats = catsR.categories || [];
+      FIN.salons = salonsR.salons || [];
+      await finLoadExpenses();
+      FIN.loaded = true;
+    } catch (e) {
+      box.innerHTML = errBar('Не удалось загрузить финансы: ' + (e.message || e));
+      return;
+    }
+  }
+  finPaint();
+}
+
+// загрузка расходов за выбранный период (по period_month через from/to)
+async function finLoadExpenses() {
+  const fromM = (FIN._from || '').slice(0, 7) + '-01';
+  const toM = (FIN._to || '').slice(0, 7) + '-01';
+  const d = await posApi(`?action=fin-expenses&from=${fromM}&to=${toM}`, { method: 'GET' });
+  FIN.expenses = (d.expenses || []);
+}
+
+// текущий набор расходов после клиентских фильтров (категория/салон/тип/поиск/подвкладка)
+function finFiltered() {
+  let arr = FIN.expenses.slice();
+  if (FIN.sub === 'fixed') arr = arr.filter(e => e.kind === 'fixed');
+  if (FIN.flt.kind) arr = arr.filter(e => e.kind === FIN.flt.kind);
+  if (FIN.flt.cat) arr = arr.filter(e => (e.category_id || '') === FIN.flt.cat);
+  if (FIN.flt.salon) arr = arr.filter(e => (e.warehouse_id || '') === FIN.flt.salon);
+  if (FIN.flt.q) {
+    const q = FIN.flt.q.toLowerCase();
+    arr = arr.filter(e => {
+      const cat = (finCatName(e.category_id) || '').toLowerCase();
+      const t = (e.title || '').toLowerCase();
+      const cm = (e.comment || '').toLowerCase();
+      return cat.includes(q) || t.includes(q) || cm.includes(q);
+    });
+  }
+  // фильтр по датам внутри периода (по expense_date, если задан)
+  arr = arr.filter(e => {
+    const d = e.expense_date;
+    if (!d) return true;
+    if (FIN._from && d < FIN._from) return false;
+    if (FIN._to && d > FIN._to) return false;
+    return true;
+  });
+  return arr;
+}
+
+function finPaint() {
+  const box = $('finBody');
+  const per = FIN._from === FIN._to ? FIN._from : `${FIN._from} — ${FIN._to}`;
+  const all = FIN.expenses;
+  const totalAll = all.reduce((s, e) => s + (+e.amount || 0), 0);
+  const totalFixed = all.filter(e => e.kind === 'fixed').reduce((s, e) => s + (+e.amount || 0), 0);
+  const totalVar = totalAll - totalFixed;
+  const pFixed = totalAll ? Math.round(totalFixed / totalAll * 100) : 0;
+  const pVar = totalAll ? 100 - pFixed : 0;
+
+  const subChip = (key, label) =>
+    `<button class="fin-chip ${FIN.sub === key ? 'active' : ''}" data-sub="${key}">${label}</button>`;
+
+  box.innerHTML = `
+    <!-- Верхняя панель: период + магазины + экспорт -->
+    <div class="fin-toolbar">
+      <div class="fin-period">
+        <label>Период
+          <span class="fin-daterange">
+            <input type="date" id="finFrom" value="${FIN._from}">
+            <span>—</span>
+            <input type="date" id="finTo" value="${FIN._to}">
+          </span>
+        </label>
+        <button class="btn btn-ghost btn-sm" id="finApplyPeriod">Применить</button>
+      </div>
+      <div class="fin-tb-right">
+        <span class="badge off">Все магазины (${FIN.salons.length})</span>
+        <button class="btn btn-ghost btn-sm" id="finExport">⬇ Экспорт</button>
+      </div>
+    </div>
+
+    <!-- Под-вкладки -->
+    <div class="fin-chips">
+      ${subChip('expenses', 'Расходы')}
+      ${subChip('fixed', 'Постоянные по категориям')}
+      ${subChip('compare', 'Сравнение 6 мес')}
+      ${subChip('revenue', 'Выручка (ручной ввод)')}
+    </div>
+
+    <div id="finSubBody"></div>
+  `;
+
+  // события верхней панели
+  $('finApplyPeriod').addEventListener('click', async () => {
+    const f = $('finFrom').value, t = $('finTo').value;
+    if (!f || !t) return;
+    FIN._from = f; FIN._to = t; FIN.page = 1;
+    $('finSubBody').innerHTML = `<div class="loading">⏳ Обновляю…</div>`;
+    try { await finLoadExpenses(); } catch (e) { $('finSubBody').innerHTML = errBar(e.message || e); return; }
+    finPaintSub();
+  });
+  $('finExport').addEventListener('click', finExportCsv);
+  box.querySelectorAll('.fin-chip').forEach(b =>
+    b.addEventListener('click', () => { FIN.sub = b.dataset.sub; FIN.page = 1; finPaint(); }));
+
+  finPaintSub({ totalAll, totalFixed, totalVar, pFixed, pVar, per });
+}
+
+function finPaintSub(pre) {
+  if (FIN.sub === 'compare') return finPaintCompare();
+  if (FIN.sub === 'revenue') return finPaintRevenue();
+  // expenses / fixed → одинаковая раскладка (fixed отфильтрован в finFiltered)
+  finPaintExpenses(pre);
+}
+
+// ————— Основной экран расходов —————
+function finPaintExpenses(pre) {
+  const host = $('finSubBody');
+  const all = FIN.expenses;
+  const totalAll = all.reduce((s, e) => s + (+e.amount || 0), 0);
+  const totalFixed = all.filter(e => e.kind === 'fixed').reduce((s, e) => s + (+e.amount || 0), 0);
+  const totalVar = totalAll - totalFixed;
+  const pFixed = totalAll ? Math.round(totalFixed / totalAll * 100) : 0;
+  const pVar = totalAll ? 100 - pFixed : 0;
+
+  // структура по категориям (для пончика) — по всем расходам периода
+  const byCat = new Map();
+  for (const e of all) {
+    const key = e.category_id || ('t:' + (e.title || 'Прочее'));
+    const name = finCatName(e.category_id) || e.title || 'Прочее';
+    const cur = byCat.get(key) || { name, amount: 0 };
+    cur.amount += (+e.amount || 0); byCat.set(key, cur);
+  }
+  const catList = Array.from(byCat.values()).sort((a, b) => b.amount - a.amount);
+
+  const filtered = finFiltered();
+  const totalFiltered = filtered.reduce((s, e) => s + (+e.amount || 0), 0);
+  const pages = Math.max(1, Math.ceil(filtered.length / FIN.perPage));
+  if (FIN.page > pages) FIN.page = pages;
+  const pageRows = filtered.slice((FIN.page - 1) * FIN.perPage, FIN.page * FIN.perPage);
+
+  const catOpts = ['<option value="">Все категории</option>']
+    .concat(FIN.cats.map(c => `<option value="${c.id}" ${FIN.flt.cat === c.id ? 'selected' : ''}>${esc(c.name)}</option>`)).join('');
+  const salonOpts = ['<option value="">Все магазины</option>']
+    .concat(FIN.salons.map(s => `<option value="${s.warehouse_id}" ${FIN.flt.salon === s.warehouse_id ? 'selected' : ''}>${esc(s.name)}</option>`)).join('');
+
+  host.innerHTML = `
+    <!-- Панель фильтров -->
+    <div class="fin-filters card card-pad">
+      <div class="fin-flt-grid">
+        <label class="fld-inline"><span>Категория</span>
+          <select id="finFltCat">${catOpts}</select></label>
+        <label class="fld-inline"><span>Магазин</span>
+          <select id="finFltSalon">${salonOpts}</select></label>
+        <label class="fld-inline"><span>Тип расхода</span>
+          <select id="finFltKind">
+            <option value="">Все типы</option>
+            <option value="fixed" ${FIN.flt.kind === 'fixed' ? 'selected' : ''}>Постоянный</option>
+            <option value="variable" ${FIN.flt.kind === 'variable' ? 'selected' : ''}>Переменный</option>
+          </select></label>
+        <label class="fld-inline fin-search"><span>Поиск</span>
+          <input type="text" id="finFltQ" placeholder="Название, категория, комментарий…" value="${esc(FIN.flt.q)}"></label>
+      </div>
+    </div>
+
+    <!-- KPI + пончик -->
+    <div class="fin-grid-kpi">
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:0">
+        ${kpi('💸','Всего расходов', money(totalAll),'red', `${all.length} записей`)}
+        ${kpi('📌','Постоянные', money(totalFixed),'amber', `${pFixed}% от суммы`)}
+        ${kpi('🔁','Переменные', money(totalVar),'gray', `${pVar}% от суммы`)}
+      </div>
+      <div class="card card-pad fin-donut-card">
+        <div class="card-h-row"><h3>Структура расходов</h3></div>
+        <div class="fin-donut-wrap">
+          <div class="chart-box" style="height:200px;position:relative"><canvas id="finDonut"></canvas></div>
+          <div class="fin-legend" id="finLegend"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Основной ряд: таблица + панель добавления -->
+    <div class="fin-main-row">
+      <div class="card card-pad fin-table-card">
+        <div class="card-h-row">
+          <h3>Список расходов</h3>
+          <button class="btn btn-primary btn-sm" id="finAddBtn">+ Добавить расход</button>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl fin-tbl">
+            <thead><tr>
+              <th>Дата</th><th>Тип</th><th>Категория</th><th>Название</th>
+              <th>Магазин</th><th class="r">Сумма</th><th>Комментарий</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${pageRows.length ? pageRows.map(finRowHtml).join('') :
+                `<tr><td colspan="8" class="tbl-empty">Нет расходов по фильтрам</td></tr>`}
+            </tbody>
+            ${filtered.length ? `<tfoot><tr class="tbl-total">
+              <td colspan="5">Итого (${filtered.length})</td>
+              <td class="r neg">${money(totalFiltered)}</td><td colspan="2"></td>
+            </tr></tfoot>` : ''}
+          </table>
+        </div>
+        ${pages > 1 ? `<div class="fin-pager">
+          <button class="btn btn-ghost btn-sm" id="finPrev" ${FIN.page <= 1 ? 'disabled' : ''}>‹ Назад</button>
+          <span class="muted">Стр. ${FIN.page} из ${pages}</span>
+          <button class="btn btn-ghost btn-sm" id="finNext" ${FIN.page >= pages ? 'disabled' : ''}>Вперёд ›</button>
+        </div>` : ''}
+      </div>
+
+      <div class="card card-pad fin-add-card" id="finAddCard">
+        <div class="card-h-row"><h3>Добавить расход</h3></div>
+        ${finAddFormHtml()}
+      </div>
+    </div>
+
+    <!-- ИИ-блоки -->
+    <div class="fin-ai-row">
+      <div class="card card-pad fin-ai-card">
+        <div class="fin-ai-head"><span class="fin-ai-ic purple">🧠</span>
+          <div><div class="fin-ai-title">ИИ-аналитик расходов</div>
+          <div class="fin-ai-sub">Анализ структуры расходов за период на базе Claude</div></div></div>
+        <div class="fin-ai-body" id="finAiAnalysisBody">
+          <p class="muted">Нажмите «Подробнее», чтобы ИИ проанализировал расходы за выбранный месяц.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="finAiAnalysisBtn">Подробнее →</button>
+      </div>
+      <div class="card card-pad fin-ai-card">
+        <div class="fin-ai-head"><span class="fin-ai-ic green">💡</span>
+          <div><div class="fin-ai-title">ИИ-рекомендация</div>
+          <div class="fin-ai-sub">Быстрое добавление расхода из текста</div></div></div>
+        <div class="fin-ai-body">
+          <textarea id="finAiText" class="fin-ai-text" rows="2" placeholder="Напр.: аренда Сиёма 4500 за июль"></textarea>
+          <div id="finAiParsePreview"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="finAiParseBtn">Разобрать текст →</button>
+      </div>
+    </div>
+
+    <!-- Графики -->
+    <div class="fin-charts-row">
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Динамика расходов</h3><span class="muted">По дням</span></div>
+        <div class="chart-box" style="height:220px"><canvas id="finTrend"></canvas></div>
+      </div>
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Расходы по категориям (за период)</h3></div>
+        ${catList.length ? hbars(catList.slice(0, 12).map(c => ({
+          label: `${c.name}`, value: c.amount,
+          extra: totalAll ? Math.round(c.amount / totalAll * 100) + '%' : ''
+        })), { money: true }) : `<div class="tbl-empty">Нет данных</div>`}
+      </div>
+    </div>
+  `;
+
+  // ——— пончик ———
+  finDrawDonut('finDonut', 'finLegend', catList);
+  // ——— график динамики ———
+  finDrawTrend('finTrend', filtered);
+
+  // ——— события фильтров ———
+  $('finFltCat').addEventListener('change', e => { FIN.flt.cat = e.target.value; FIN.page = 1; finPaintSub(); });
+  $('finFltSalon').addEventListener('change', e => { FIN.flt.salon = e.target.value; FIN.page = 1; finPaintSub(); });
+  $('finFltKind').addEventListener('change', e => { FIN.flt.kind = e.target.value; FIN.page = 1; finPaintSub(); });
+  let qT;
+  $('finFltQ').addEventListener('input', e => { clearTimeout(qT); const v = e.target.value; qT = setTimeout(() => { FIN.flt.q = v; FIN.page = 1; finPaintSub(); }, 250); });
+
+  // пагинация
+  if ($('finPrev')) $('finPrev').addEventListener('click', () => { if (FIN.page > 1) { FIN.page--; finPaintSub(); } });
+  if ($('finNext')) $('finNext').addEventListener('click', () => { FIN.page++; finPaintSub(); });
+
+  // строки: удаление
+  host.querySelectorAll('[data-del]').forEach(b =>
+    b.addEventListener('click', () => finDeleteExpense(b.dataset.del)));
+
+  // кнопка «+ Добавить» — фокус на панель
+  $('finAddBtn').addEventListener('click', () => {
+    const c = $('finAddCard'); if (c) { c.classList.add('flash'); setTimeout(() => c.classList.remove('flash'), 800); c.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+    const amt = $('finFAmount'); if (amt) amt.focus();
+  });
+
+  finBindAddForm();
+  finBindAi();
+}
+
+function finRowHtml(e) {
+  const dt = finExpDate(e);
+  const dtShow = dt ? dt.slice(0, 10).split('-').reverse().join('.') : '—';
+  const kindCls = e.kind === 'fixed' ? 'amber' : 'gray';
+  return `<tr>
+    <td class="muted">${dtShow}</td>
+    <td><span class="badge ${kindCls}">${finKindLabel(e.kind)}</span></td>
+    <td>${finCatIcon(e.category_id)} ${esc(finCatName(e.category_id) || '—')}</td>
+    <td>${esc(e.title || '—')}</td>
+    <td class="muted">${e.warehouse_id ? esc(finSalonName(e.warehouse_id)) : finOwnerLabel(e.owner_type)}</td>
+    <td class="r neg strong">${money(+e.amount || 0)}</td>
+    <td class="muted">${esc(e.comment || '')}</td>
+    <td class="r"><button class="fin-del" data-del="${e.id}" title="Удалить">✕</button></td>
+  </tr>`;
+}
+
+// ————— Форма добавления —————
+function finAddFormHtml() {
+  const f = FIN.form;
+  const catOpts = ['<option value="">— выбрать —</option>']
+    .concat(FIN.cats.map(c => `<option value="${c.id}" ${f.category_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`)).join('');
+  const salonOpts = ['<option value="">— выбрать —</option>']
+    .concat(FIN.salons.map(s => `<option value="${s.warehouse_id}" ${f.warehouse_id === s.warehouse_id ? 'selected' : ''}>${esc(s.name)}</option>`)).join('');
+  const today = dushToday();
+  return `
+    <div class="fin-form">
+      <div class="fin-kind-toggle">
+        <button class="fin-kt ${f.kind !== 'variable' ? 'active' : ''}" data-kind="fixed">Постоянный</button>
+        <button class="fin-kt ${f.kind === 'variable' ? 'active' : ''}" data-kind="variable">Переменный</button>
+      </div>
+      <label class="fld-inline"><span>Владелец</span>
+        <select id="finFOwner">
+          <option value="salon" ${f.owner_type === 'salon' || !f.owner_type ? 'selected' : ''}>Салон</option>
+          <option value="office" ${f.owner_type === 'office' ? 'selected' : ''}>Офис</option>
+          <option value="common" ${f.owner_type === 'common' ? 'selected' : ''}>Общий</option>
+        </select></label>
+      <label class="fld-inline" id="finFSalonWrap"><span>Магазин (салон)</span>
+        <select id="finFSalon">${salonOpts}</select></label>
+      <label class="fld-inline"><span>Категория</span>
+        <select id="finFCat">${catOpts}</select></label>
+      <label class="fld-inline"><span>Название</span>
+        <input type="text" id="finFTitle" placeholder="Напр.: Аренда за июль" value="${esc(f.title || '')}"></label>
+      <label class="fld-inline"><span>Сумма (с.)</span>
+        <input type="number" id="finFAmount" min="0" step="0.01" placeholder="0.00" value="${f.amount != null ? f.amount : ''}"></label>
+      <label class="fld-inline"><span>Дата</span>
+        <input type="date" id="finFDate" value="${f.expense_date || today}"></label>
+      <label class="fld-inline"><span>Комментарий</span>
+        <input type="text" id="finFComment" placeholder="Необязательно" value="${esc(f.comment || '')}"></label>
+      <button class="btn btn-primary btn-block" id="finSaveBtn">Сохранить расход</button>
+      <div id="finSaveMsg"></div>
+    </div>`;
+}
+
+function finBindAddForm() {
+  const owner = $('finFOwner');
+  const salonWrap = $('finFSalonWrap');
+  const syncSalon = () => { salonWrap.style.display = owner.value === 'salon' ? '' : 'none'; };
+  syncSalon();
+  owner.addEventListener('change', () => { FIN.form.owner_type = owner.value; syncSalon(); });
+
+  document.querySelectorAll('.fin-kt').forEach(b =>
+    b.addEventListener('click', () => {
+      FIN.form.kind = b.dataset.kind;
+      document.querySelectorAll('.fin-kt').forEach(x => x.classList.toggle('active', x === b));
+    }));
+
+  $('finSaveBtn').addEventListener('click', finSaveExpense);
+}
+
+async function finSaveExpense() {
+  const msg = $('finSaveMsg');
+  const owner_type = $('finFOwner').value;
+  const kind = document.querySelector('.fin-kt.active') ? document.querySelector('.fin-kt.active').dataset.kind : 'variable';
+  const warehouse_id = $('finFSalon').value || null;
+  const category_id = $('finFCat').value || null;
+  const title = $('finFTitle').value.trim();
+  const amount = parseFloat($('finFAmount').value);
+  const expense_date = $('finFDate').value || null;
+  const comment = $('finFComment').value.trim();
+
+  if (!(amount >= 0) || isNaN(amount)) { msg.innerHTML = errBar('Введите корректную сумму'); return; }
+  if (owner_type === 'salon' && !warehouse_id) { msg.innerHTML = errBar('Для салона выберите магазин'); return; }
+
+  msg.innerHTML = `<div class="muted">Сохраняю…</div>`;
+  try {
+    await posApi('?action=fin-expense-create', { method: 'POST', body: JSON.stringify({
+      owner_type, kind, warehouse_id, category_id, title, amount, expense_date, comment,
+    }) });
+    // сброс формы (кроме типа/владельца)
+    FIN.form = { kind, owner_type, warehouse_id };
+    state.cache = {}; // сбрасываем кеш
+    await finLoadExpenses();
+    finPaint();
+    // сообщение об успехе покажем после перерисовки
+    const m2 = $('finSaveMsg'); if (m2) m2.innerHTML = `<div class="fin-ok">✓ Расход добавлен</div>`;
+  } catch (e) {
+    msg.innerHTML = errBar('Не удалось сохранить: ' + (e.message || e));
+  }
+}
+
+async function finDeleteExpense(id) {
+  if (!confirm('Удалить этот расход?')) return;
+  try {
+    await posApi('?action=fin-expense-delete', { method: 'POST', body: JSON.stringify({ id }) });
+    FIN.expenses = FIN.expenses.filter(e => e.id !== id);
+    state.cache = {};
+    finPaintSub();
+  } catch (e) { alert('Не удалось удалить: ' + (e.message || e)); }
+}
+
+// ————— ИИ —————
+function finBindAi() {
+  $('finAiAnalysisBtn').addEventListener('click', finRunAiAnalysis);
+  $('finAiParseBtn').addEventListener('click', finRunAiParse);
+}
+
+async function finRunAiAnalysis() {
+  const body = $('finAiAnalysisBody');
+  body.innerHTML = `<div class="loading">🧠 ИИ анализирует расходы…</div>`;
+  try {
+    const month = (FIN._from || dushToday()).slice(0, 7) + '-01';
+    const d = await posApi('?action=fin-ai-analysis', { method: 'POST', body: JSON.stringify({ month }) });
+    const a = d.analysis || {};
+    const recs = Array.isArray(a.recommendations) ? a.recommendations : [];
+    body.innerHTML = `
+      <p class="fin-ai-summary">${esc(a.summary || '—')}</p>
+      ${a.largest ? `<p class="muted">Наибольшая категория: <b>${esc(a.largest)}</b></p>` : ''}
+      ${recs.length ? `<ul class="fin-ai-list">${recs.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+      <p class="muted" style="font-size:12px">Расходы: ${money(d.total_expenses || 0)} · Выручка: ${money(d.total_revenue || 0)}</p>`;
+  } catch (e) {
+    const m = (e.message || '') + '';
+    body.innerHTML = errBar(m.includes('503') || m.toLowerCase().includes('anthropic') || m.toLowerCase().includes('ии недоступен')
+      ? 'ИИ недоступен: не задан ключ Claude в настройках сервера.'
+      : 'Не удалось получить анализ: ' + m);
+  }
+}
+
+async function finRunAiParse() {
+  const prev = $('finAiParsePreview');
+  const text = $('finAiText').value.trim();
+  if (!text) { prev.innerHTML = errBar('Введите текст расхода'); return; }
+  prev.innerHTML = `<div class="loading">🤖 Разбираю…</div>`;
+  try {
+    const d = await posApi('?action=fin-ai-parse', { method: 'POST', body: JSON.stringify({ text }) });
+    const p = d.preview || {};
+    prev.innerHTML = `
+      <div class="fin-parse-card">
+        <div class="fin-parse-grid">
+          <div><span class="muted">Тип</span><b>${finKindLabel(p.kind)}</b></div>
+          <div><span class="muted">Владелец</span><b>${finOwnerLabel(p.owner_type)}${p.salon_name ? ' · ' + esc(p.salon_name) : ''}</b></div>
+          <div><span class="muted">Категория</span><b>${esc(p.category_name || '—')}${p.category_is_new ? ' <span class="badge amber">новая</span>' : ''}</b></div>
+          <div><span class="muted">Сумма</span><b>${money(p.amount || 0)}</b></div>
+          <div><span class="muted">Месяц</span><b>${(p.period_month || '').slice(0, 7)}</b></div>
+        </div>
+        <button class="btn btn-primary btn-sm btn-block" id="finParseApply">Заполнить форму этими данными →</button>
+      </div>`;
+    $('finParseApply').addEventListener('click', () => {
+      FIN.form = {
+        kind: p.kind, owner_type: p.owner_type, warehouse_id: p.warehouse_id || '',
+        category_id: p.category_id || '', title: p.title || (p.category_is_new ? p.category_name : ''),
+        amount: p.amount || '', expense_date: (p.period_month || '').slice(0, 10),
+      };
+      // перерисуем только форму
+      const card = $('finAddCard');
+      if (card) { card.innerHTML = `<div class="card-h-row"><h3>Добавить расход</h3></div>` + finAddFormHtml(); finBindAddForm(); card.classList.add('flash'); setTimeout(() => card.classList.remove('flash'), 800); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+    });
+  } catch (e) {
+    const m = (e.message || '') + '';
+    prev.innerHTML = errBar(m.includes('503') || m.toLowerCase().includes('ии недоступен')
+      ? 'ИИ недоступен: не задан ключ Claude в настройках сервера.'
+      : 'Не удалось разобрать: ' + m);
+  }
+}
+
+// ————— Пончик (Chart.js) —————
+const FIN_DONUT_COLORS = ['#10b981','#059669','#3b82f6','#f59e0b','#e11d48','#8b5cf6','#14b8a6','#f97316','#0ea5e9','#ec4899','#84cc16','#64748b'];
+function finDrawDonut(canvasId, legendId, catList) {
+  const el = $(canvasId); if (!el) return;
+  destroyChart(canvasId);
+  const top = catList.slice(0, 8);
+  const rest = catList.slice(8);
+  const restSum = rest.reduce((s, x) => s + x.amount, 0);
+  const items = restSum > 0 ? top.concat([{ name: 'Прочее', amount: restSum }]) : top;
+  const total = items.reduce((s, x) => s + x.amount, 0);
+  if (!total) { const lg = $(legendId); if (lg) lg.innerHTML = '<span class="muted">Нет данных</span>'; return; }
+  state.charts[canvasId] = new Chart(el, {
+    type: 'doughnut',
+    data: { labels: items.map(x => x.name),
+      datasets: [{ data: items.map(x => Math.round(x.amount)),
+        backgroundColor: items.map((_, i) => FIN_DONUT_COLORS[i % FIN_DONUT_COLORS.length]), borderWidth: 0 }] },
+    options: { cutout: '62%', plugins: { legend: { display: false },
+      tooltip: { callbacks: { label: c => `${c.label}: ${fmtNum(c.parsed)} с. (${Math.round(c.parsed / total * 100)}%)` } } } },
+  });
+  const lg = $(legendId);
+  if (lg) lg.innerHTML = items.map((x, i) => `
+    <div class="fin-leg-row">
+      <span class="fin-leg-dot" style="background:${FIN_DONUT_COLORS[i % FIN_DONUT_COLORS.length]}"></span>
+      <span class="fin-leg-name">${esc(x.name)}</span>
+      <span class="fin-leg-val">${Math.round(x.amount / total * 100)}%</span>
+    </div>`).join('');
+}
+
+// ————— График динамики по дням —————
+function finDrawTrend(canvasId, expenses) {
+  const el = $(canvasId); if (!el) return;
+  destroyChart(canvasId);
+  const byDay = new Map();
+  for (const e of expenses) {
+    const d = finExpDate(e).slice(0, 10);
+    if (!d) continue;
+    byDay.set(d, (byDay.get(d) || 0) + (+e.amount || 0));
+  }
+  const days = Array.from(byDay.keys()).sort();
+  if (!days.length) {
+    const ctx = el.getContext('2d'); ctx.clearRect(0, 0, el.width, el.height);
+    return;
+  }
+  state.charts[canvasId] = new Chart(el, {
+    type: 'line',
+    data: { labels: days.map(d => d.slice(5)),
+      datasets: [{ label: 'Расходы', data: days.map(d => Math.round(byDay.get(d))),
+        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', fill: true, tension: .3, pointRadius: 3 }] },
+    options: { plugins: { legend: { display: false },
+      tooltip: { callbacks: { label: c => `${fmtNum(c.parsed.y)} с.` } } },
+      scales: { y: { ticks: { callback: v => fmtInt(v) } } } },
+  });
+}
+
+// ————— Под-вкладка: Сравнение 6 месяцев —————
+async function finPaintCompare() {
+  const host = $('finSubBody');
+  host.innerHTML = `<div class="loading">⏳ Считаю по месяцам…</div>`;
+  try {
+    // возьмём последние 6 месяцев относительно конца выбранного периода
+    const end = (FIN._to || dushToday()).slice(0, 7);
+    const [ey, em] = [+end.slice(0, 4), +end.slice(5, 7)];
+    const months = [];
+    for (let i = 5; i >= 0; i--) {
+      const dt = new Date(Date.UTC(ey, em - 1 - i, 1));
+      months.push(`${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`);
+    }
+    const fromM = months[0] + '-01', toM = months[5] + '-01';
+    const d = await posApi(`?action=fin-expenses&from=${fromM}&to=${toM}`, { method: 'GET' });
+    const exp = d.expenses || [];
+    const sums = new Map(months.map(m => [m, { fixed: 0, variable: 0 }]));
+    for (const e of exp) {
+      const m = (e.period_month || '').slice(0, 7);
+      if (!sums.has(m)) continue;
+      const o = sums.get(m); o[e.kind === 'fixed' ? 'fixed' : 'variable'] += (+e.amount || 0);
+    }
+    const RU = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+    const labels = months.map(m => `${RU[+m.slice(5, 7) - 1]} ${m.slice(2, 4)}`);
+    host.innerHTML = `
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Сравнение расходов за 6 месяцев</h3></div>
+        <div class="chart-box" style="height:280px"><canvas id="finCompare"></canvas></div>
+      </div>
+      <div class="card card-pad">
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Месяц</th><th class="r">Постоянные</th><th class="r">Переменные</th><th class="r">Итого</th></tr></thead>
+          <tbody>${months.map((m, i) => { const o = sums.get(m); const tot = o.fixed + o.variable; return `<tr>
+            <td>${labels[i]}</td><td class="r">${money(o.fixed)}</td><td class="r">${money(o.variable)}</td>
+            <td class="r strong neg">${money(tot)}</td></tr>`; }).join('')}</tbody>
+        </table></div>
+      </div>`;
+    destroyChart('finCompare');
+    state.charts['finCompare'] = new Chart($('finCompare'), {
+      type: 'bar',
+      data: { labels, datasets: [
+        { label: 'Постоянные', data: months.map(m => Math.round(sums.get(m).fixed)), backgroundColor: '#f59e0b' },
+        { label: 'Переменные', data: months.map(m => Math.round(sums.get(m).variable)), backgroundColor: '#10b981' },
+      ] },
+      options: { plugins: { legend: { position: 'bottom' } },
+        scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => fmtInt(v) } } } },
+    });
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось построить сравнение: ' + (e.message || e));
+  }
+}
+
+// ————— Под-вкладка: Выручка (ручной ввод) —————
+async function finPaintRevenue() {
+  const host = $('finSubBody');
+  host.innerHTML = `<div class="loading">⏳ Загружаю выручку…</div>`;
+  try {
+    const month = (FIN._from || dushToday()).slice(0, 7) + '-01';
+    const d = await posApi(`?action=fin-revenue&month=${month}`, { method: 'GET' });
+    const rev = d.revenue || [];
+    const byWh = new Map(rev.map(r => [r.warehouse_id || 'net', +r.amount || 0]));
+    const netTotal = byWh.get('net') || 0;
+    const rows = FIN.salons.map(s => {
+      const v = byWh.get(s.warehouse_id) || 0;
+      return `<tr>
+        <td>${esc(s.name)}</td>
+        <td class="r"><input type="number" class="fin-rev-inp" data-wh="${s.warehouse_id}" min="0" step="0.01" value="${v || ''}" placeholder="0.00"></td>
+      </tr>`;
+    }).join('');
+    host.innerHTML = `
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Выручка за ${month.slice(0, 7)} (ручной ввод)</h3>
+          <button class="btn btn-primary btn-sm" id="finRevSave">Сохранить выручку</button></div>
+        <p class="muted" style="margin-bottom:14px">Введите грязную выручку по салонам за месяц. Используется ИИ-аналитиком для расчёта доли расходов.</p>
+        <div class="tbl-wrap"><table class="tbl">
+          <thead><tr><th>Салон</th><th class="r">Выручка (с.)</th></tr></thead>
+          <tbody>
+            <tr><td class="strong">Вся сеть (общая)</td>
+              <td class="r"><input type="number" class="fin-rev-inp" data-wh="net" min="0" step="0.01" value="${netTotal || ''}" placeholder="0.00"></td></tr>
+            ${rows}
+          </tbody>
+        </table></div>
+        <div id="finRevMsg" style="margin-top:12px"></div>
+      </div>`;
+    $('finRevSave').addEventListener('click', async () => {
+      const msg = $('finRevMsg');
+      msg.innerHTML = `<div class="muted">Сохраняю…</div>`;
+      try {
+        const inputs = Array.from(host.querySelectorAll('.fin-rev-inp'));
+        for (const inp of inputs) {
+          const val = inp.value.trim();
+          if (val === '') continue;
+          const amount = parseFloat(val);
+          if (!(amount >= 0)) continue;
+          const wh = inp.dataset.wh;
+          await posApi('?action=fin-revenue-set', { method: 'POST', body: JSON.stringify({
+            period_month: month, warehouse_id: wh === 'net' ? null : wh, amount,
+          }) });
+        }
+        msg.innerHTML = `<div class="fin-ok">✓ Выручка сохранена</div>`;
+      } catch (e) { msg.innerHTML = errBar('Не удалось сохранить: ' + (e.message || e)); }
+    });
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось загрузить выручку: ' + (e.message || e));
+  }
+}
+
+// ————— Экспорт CSV —————
+function finExportCsv() {
+  const arr = finFiltered();
+  if (!arr.length) { alert('Нет данных для экспорта'); return; }
+  const head = ['Дата','Тип','Категория','Название','Магазин','Сумма','Комментарий'];
+  const lines = [head.join(';')];
+  for (const e of arr) {
+    const row = [
+      finExpDate(e).slice(0, 10),
+      finKindLabel(e.kind),
+      (finCatName(e.category_id) || ''),
+      (e.title || ''),
+      (e.warehouse_id ? finSalonName(e.warehouse_id) : finOwnerLabel(e.owner_type)),
+      (+e.amount || 0).toFixed(2),
+      (e.comment || ''),
+    ].map(x => `"${String(x).replace(/"/g, '""')}"`);
+    lines.push(row.join(';'));
+  }
+  const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `rashody_${(FIN._from||'').slice(0,7)}.csv`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 
 // ══════════════════════════════════════════════════════════
 //  СТАРТ

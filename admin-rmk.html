@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260730-173358">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260730-211100">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -17,7 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20260730-173358"></script>
+  <script src="fonts-dejavu.js?v=20260730-211100"></script>
 </head>
 <body>
 
@@ -79,6 +79,7 @@
         <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
         <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
         <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
+        <button class="sb-item" data-view="finance"><span class="sb-ic">💸</span> Движение денежных средств</button>
       </nav>
 
       <button class="sb-logout" id="btnLogout"><span class="sb-ic">⤶</span> Выйти</button>
@@ -200,6 +201,10 @@
           <div id="trBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <section class="view" id="view-finance">
+          <div id="finBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ЗАГЛУШКИ ═══ -->
         <section class="view" id="view-stub">
           <div class="stub">
@@ -213,6 +218,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260730-173358"></script>
+  <script src="admin-rmk.js?v=20260730-211100"></script>
 </body>
 </html>

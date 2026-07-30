@@ -2625,7 +2625,7 @@ function finDrawDonut(canvasId, legendId, catList) {
     data: { labels: items.map(x => x.name),
       datasets: [{ data: items.map(x => Math.round(x.amount)),
         backgroundColor: items.map((_, i) => FIN_DONUT_COLORS[i % FIN_DONUT_COLORS.length]), borderWidth: 0 }] },
-    options: { cutout: '62%', plugins: { legend: { display: false },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '62%', plugins: { legend: { display: false },
       tooltip: { callbacks: { label: c => `${c.label}: ${fmtNum(c.parsed)} с. (${Math.round(c.parsed / total * 100)}%)` } } } },
   });
   const lg = $(legendId);
@@ -2657,7 +2657,7 @@ function finDrawTrend(canvasId, expenses) {
     data: { labels: days.map(d => d.slice(5)),
       datasets: [{ label: 'Расходы', data: days.map(d => Math.round(byDay.get(d))),
         borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', fill: true, tension: .3, pointRadius: 3 }] },
-    options: { plugins: { legend: { display: false },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
       tooltip: { callbacks: { label: c => `${fmtNum(c.parsed.y)} с.` } } },
       scales: { y: { ticks: { callback: v => fmtInt(v) } } } },
   });
@@ -2707,7 +2707,7 @@ async function finPaintCompare() {
         { label: 'Постоянные', data: months.map(m => Math.round(sums.get(m).fixed)), backgroundColor: '#f59e0b' },
         { label: 'Переменные', data: months.map(m => Math.round(sums.get(m).variable)), backgroundColor: '#10b981' },
       ] },
-      options: { plugins: { legend: { position: 'bottom' } },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
         scales: { x: { stacked: true }, y: { stacked: true, ticks: { callback: v => fmtInt(v) } } } },
     });
   } catch (e) {

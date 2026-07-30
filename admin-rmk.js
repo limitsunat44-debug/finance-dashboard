@@ -155,6 +155,12 @@ async function bootApp() {
   $('btnSync').addEventListener('click', () => { state.cache = {}; renderView(true); });
   $('btnLogout').addEventListener('click', doLogout);
 
+  // бургер-меню (мобильная версия)
+  const burger = $('btnBurger');
+  const overlay = $('sbOverlay');
+  if (burger) burger.addEventListener('click', () => toggleSidebar());
+  if (overlay) overlay.addEventListener('click', () => toggleSidebar(false));
+
   // навигация
   document.querySelectorAll('.sb-item').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -163,6 +169,7 @@ async function bootApp() {
       btn.classList.add('active');
       state.view = v;
       renderView();
+      toggleSidebar(false); // авто-закрытие меню после выбора раздела на мобильном
     });
   });
 
@@ -171,6 +178,17 @@ async function bootApp() {
 
   renderView();
   bumpSync();
+}
+
+// Открыть/закрыть боковое меню на мобильных. force=true — открыть, false — закрыть, undefined — переключить.
+function toggleSidebar(force) {
+  const sb = $('sidebar'), ov = $('sbOverlay'), bg = $('btnBurger');
+  if (!sb) return;
+  const open = (force === undefined) ? !sb.classList.contains('open') : force;
+  sb.classList.toggle('open', open);
+  if (ov) ov.classList.toggle('show', open);
+  if (bg) bg.classList.toggle('on', open);
+  document.body.style.overflow = open ? 'hidden' : '';
 }
 
 function onFilterChange() {

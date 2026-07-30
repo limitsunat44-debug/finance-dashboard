@@ -279,9 +279,16 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
   .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:60;transform:translateX(-100%);transition:transform .25s;box-shadow:var(--shadow-lg);overflow-y:auto}
   .sidebar.open{transform:none}
   .burger{display:flex}
-  .topbar{align-items:flex-start;gap:14px}
-  .topbar-title{flex:1;min-width:0}
-  .topbar-tools{width:100%}
+  /* Шапка — два ряда: (бургер + заголовок), затем фильтры на всю ширину */
+  .topbar{flex-wrap:wrap;align-items:center;gap:12px 14px;padding:14px 16px}
+  .topbar-title{flex:1 1 auto;min-width:0;order:1}
+  .burger{order:0}
+  .topbar-title h1{font-size:20px}
+  .topbar-tools{order:2;flex-basis:100%;width:100%;gap:8px}
+  .topbar-tools .tool{flex:1 1 auto;min-width:0}
+  .tool-date{width:auto;flex:1 1 auto;min-width:0}
+  .views{padding:4px 16px 40px}
+  .main{max-width:100vw;overflow-x:hidden}
 }
 
 /* ═══ ГОРИЗОНТАЛЬНЫЕ БАРЫ (раздел Скидки) ═══ */

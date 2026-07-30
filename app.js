@@ -6755,7 +6755,16 @@ async function loadTransfers() {
             headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET },
             cache: 'no-store'
         });
-        const data = await res.json();
+        // Безопасный парсинг: если сервер вернул не‑JSON (таймаут/ошибка Vercel) — показываем понятное сообщение
+        const raw = await res.text();
+        let data;
+        try { data = JSON.parse(raw); }
+        catch {
+            if (res.status === 504 || /timeout|FUNCTION_INVOCATION/i.test(raw)) {
+                throw new Error('сервер не успел ответить (таймаут). Попробуйте меньший лимит.');
+            }
+            throw new Error(`HTTP ${res.status}: ${raw.slice(0, 80)}`);
+        }
         if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`);
         renderTransfers(data.transfers || []);
     } catch (e) {

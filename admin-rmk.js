@@ -2041,65 +2041,57 @@ function trBuildPDF() {
   try {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    // шрифт с кириллицей (из fonts-dejavu.js); fallback — helvetica
+    const FONT = (doc.getFontList && doc.getFontList().DejaVuSans) ? 'DejaVuSans' : 'helvetica';
     const W = 210, M = 14;
     let y = 18;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(16);
-    doc.text('PEREMESHCHENIE TOVAROV', M, y);
-    doc.setFontSize(11); doc.setFont('helvetica', 'normal');
-    doc.text('Dokument №: ' + (r.number || '-'), M, y + 7);
-    doc.text('Data: ' + (r.dateLabel || nowDushLabel()), M, y + 13);
+    doc.setFont(FONT, 'bold'); doc.setFontSize(16);
+    doc.text('Перемещение товаров', M, y);
+    doc.setFontSize(11); doc.setFont(FONT, 'normal');
+    doc.text('Документ №: ' + (r.number || '-'), M, y + 7);
+    doc.text('Дата: ' + (r.dateLabel || nowDushLabel()), M, y + 13);
     y += 22;
     doc.setDrawColor(210); doc.line(M, y, W - M, y); y += 8;
 
-    doc.setFont('helvetica', 'bold'); doc.text('Otkuda:', M, y);
-    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.fromName), M + 24, y);
+    doc.setFont(FONT, 'bold'); doc.text('Откуда:', M, y);
+    doc.setFont(FONT, 'normal'); doc.text(String(TR.fromName || '-'), M + 24, y);
     y += 7;
-    doc.setFont('helvetica', 'bold'); doc.text('Kuda:', M, y);
-    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.toName), M + 24, y);
+    doc.setFont(FONT, 'bold'); doc.text('Куда:', M, y);
+    doc.setFont(FONT, 'normal'); doc.text(String(TR.toName || '-'), M + 24, y);
     y += 9;
-    doc.setFont('helvetica', 'bold'); doc.text('Otpravil:', M, y);
-    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.sender || '____________________'), M + 24, y);
-    doc.setFont('helvetica', 'bold'); doc.text('Prinyal:', W/2, y);
-    doc.setFont('helvetica', 'normal'); doc.text(trTranslit(TR.receiver || '____________________'), W/2 + 22, y);
+    doc.setFont(FONT, 'bold'); doc.text('Отправил:', M, y);
+    doc.setFont(FONT, 'normal'); doc.text(String(TR.sender || '____________________'), M + 24, y);
+    doc.setFont(FONT, 'bold'); doc.text('Принял:', W/2, y);
+    doc.setFont(FONT, 'normal'); doc.text(String(TR.receiver || '____________________'), W/2 + 22, y);
     y += 6;
 
     const rows = TR.items.map((it, i) => [
-      String(i + 1), trTranslit(it.name || '-'), last4(it.barcode), it.sizeLabel || '-', String(it.qty || 1),
+      String(i + 1), String(it.name || '-'), last4(it.barcode), it.sizeLabel || '-', String(it.qty || 1),
     ]);
     doc.autoTable({
       startY: y + 2,
-      head: [['#', 'Tovar', 'Kod (posl.4)', 'Razmer', 'Kol-vo']],
+      head: [['#', 'Товар', 'Код (посл.4)', 'Размер', 'Кол-во']],
       body: rows,
-      styles: { font: 'helvetica', fontSize: 9, cellPadding: 2 },
-      headStyles: { fillColor: [16, 185, 129], textColor: 255, halign: 'center' },
+      styles: { font: FONT, fontSize: 9, cellPadding: 2 },
+      headStyles: { font: FONT, fontStyle: 'bold', fillColor: [16, 185, 129], textColor: 255, halign: 'center' },
       columnStyles: { 0: { halign: 'center', cellWidth: 12 }, 2: { halign: 'center' }, 3: { halign: 'center' }, 4: { halign: 'center' } },
       margin: { left: M, right: M },
     });
     let yy = doc.lastAutoTable.finalY + 8;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11);
-    doc.text('Itogo edinic: ' + trUnits(), M, yy);
-    doc.text('Unik. kodov: ' + trUniqCodes(), M + 70, yy);
+    doc.setFont(FONT, 'bold'); doc.setFontSize(11);
+    doc.text('Итого единиц: ' + trUnits(), M, yy);
+    doc.text('Уник. кодов: ' + trUniqCodes(), M + 70, yy);
     yy += 14;
     doc.setDrawColor(16, 185, 129); doc.setLineWidth(0.6);
     doc.roundedRect(M, yy - 6, W - 2*M, 12, 2, 2);
     doc.setTextColor(16, 133, 96);
-    doc.text('PEREMESHCHENIE PODTVERZHDENO', W/2, yy + 2, { align: 'center' });
+    doc.text('Перемещение подтверждено', W/2, yy + 2, { align: 'center' });
     doc.setTextColor(0,0,0);
 
     doc.save(`peremeshchenie_${r.number || 'doc'}.pdf`);
   } catch (e) {
     alert('Не удалось сформировать PDF: ' + e.message);
   }
-}
-
-// транслит кириллицы для PDF (helvetica не содержит кириллицы)
-function trTranslit(s) {
-  const map = { 'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'e','ж':'zh','з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u','ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya' };
-  return String(s || '').split('').map(ch => {
-    const low = ch.toLowerCase();
-    if (map[low] != null) { const t = map[low]; return ch === low ? t : (t.charAt(0).toUpperCase() + t.slice(1)); }
-    return ch;
-  }).join('');
 }
 
 // ══════════════════════════════════════════════════════════

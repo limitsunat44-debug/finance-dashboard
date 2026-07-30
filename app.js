@@ -7784,49 +7784,33 @@ async function bcPreviewCount() {
     const summary = document.getElementById('bcCartSummary');
     const selected = bcCollectAllSelections();
     if (!selected.length) { bcShowPrintError('Список пуст. Добавьте номенклатуры или отметьте размеры.'); return; }
-    if (summary) summary.innerHTML = '<div>⏳ Считаю этикетки по остаткам и уже созданным кодам…</div>';
+    if (summary) summary.innerHTML = '<div>⏳ Считаю этикетки по остаткам…</div>';
 
-    // группируем по номенклатуре -> charRefs
-    const groups = {};
+    // Печать идёт СТРОГО по выбранным вариантам (каждый привязан к своему складу),
+    // поэтому и просчёт — по остатку каждого варианта (не по характеристике на все склады).
+    const bcWhId = document.getElementById('bcWarehouse')?.value || '';
+    const perProdMap = {}; // productC1Ref -> {name, print}
+    let toPrint = 0;
     for (const s of selected) {
         const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
-        if (!vi.productC1Ref || !vi.charRef) continue;
-        (groups[vi.productC1Ref] = groups[vi.productC1Ref] || new Set()).add(vi.charRef);
+        if (!vi.productC1Ref) continue;
+        if (bcWhId && String(vi.warehouseId || '') !== String(bcWhId)) continue;
+        const st = Number(s.stock);
+        const cnt = Number.isFinite(st) && st > 0 ? st : 0;
+        toPrint += cnt;
+        const nm = (barcodesState.printCart.find(c => c.c1Ref === vi.productC1Ref) || {}).name
+            || (barcodesState.products.find(p => String(p.c1_ref) === String(vi.productC1Ref)) || {}).name_ru
+            || vi.productC1Ref;
+        if (!perProdMap[vi.productC1Ref]) perProdMap[vi.productC1Ref] = { name: nm, print: 0 };
+        perProdMap[vi.productC1Ref].print += cnt;
     }
-    const prods = Object.keys(groups);
-    if (!prods.length) { if (summary) summary.innerHTML = '<div style="color:#c0392b;">Не удалось определить характеристики. Обновите остатки из 1С.</div>'; return; }
-
-    let toPrint = 0, toGenerate = 0, errCount = 0;
-    const perProd = [];
-    for (const prod of prods) {
-        const charRefs = Array.from(groups[prod]);
-        try {
-            const r = await fetch(`${BARCODE_SVC_URL}/api/smart-plan`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
-                body: JSON.stringify({ nomenclature: prod, charRefs, dryRun: true })
-            });
-            const jr = await r.json();
-            if (!r.ok || jr.ok === false) { errCount++; continue; }
-            // на печать по размеру = min(balance, own+ours+other+toGenerate) — но не больше balance
-            let prodPrint = 0, prodGen = 0;
-            (jr.plan || []).forEach(p => {
-                const willHave = p.own + p.ours + p.other + (p.toGenerate || 0);
-                prodPrint += Math.min(p.balance, willHave);
-                prodGen += (p.toGenerate || 0);
-            });
-            toPrint += prodPrint; toGenerate += prodGen;
-            const nm = (barcodesState.printCart.find(c => c.c1Ref === prod) || {}).name || prod;
-            perProd.push({ name: nm, print: prodPrint, gen: prodGen });
-        } catch (e) { errCount++; }
-    }
+    const perProd = Object.values(perProdMap);
+    if (!perProd.length) { if (summary) summary.innerHTML = '<div style="color:#c0392b;">Нет выбранных вариантов с остатком на этом складе.</div>'; return; }
 
     if (summary) {
-        const rows = perProd.map(p => `${escapeHtml(p.name)}: ${p.print} шт.${p.gen ? ` (+${p.gen} новых)` : ''}`).join(' | ');
+        const rows = perProd.map(p => `${escapeHtml(p.name)}: ${p.print} шт.`).join(' | ');
         summary.innerHTML =
-            `<div style="font-size:14px;">🧮 Потребуется этикеток: <b>${toPrint}</b>` +
-            (toGenerate ? `, из них новых кодов сгенерируется: <b>${toGenerate}</b>` : ', все коды уже есть') + '.</div>' +
-            (errCount ? `<div style="color:#c0392b;font-size:12px;">Не удалось посчитать ${errCount} позиц. (проверьте связь с 1С).</div>` : '') +
+            `<div style="font-size:14px;">🧮 Потребуется этикеток: <b>${toPrint}</b> (по остатку выбранных размеров).</div>` +
             `<div style="font-size:11px;color:var(--color-text-secondary);margin-top:4px;">По номенклатурам — ${rows}</div>`;
     }
 }
@@ -7905,32 +7889,26 @@ async function generateAndPrint() {
         }
 
         // 3) собираем экземпляры для ПЕЧАТИ.
-        //    ЕСЛИ ВЫБРАН СКЛАД (#bcWarehouse) — печатаем ТОЛЬКО коды этого склада
-        //    (варианты с warehouse_id = выбранный склад), без среза по общему остатку.
-        //    ЕСЛИ СКЛАД НЕ ВЫБРАН — старое поведение: по всем складам характеристики,
-        //    срез по остатку 1С.
+        //    ПЕЧАТАЕМ СТРОГО ПО ВЫБРАННЫМ ВАРИАНТАМ (галочкам), а не по всей
+        //    характеристике на все склады. Каждый вариант привязан к своему складу,
+        //    поэтому отметив «размер 21, склад Сиёма (остаток 4)» — печатаем ровно 4,
+        //    а не экземпляры этого размера со всех складов.
+        //    Срез — по остатку КАЖДОГО ВАРИАНТА (variant.stock), т.е. не больше остатка
+        //    именно на его складе. Это уважает выбор склада и в режиме «Все склады».
         const bcWhId = document.getElementById('bcWarehouse')?.value || '';
-        const printVariantIds = [];
-        if (barcodesState.variantInfo) {
-            for (const [vid, vi] of Object.entries(barcodesState.variantInfo)) {
-                if (!vi || !vi.charRef || !selCharSet.has(vi.charRef)) continue;
-                // если выбран склад — только варианты этого склада
-                if (bcWhId && String(vi.warehouseId || '') !== String(bcWhId)) continue;
-                printVariantIds.push(vid);
-            }
+        // остаток по каждому выбранному варианту (из чекбоксов/корзины)
+        const stockByVariant = {};
+        for (const s of selected) {
+            const st = Number(s.stock);
+            stockByVariant[s.variantId] = Number.isFinite(st) ? st : Infinity;
         }
-        // подстраховка: если индекс пуст, берём выбранные варианты
-        //    (с учётом склада, если он выбран)
-        let variantIdsForPrint = printVariantIds;
-        if (!variantIdsForPrint.length) {
-            variantIdsForPrint = selected
-                .filter(s => {
-                    if (!bcWhId) return true;
-                    const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
-                    return String(vi.warehouseId || '') === String(bcWhId);
-                })
-                .map(s => s.variantId);
-        }
+        let variantIdsForPrint = selected
+            .filter(s => {
+                if (!bcWhId) return true; // режим «Все склады» — вариант уже привязан к складу
+                const vi = (barcodesState.variantInfo && barcodesState.variantInfo[s.variantId]) || {};
+                return String(vi.warehouseId || '') === String(bcWhId);
+            })
+            .map(s => s.variantId);
         if (!variantIdsForPrint.length) { bcShowPrintError('На выбранном складе нет вариантов для этих размеров.'); return; }
         let unitsQuery = ortobotClient
             .from('stock_units')
@@ -7943,18 +7921,15 @@ async function generateAndPrint() {
         const { data: units, error: uErr } = await unitsQuery;
         if (uErr) throw uErr;
 
-        // срез по остатку на каждый размер (charRef): печатаем не больше balance
-        const balByChar = {};
-        planRows.forEach(p => { balByChar[p.charRef] = p.balance; });
-        const takenByChar = {};
+        // срез по остатку КАЖДОГО ВАРИАНТА: печатаем не больше остатка варианта на его складе
+        const takenByVariant = {};
         const allUnits = [];
         for (const u of (units || [])) {
-            const vInfo = (barcodesState.variantInfo && barcodesState.variantInfo[u.variant_id]) || {};
-            const ch = vInfo.charRef || u.c1_char_ref;
-            const cap = (ch != null && balByChar[ch] != null) ? balByChar[ch] : Infinity;
-            takenByChar[ch] = (takenByChar[ch] || 0);
-            if (takenByChar[ch] >= cap) continue; // не печатаем больше остатка
-            takenByChar[ch]++;
+            const vid = u.variant_id;
+            const cap = (stockByVariant[vid] != null) ? stockByVariant[vid] : Infinity;
+            takenByVariant[vid] = (takenByVariant[vid] || 0);
+            if (takenByVariant[vid] >= cap) continue; // не печатаем больше остатка варианта
+            takenByVariant[vid]++;
             allUnits.push(bcEnrichUnit(u));
         }
         if (!allUnits.length) { bcShowPrintError('Нет экземпляров для печати (проверьте остаток в 1С).'); return; }

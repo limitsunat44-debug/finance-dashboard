@@ -236,27 +236,33 @@ async function renderOverview(force) {
   const box = $('ovBody');
   box.innerHTML = `<div class="loading">⏳ Загружаю обзор…</div>`;
   try {
-    const [hist, rep] = await Promise.all([
+    const [hist, rep, ret] = await Promise.all([
       cachedApi(`hist:${state.from}:${state.to}:${state.kassa}`, `?action=history&from=${state.from}&to=${state.to}${kassaQS()}`),
       cachedApi(`rep:${state.from}:${state.to}`, `?action=sales-report&from=${state.from}&to=${state.to}`),
+      cachedApi(`ret:${state.from}:${state.to}:${state.kassa}`, `?action=returns&from=${state.from}&to=${state.to}${kassaQS()}`),
     ]);
     const receipts = hist.receipts || [];
-    const total = hist.total || 0;
+    // ВОЗВРАТЫ: отдельные чеки С ВидОперации='Возврат' (action=returns).
+    // Их НАДО вычитать из продаж, чтобы совпадало с отчётом 1С (чистая выручка).
+    const returnsSum = Number(ret && ret.total) || 0;
+    const returnsList = (ret && ret.returns) || [];
+    const grossSales = hist.total || 0;      // продажи без учёта возвратов
+    const total = grossSales - returnsSum;   // ЧИСТАЯ выручка = продажи − возвраты (= 1С)
     const cnt = receipts.length;
-    const avg = cnt ? total / cnt : 0;
+    const avg = cnt ? grossSales / cnt : 0;  // средний чек — по продажам (возвраты — не чеки продаж)
 
-    // способы оплаты и возвраты — из sales-report (grand)
+    // способы оплаты — из sales-report (grand), там возвраты уже учтены со знаком −
     const g = (rep.report && rep.report.grand) || {};
     const buckets = (rep.report && rep.report.buckets) || [];
     const cash = g.cash || 0;
     let nonCash = 0;
     buckets.forEach(b => { if (b.key !== 'cash') nonCash += (g[b.key] || 0); });
     nonCash += (g.other || 0);
-    const returnsSum = computeReturns(rep.report);
 
-    // топ товаров недоступен из этих action → показываем топ продавцов по чекам
+    // Топ продавцов: продажи минус возвраты по каждому продавцу (чистый результат, как в 1С)
     const bySeller = {};
     receipts.forEach(r => { const s = r.seller || '—'; if (!bySeller[s]) bySeller[s] = { sum: 0, n: 0 }; bySeller[s].sum += r.total; bySeller[s].n++; });
+    returnsList.forEach(r => { const s = r.seller || '—'; if (!bySeller[s]) bySeller[s] = { sum: 0, n: 0 }; bySeller[s].sum -= (Number(r.total) || 0); });
     const topSellers = Object.entries(bySeller).sort((a, b) => b[1].sum - a[1].sum).slice(0, 5);
 
     // последние чеки

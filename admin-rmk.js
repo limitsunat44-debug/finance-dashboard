@@ -236,11 +236,16 @@ async function renderOverview(force) {
   const box = $('ovBody');
   box.innerHTML = `<div class="loading">⏳ Загружаю обзор…</div>`;
   try {
-    const [hist, rep, ret] = await Promise.all([
+    // БЫСТРЫЕ данные (Продажи/Возвраты/чеки/топы) — не ждём тяжёлый sales-report.
+    const [hist, ret] = await Promise.all([
       cachedApi(`hist:${state.from}:${state.to}:${state.kassa}`, `?action=history&from=${state.from}&to=${state.to}${kassaQS()}`),
-      cachedApi(`rep:${state.from}:${state.to}`, `?action=sales-report&from=${state.from}&to=${state.to}`),
       cachedApi(`ret:${state.from}:${state.to}:${state.kassa}`, `?action=returns&from=${state.from}&to=${state.to}${kassaQS()}`),
     ]);
+    // Разбивка наличные/безнал (sales-report) — тяжёлая на больших периодах (до ~90с),
+    // грузим НЕ блокируя обзор — дорисуем когда придёт.
+    const repPromise = cachedApi(`rep:${state.from}:${state.to}`, `?action=sales-report&from=${state.from}&to=${state.to}`)
+      .catch(() => null);
+    const rep = { report: null }; // плейсхолдер — реальные оплаты придут позже
     const receipts = hist.receipts || [];
     // ВОЗВРАТЫ: отдельные чеки С ВидОперации='Возврат' (action=returns).
     // Их НАДО вычитать из продаж, чтобы совпадало с отчётом 1С (чистая выручка).
@@ -274,8 +279,8 @@ async function renderOverview(force) {
         ${kpi('🧾','Чеков', fmtInt(cnt),'gray','')}
         ${kpi('↩','Возвраты', money(returnsSum),'red','')}
         ${kpi('📊','Средний чек', money(avg),'gray','')}
-        ${kpi('🟢','Наличные', money(cash),'g', pct(cash, cash+nonCash))}
-        ${kpi('💳','Безналичные', money(nonCash),'gray', pct(nonCash, cash+nonCash))}
+        <div id="ovCashKpi">${kpi('🟢','Наличные', '⏳','g', 'загрузка…')}</div>
+        <div id="ovNonCashKpi">${kpi('💳','Безналичные', '⏳','gray', 'загрузка…')}</div>
       </div>
 
       <div class="cols-main">
@@ -303,9 +308,9 @@ async function renderOverview(force) {
           <div class="card card-pad">
             <div class="card-h">Способы оплаты</div>
             <div class="chart-box" style="height:180px"><canvas id="ovPay"></canvas></div>
-            <div class="legend">
-              <div class="legend-item"><span class="lg-dot" style="background:#10b981"></span> Наличные — <b>&nbsp;${fmtNum(cash)}</b></div>
-              <div class="legend-item"><span class="lg-dot" style="background:#3b82f6"></span> Безналичные — <b>&nbsp;${fmtNum(nonCash)}</b></div>
+            <div class="legend" id="ovPayLegend">
+              <div class="legend-item"><span class="lg-dot" style="background:#10b981"></span> Наличные — <b>&nbsp;⏳</b></div>
+              <div class="legend-item"><span class="lg-dot" style="background:#3b82f6"></span> Безналичные — <b>&nbsp;⏳</b></div>
             </div>
           </div>
           <div class="card card-pad">
@@ -323,8 +328,28 @@ async function renderOverview(force) {
     box.querySelectorAll('[data-goto]').forEach(a => a.addEventListener('click', () => gotoView(a.dataset.goto)));
 
     drawHoursChart('ovHours', receipts);
-    drawPayDonut('ovPay', cash, nonCash);
     bumpSync();
+
+    // ДОГРУЗКА разбивки наличные/безнал (не блокирует обзор): дорисуем KPI, легенду и донат.
+    repPromise.then(rp => {
+      if (!rp || !rp.report) { // sales-report не ответил (таймаут/ошибка)
+        const cEl = $('ovCashKpi'), nEl = $('ovNonCashKpi'), lg = $('ovPayLegend');
+        if (cEl) cEl.innerHTML = kpi('🟢','Наличные', 'н/д','g', 'нет данных');
+        if (nEl) nEl.innerHTML = kpi('💳','Безналичные', 'н/д','gray', 'нет данных');
+        if (lg) lg.innerHTML = `<div class="legend-item muted">Разбивка оплат недоступна за этот период</div>`;
+        return;
+      }
+      const gg = rp.report.grand || {};
+      const bk = rp.report.buckets || [];
+      const c = gg.cash || 0;
+      let nc = 0; bk.forEach(b => { if (b.key !== 'cash') nc += (gg[b.key] || 0); }); nc += (gg.other || 0);
+      const cEl = $('ovCashKpi'), nEl = $('ovNonCashKpi'), lg = $('ovPayLegend');
+      if (cEl) cEl.innerHTML = kpi('🟢','Наличные', money(c),'g', pct(c, c+nc));
+      if (nEl) nEl.innerHTML = kpi('💳','Безналичные', money(nc),'gray', pct(nc, c+nc));
+      if (lg) lg.innerHTML = `<div class="legend-item"><span class="lg-dot" style="background:#10b981"></span> Наличные — <b>&nbsp;${fmtNum(c)}</b></div>`+
+        `<div class="legend-item"><span class="lg-dot" style="background:#3b82f6"></span> Безналичные — <b>&nbsp;${fmtNum(nc)}</b></div>`;
+      drawPayDonut('ovPay', c, nc);
+    }).catch(() => {});
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить обзор: ' + (e.message || e));
   }

@@ -4527,10 +4527,29 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
 .pmob-hist-thead .c-size,
 .pmob-hist-thead .c-time { text-align: center; }
 .pmob-hist-thead .c-pay { text-align: right; }
+.pmob-hist-item { border-bottom: 1px solid #f0f4f4; }
 .pmob-hist-row {
-    padding: 11px 4px; border-bottom: 1px solid #f0f4f4; font-size: 13px;
+    padding: 11px 4px; font-size: 13px; cursor: pointer;
+    transition: background .12s;
 }
 .pmob-hist-row:active { background: var(--pm-soft); }
+.pmob-hist-item.open .pmob-hist-row { background: #f2fcf6; }
+/* Разворот: полное имя + сумма */
+.pmob-hist-det { display: none; padding: 0 4px 12px; }
+.pmob-hist-item.open .pmob-hist-det { display: block; }
+.pmob-hist-det-name {
+    font-size: 14px; font-weight: 700; color: var(--pm-ink);
+    line-height: 1.35; margin-bottom: 8px; word-break: break-word;
+}
+.pmob-hist-det-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #f2fcf6; border: 1px solid #cdeedd; border-radius: 12px;
+}
+.pmob-hist-det-cap { font-size: 12px; color: var(--pm-muted); font-weight: 600; }
+.pmob-hist-det-sum {
+    font-size: 16px; font-weight: 800; color: #059669;
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+}
 .pmob-hist-row .c-name {
     min-width: 0; font-weight: 700; color: var(--pm-ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

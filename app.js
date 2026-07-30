@@ -12739,18 +12739,32 @@ function pmobHistRender() {
         '<span class="c-time">Время</span>' +
         '<span class="c-pay">Оплата</span>' +
         '</div>';
-    const body = rows.map(it => {
+    const body = rows.map((it, i) => {
         const size = pmobHistSize(it.size);
         const time = repDushTime(it.date, false);
-        return '<div class="pmob-hist-row">' +
+        const sum = posMoney(it.sum || 0) + ' с.';
+        return '<div class="pmob-hist-item">' +
+            `<div class="pmob-hist-row" data-histidx="${i}">` +
             `<span class="c-name">${posEsc(it.name || 'Товар')}</span>` +
             `<span class="c-code">${posEsc(it.code4 || '—')}</span>` +
             `<span class="c-size">${posEsc(size)}</span>` +
             `<span class="c-time">${posEsc(time)}</span>` +
             `<span class="c-pay">${pmobPayBadge(it.pay)}</span>` +
+            '</div>' +
+            '<div class="pmob-hist-det">' +
+            `<div class="pmob-hist-det-name">${posEsc(it.name || 'Товар')}</div>` +
+            '<div class="pmob-hist-det-row">' +
+            `<span class="pmob-hist-det-cap">Сумма продажи</span>` +
+            `<span class="pmob-hist-det-sum">${posEsc(sum)}</span>` +
+            '</div></div>' +
             '</div>';
     }).join('');
     list.innerHTML = head + body;
+    list.querySelectorAll('.pmob-hist-row').forEach(r => {
+        r.addEventListener('click', () => {
+            r.closest('.pmob-hist-item').classList.toggle('open');
+        });
+    });
 }
 
 function pmobBindEvents() {

@@ -77,6 +77,17 @@ async function posApi(path, opts) {
   return data;
 }
 
+// Вызов inventory-API того же backend (для sync-prices и пр.)
+async function invApi(path, opts) {
+  const res = await fetch(`${BARCODE_SVC_URL}/api/inventory${path}`, {
+    ...(opts || {}),
+    headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET, ...((opts && opts.headers) || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
 // ─────────── Состояние ───────────
 const state = {
   user: null,
@@ -1504,12 +1515,85 @@ async function renderSettings(force) {
           <div class="muted" style="font-size:12px;margin-top:12px">Раздел только для просмотра. Изменение параметров — через 1С и основной дашборд.</div>
         </div>
       </div>
+
+      ${state.allowedTabs === '*' ? `
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Синхронизация цен из 1С</h3></div>
+        <div class="muted" style="font-size:13px;margin-bottom:12px">
+          Загружает актуальные цены из 1С (документы «Установка цен номенклатуры», только проведённые)
+          и обновляет цены в базе кассы и РМК. Обновляются продажная цена, зачёркнутая старая цена (скидка)
+          и базовая цена товара — только там, где значение отличается.
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <button class="btn" id="btnSyncPricesCheck" onclick="syncPricesCheck()">🔍 Проверить (без записи)</button>
+          <button class="btn btn-primary" id="btnSyncPricesApply" onclick="syncPricesApply()">⬇️ Обновить цены из 1С</button>
+        </div>
+        <div id="syncPricesResult" style="margin-top:14px"></div>
+      </div>
+      ` : ''}
     `;
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить настройки: ' + (e.message || e));
   }
 }
+
+// ─────────── Синхронизация цен 1С -> база кассы/РМК ───────────
+function _syncPricesReport(d, applied) {
+  const v = d.variants || {}; const p = d.products || {}; const sc = d.scanned || {};
+  const ap = d.applied || {};
+  const line = (label, val, tone) => `<div class="st-row"><span class="st-k">${label}</span><span class="st-v ${tone||''}">${val}</span></div>`;
+  let head;
+  if (applied) {
+    head = `<div style="margin-bottom:10px;padding:8px 12px;border-radius:8px;background:rgba(67,122,34,.12);color:#2f6b17;font-weight:600">✅ Цены обновлены. Вариантов: <b>${fmtInt(ap.variants||0)}</b>, товаров: <b>${fmtInt(ap.products||0)}</b>.</div>`;
+  } else {
+    head = `<div class="muted" style="margin-bottom:10px;font-size:13px">Предварительная проверка (без записи). Нажмите «Обновить цены», чтобы применить.</div>`;
+  }
+  const samples = (d.sampleRealPriceChanges || []).slice(0, 20);
+  const sampleHtml = samples.length ? `
+    <div style="margin-top:12px">
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Примеры изменения продажной цены (до ${samples.length}):</div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Было</th><th>Стало</th></tr></thead>
+      <tbody>${samples.map(s => `<tr><td>${s.from==null?'—':money(s.from)}</td><td class="strong">${money(s.to)}</td></tr>`).join('')}</tbody>
+      </table></div>
+    </div>` : '';
+  return `<div class="card card-pad" style="background:var(--surface,#faf9f6)">
+    ${head}
+    ${line('Проверено вариантов', fmtInt(sc.variants||0))}
+    ${line('→ изменится продажная цена', fmtInt(v.priceChanged||0), (v.priceChanged?'amber':''))}
+    ${line('→ изменится только старая (зачёркнутая) цена', fmtInt(v.oldPriceChanged||0))}
+    ${line('→ нет цены в 1С (пропущено)', fmtInt(v.noPriceInC1||0))}
+    ${line('Товаров к обновлению (базовая цена)', fmtInt(p.toUpdate||0))}
+    ${sampleHtml}
+  </div>`;
+}
+
+async function syncPricesRun(apply) {
+  const box = document.getElementById('syncPricesResult');
+  const bCheck = document.getElementById('btnSyncPricesCheck');
+  const bApply = document.getElementById('btnSyncPricesApply');
+  if (bCheck) bCheck.disabled = true;
+  if (bApply) bApply.disabled = true;
+  if (box) box.innerHTML = `<div class="loading">⏳ ${apply ? 'Обновляю цены из 1С…' : 'Проверяю цены в 1С…'} (может занять 10–20 сек)</div>`;
+  try {
+    const q = apply ? '?action=sync-prices' : '?action=sync-prices&dryRun=true';
+    const d = await invApi(q, apply ? { method: 'POST', body: JSON.stringify({}) } : {});
+    if (box) box.innerHTML = _syncPricesReport(d, apply);
+    if (apply) { try { state.cache = {}; } catch(_){} }
+  } catch (e) {
+    if (box) box.innerHTML = errBar('Ошибка синхронизации: ' + (e.message || e));
+  } finally {
+    if (bCheck) bCheck.disabled = false;
+    if (bApply) bApply.disabled = false;
+  }
+}
+function syncPricesCheck() { return syncPricesRun(false); }
+async function syncPricesApply() {
+  if (!confirm('Обновить цены в базе кассы и РМК из 1С? Цены будут перезаписаны актуальными значениями из 1С.')) return;
+  return syncPricesRun(true);
+}
+window.syncPricesCheck = syncPricesCheck;
+window.syncPricesApply = syncPricesApply;
 
 // ═════════════════════════════════════════════════════
 //  РАЗДЕЛ: СТАТИСТИКА

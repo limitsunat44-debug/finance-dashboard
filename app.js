@@ -11379,38 +11379,57 @@ async function posCloseShift() {
 function posShowShiftSummary(shift, kassaName) {
     const body = document.getElementById('posShiftSummaryBody');
     if (!body) return;
-    const total = Number(shift.total_sales) || 0;
+    const sales = Number(shift.total_sales) || 0;
+    const returns = Number(shift.total_returns) || 0;
+    const net = sales - returns;                       // ЧИСТАЯ выручка = продажи − возвраты
     const receipts = Number(shift.receipts_count) || 0;
     const bd = shift.payments_breakdown || {};
-    // порядок: Наличные первыми, остальные по убыванию суммы
-    const entries = Object.keys(bd).map(k => [k, Number(bd[k]) || 0])
-        .sort((a, b) => {
-            const ca = /налич/i.test(a[0]) ? 1 : 0, cb = /налич/i.test(b[0]) ? 1 : 0;
-            if (ca !== cb) return cb - ca;
-            return b[1] - a[1];
-        });
+    const rbd = shift.returns_breakdown || {};
     const icon = (name) => {
         if (/налич/i.test(name)) return '💵';
         if (/qr|кьюар|кюар/i.test(name)) return '📱';
         if (/карт|visa|master|мир|uzcard|humo/i.test(name)) return '💳';
         return '💰';
     };
-    let rows = '';
-    if (entries.length) {
-        rows = entries.map(([name, amt]) =>
+    // порядок: Наличные первыми, остальные по убыванию суммы
+    const sortEntries = (obj) => Object.keys(obj).map(k => [k, Number(obj[k]) || 0])
+        .sort((a, b) => {
+            const ca = /налич/i.test(a[0]) ? 1 : 0, cb = /налич/i.test(b[0]) ? 1 : 0;
+            if (ca !== cb) return cb - ca;
+            return b[1] - a[1];
+        });
+    const saleEntries = sortEntries(bd);
+    const retEntries = sortEntries(rbd).filter(([, amt]) => amt > 0);
+
+    let saleRows = saleEntries.length
+        ? saleEntries.map(([name, amt]) =>
             `<div class="pr-line"><span>${icon(name)} ${posEsc(name)}</span><b>${posMoney(amt)} сом</b></div>`
-        ).join('');
-    } else {
-        rows = `<div class="pr-line" style="color:#7a7974;"><span>Продаж не было</span><span></span></div>`;
+          ).join('')
+        : `<div class="pr-line" style="color:#7a7974;"><span>Продаж не было</span><span></span></div>`;
+
+    // секция возвратов — показываем только если были возвраты
+    let returnsBlock = '';
+    if (returns > 0) {
+        const retRows = retEntries.length
+            ? retEntries.map(([name, amt]) =>
+                `<div class="pr-line pr-ret"><span>${icon(name)} ${posEsc(name)}</span><b>−${posMoney(amt)} сом</b></div>`
+              ).join('')
+            : `<div class="pr-line pr-ret"><span>Возвраты</span><b>−${posMoney(returns)} сом</b></div>`;
+        returnsBlock = `
+        <div class="pr-hr"></div>
+        <div style="font-weight:700;color:#c0392b;margin:6px 0 4px;">Возвраты по способам оплаты</div>
+        ${retRows}`;
     }
+
     body.innerHTML = `
         <div class="pr-line" style="color:#4b5563;"><span>Касса</span><span>${posEsc(kassaName || '')}</span></div>
         <div class="pr-line" style="color:#4b5563;"><span>Чеков за смену</span><span>${receipts}</span></div>
         <div class="pr-hr"></div>
         <div style="font-weight:700;color:#01696F;margin:6px 0 4px;">Выручка по способам оплаты</div>
-        ${rows}
+        ${saleRows}
+        ${returnsBlock}
         <div class="pr-hr"></div>
-        <div class="pr-line pr-grand"><span>ИТОГО</span><b>${posMoney(total)} сом</b></div>
+        <div class="pr-line pr-grand"><span>ИТОГО</span><b>${posMoney(net)} сом</b></div>
     `;
     const modal = document.getElementById('posShiftSummaryModal');
     if (modal) modal.style.display = 'flex';
@@ -11535,6 +11554,8 @@ async function posReturnConfirm() {
     const reason = reasonBtn ? reasonBtn.getAttribute('data-reason') : '';
     const refundSel = document.getElementById('posRetRefund');
     const refundPayC1Ref = (refundSel && refundSel.value) || null;
+    const refundPayName = (refundSel && refundSel.selectedIndex >= 0 && refundSel.options[refundSel.selectedIndex])
+        ? refundSel.options[refundSel.selectedIndex].text.trim() : '';
     const sh = POS.shift || {};
     POS._return.busy = true;
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Оформляю…'; }
@@ -11547,6 +11568,8 @@ async function posReturnConfirm() {
             sellerName: sh.seller_name || null,
             reason: reason,
             refundPayC1Ref: refundPayC1Ref,
+            refundPayName: refundPayName,          // читаемое имя способа — для разбивки возвратов в отчёте
+            shiftId: sh.id || null,                // чтобы backend вычел возврат из итога смены
         };
         // ОНЛАЙН-FIRST с таймаутом; при сбое сети — в очередь.
         let r;
@@ -12678,6 +12701,8 @@ async function pmobRetConfirm() {
     const reason = rSel ? (rSel.value || '') : '';
     const fSel = pmobEl('pmobRetRefund');
     const refundPayC1Ref = (fSel && fSel.value) || null;
+    const refundPayName = (fSel && fSel.selectedIndex >= 0 && fSel.options[fSel.selectedIndex])
+        ? fSel.options[fSel.selectedIndex].text.trim() : '';
     const sh = POS.shift || {};
 
     const btn = pmobEl('pmobRetConfirmBtn');
@@ -12693,6 +12718,8 @@ async function pmobRetConfirm() {
             sellerName: sh.seller_name || null,
             reason,
             refundPayC1Ref,
+            refundPayName,                         // читаемое имя способа — для разбивки возвратов
+            shiftId: sh.id || null,                // чтобы backend вычел возврат из итога смены
             refundTotal,
         };
         let r;
@@ -13416,9 +13443,11 @@ function repFmtNum(n) {
   return n.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 function repToday() {
-  // сегодня в TZ Душанбе (+05) как YYYY-MM-DD
-  const d = new Date();
-  const dush = new Date(d.getTime() + (5 * 60 - d.getTimezoneOffset()) * 60000);
+  // Сегодня по Душанбе (UTC+5, без DST) как YYYY-MM-DD.
+  // ВАЖНО: берём абсолютный момент (Date.now() — всегда UTC-epoch), добавляем ровно +5ч
+  // и читаем как UTC. Не зависит от часового пояса/настроек телефона.
+  // (Старая формула дважды учитывала сдвиг → вечером перескакивало на следующий день.)
+  const dush = new Date(Date.now() + 5 * 3600000);
   return dush.toISOString().slice(0, 10);
 }
 // ISO-строка → 'ДД.ММ HH:MM' по Душанбе (+05)

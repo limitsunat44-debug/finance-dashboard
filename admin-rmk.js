@@ -67,8 +67,38 @@ function nowDushLabel() {
 }
 
 // ─────────── API ───────────
+// fetch с таймаутом и авто-ретраем на обрыв/abort (лечит «This operation was aborted»
+// на холодном старте serverless: первый запрос может идти 20-30с, повторный — 2-3с).
+async function svcFetch(url, opts) {
+  const o = opts || {};
+  const timeoutMs = o.timeoutMs || 95000; // выше лимита cold-start, чтобы не рвать раньше времени
+  const retries = (o.retries != null) ? o.retries : 2;
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { ...o, signal: ctrl.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      const aborted = (e && (e.name === 'AbortError' || /abort/i.test(String(e && e.message))));
+      const netErr = (e && (e.name === 'TypeError' || /network|failed to fetch/i.test(String(e && e.message))));
+      // повторяем только при обрыве/таймауте/сетевой ошибке и если есть попытки
+      if ((aborted || netErr) && attempt < retries) {
+        await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
 async function posApi(path, opts) {
-  const res = await fetch(`${BARCODE_SVC_URL}/api/pos${path}`, {
+  const res = await svcFetch(`${BARCODE_SVC_URL}/api/pos${path}`, {
     ...(opts || {}),
     headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET, ...((opts && opts.headers) || {}) },
   });
@@ -79,7 +109,7 @@ async function posApi(path, opts) {
 
 // Вызов inventory-API того же backend (для sync-prices и пр.)
 async function invApi(path, opts) {
-  const res = await fetch(`${BARCODE_SVC_URL}/api/inventory${path}`, {
+  const res = await svcFetch(`${BARCODE_SVC_URL}/api/inventory${path}`, {
     ...(opts || {}),
     headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET, ...((opts && opts.headers) || {}) },
   });
@@ -434,9 +464,16 @@ async function renderOverview(force) {
       drawPayDonut('ovPay', c, nc);
     }).catch(() => {});
   } catch (e) {
-    box.innerHTML = errBar('Не удалось загрузить обзор: ' + (e.message || e));
+    const msg = String(e && e.message || e);
+    const isAbort = /abort|timeout|network|failed to fetch/i.test(msg);
+    const human = isAbort
+      ? 'Сервер долго не отвечал (возможно, «просыпался» после простоя). Попробуйте ещё раз.'
+      : msg;
+    box.innerHTML = errBar('Не удалось загрузить обзор: ' + human) +
+      `<div style="margin-top:10px"><button class="btn btn-primary" onclick="renderOverview(true)">🔄 Повторить</button></div>`;
   }
 }
+window.renderOverview = renderOverview;
 
 function computeReturns(report) {
   // сумма возвратов = насколько отрицательна колонка «Итого» относительно суммы продаж не даёт прямо,

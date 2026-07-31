@@ -153,6 +153,7 @@ const VIEW_META = {
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
   users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
+  devices:   { title: 'Устройства касс', sub: 'Заявки на вход с мобильных устройств и одобренные устройства' },
   audit:     { title: 'Журнал действий', sub: 'Смены, продажи и возвраты в хронологии' },
   settings:  { title: 'Настройки РМК', sub: 'Магазины, кассы ККМ и параметры системы' },
   stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
@@ -161,7 +162,7 @@ const VIEW_META = {
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer', 'finance'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer', 'finance'];
 
 async function bootApp() {
   // фильтры даты
@@ -280,6 +281,7 @@ function renderView(force) {
   else if (v === 'search') renderSearch(force);
   else if (v === 'history') renderHistory(force);
   else if (v === 'users') renderUsers(force);
+  else if (v === 'devices') renderDevices(force);
   else if (v === 'audit') renderAudit(force);
   else if (v === 'settings') renderSettings(force);
   else if (v === 'stats') renderStats(force);
@@ -1273,6 +1275,108 @@ const AU_META = {
 };
 const auState = { type: '' };
 let auCache = null;
+
+// ════════════════════════════════════════════════════════
+//  РАЗДЕЛ: УСТРОЙСТВА КАСС (одобрение девайсов)
+// ════════════════════════════════════════════════════════
+const DEV_ACCOUNT_LABEL = {
+  siyoma: 'Сиёма', ayni: 'Айни', barakat: 'Баракат', citymall: 'Сити-Молл',
+  'кассир': 'Кассир', kassir: 'Кассир',
+};
+function devFmtTime(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+  catch (_) { return String(iso); }
+}
+
+async function renderDevices(force) {
+  const box = $('dvBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю устройства…</div>`;
+  let data;
+  try {
+    data = await posApi('?action=device-list', { method: 'GET' });
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить устройства: ' + e.message);
+    return;
+  }
+  const devices = (data && data.devices) || [];
+  const counts = (data && data.counts) || { pending: 0, approved: 0, denied: 0 };
+  const pending  = devices.filter(d => d.status === 'pending');
+  const approved = devices.filter(d => d.status === 'approved');
+  const denied   = devices.filter(d => d.status === 'denied');
+
+  const accName = (k) => DEV_ACCOUNT_LABEL[String(k || '').toLowerCase()] || k || '—';
+  const shortId = (id) => { const s = String(id || ''); return s.length > 14 ? s.slice(0, 8) + '…' + s.slice(-4) : s; };
+
+  const rowPending = (d) => `
+    <tr>
+      <td><b>${esc(accName(d.account_key))}</b><div class="muted" style="font-size:12px">${esc(d.warehouse_name || '')}</div></td>
+      <td>${esc(d.label || '—')}<div class="muted" style="font-size:11px">${esc(shortId(d.device_id))}</div></td>
+      <td class="muted" style="font-size:12px">${esc(d.ip || '—')}</td>
+      <td>${devFmtTime(d.first_seen)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-sm btn-ok" data-dev-approve="${esc(d.id)}">✓ Одобрить</button>
+        <button class="btn-sm btn-no" data-dev-deny="${esc(d.id)}">✕ Отклонить</button>
+      </td>
+    </tr>`;
+  const rowApproved = (d) => `
+    <tr>
+      <td><b>${esc(accName(d.account_key))}</b><div class="muted" style="font-size:12px">${esc(d.warehouse_name || '')}</div></td>
+      <td>${esc(d.label || '—')}<div class="muted" style="font-size:11px">${esc(shortId(d.device_id))}</div></td>
+      <td class="muted" style="font-size:12px">${esc(d.approved_by || '—')}<div>${devFmtTime(d.approved_at)}</div></td>
+      <td>${devFmtTime(d.last_seen)}</td>
+      <td><button class="btn-sm btn-no" data-dev-revoke="${esc(d.id)}">↺ Отозвать</button></td>
+    </tr>`;
+
+  box.innerHTML = `
+    <style>
+      .dev-cards{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+      .dev-card{flex:1;min-width:120px;background:#fff;border:1px solid #e5e5e5;border-radius:12px;padding:14px 16px}
+      .dev-card .n{font-size:26px;font-weight:800}
+      .dev-card .l{font-size:13px;color:#777}
+      .dev-card.pend .n{color:#c47f17}.dev-card.appr .n{color:#2e7d32}.dev-card.den .n{color:#b3306a}
+      .dev-table{width:100%;border-collapse:collapse;margin-bottom:10px}
+      .dev-table th,.dev-table td{padding:10px 12px;border-bottom:1px solid #eee;text-align:left;font-size:14px;vertical-align:top}
+      .dev-table th{background:#faf9f7;font-size:12px;color:#666;text-transform:uppercase;letter-spacing:.03em}
+      .dev-h{font-size:16px;font-weight:700;margin:18px 0 8px}
+      .btn-sm{border:none;border-radius:8px;padding:7px 12px;font-size:13px;cursor:pointer;margin-right:6px}
+      .btn-ok{background:#e6f4ea;color:#1e7d33}.btn-ok:hover{background:#d3ebd9}
+      .btn-no{background:#fbe9f2;color:#b3306a}.btn-no:hover{background:#f5d8e7}
+      .dev-empty{color:#999;padding:14px;font-style:italic}
+      .muted{color:#888}
+    </style>
+    <div class="dev-cards">
+      <div class="dev-card pend"><div class="n">${counts.pending || 0}</div><div class="l">Ожидают</div></div>
+      <div class="dev-card appr"><div class="n">${counts.approved || 0}</div><div class="l">Одобрены</div></div>
+      <div class="dev-card den"><div class="n">${counts.denied || 0}</div><div class="l">Отклонены</div></div>
+    </div>
+
+    <div class="dev-h">🔔 Заявки на вход (ожидают одобрения)</div>
+    ${pending.length ? `<table class="dev-table"><thead><tr><th>Касса</th><th>Устройство</th><th>IP</th><th>Первый вход</th><th>Действие</th></tr></thead><tbody>${pending.map(rowPending).join('')}</tbody></table>` : `<div class="dev-empty">Новых заявок нет.</div>`}
+
+    <div class="dev-h">✅ Одобренные устройства</div>
+    ${approved.length ? `<table class="dev-table"><thead><tr><th>Касса</th><th>Устройство</th><th>Кто/когда одобрил</th><th>Активность</th><th>Действие</th></tr></thead><tbody>${approved.map(rowApproved).join('')}</tbody></table>` : `<div class="dev-empty">Одобренных устройств пока нет.</div>`}
+
+    ${denied.length ? `<div class="dev-h">🚫 Отклонённые</div><table class="dev-table"><thead><tr><th>Касса</th><th>Устройство</th><th>IP</th><th>Активность</th><th>Действие</th></tr></thead><tbody>${denied.map(d => `<tr><td><b>${esc(accName(d.account_key))}</b></td><td>${esc(d.label || '—')}<div class="muted" style="font-size:11px">${esc(shortId(d.device_id))}</div></td><td class="muted">${esc(d.ip || '—')}</td><td>${devFmtTime(d.last_seen)}</td><td><button class="btn-sm btn-ok" data-dev-approve="${esc(d.id)}">✓ Разрешить</button></td></tr>`).join('')}</tbody></table>` : ''}
+  `;
+
+  const act = async (id, action, verb) => {
+    if (!id) return;
+    try {
+      await posApi(`?action=device-${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ id, by: (state.user || 'admin') }),
+      });
+      state.cache = {};
+      renderDevices(true);
+    } catch (e) {
+      alert('Не удалось ' + verb + ': ' + e.message);
+    }
+  };
+  box.querySelectorAll('[data-dev-approve]').forEach(b => b.addEventListener('click', () => act(b.dataset.devApprove, 'approve', 'одобрить')));
+  box.querySelectorAll('[data-dev-deny]').forEach(b => b.addEventListener('click', () => act(b.dataset.devDeny, 'deny', 'отклонить')));
+  box.querySelectorAll('[data-dev-revoke]').forEach(b => b.addEventListener('click', () => { if (confirm('Отозвать доступ у этого устройства?')) act(b.dataset.devRevoke, 'revoke', 'отозвать'); }));
+}
 
 async function renderAudit(force) {
   const box = $('auBody');

@@ -62,6 +62,135 @@ const ADMIN_ACCOUNTS = {
     'citymall': { password: 'citymall123', displayName: 'Сити-Молл', allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Сити-Молл"' }
 };
 
+// ============================================================================
+//  ПРИВЯЗКА КАССЫ К ОДОБРЕННЫМ УСТРОЙСТВАМ (только мобильная/PWA-касса)
+//  На ПК и для админов гейт НЕ работает — вход как раньше.
+// ============================================================================
+// Аккаунты, которые на мобильном/PWA требуют одобрения устройства.
+// Ключ = логин аккаунта (нижний регистр) → account_key на сервере.
+const POS_DEVICE_GATED = ['siyoma', 'ayni', 'barakat', 'citymall', 'кассир', 'kassir'];
+
+// Мобильный/PWA-контекст: PWA (standalone) ИЛИ мобильный userAgent.
+// Только в этом случае включаем гейт устройства.
+function isMobilePos() {
+    try {
+        const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+            || window.navigator.standalone === true;
+        const mobileUA = /Android|iPhone|iPad|iPod|Mobile|Opera Mini|IEMobile/i.test(navigator.userAgent || '');
+        return !!(standalone || mobileUA);
+    } catch (_) { return false; }
+}
+
+// Постоянный идентификатор устройства (localStorage). Создаётся один раз.
+function getDeviceId() {
+    let id = null;
+    try { id = localStorage.getItem('orto_device_id'); } catch (_) {}
+    if (!id) {
+        id = (crypto && crypto.randomUUID) ? crypto.randomUUID()
+            : ('dev-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+        try { localStorage.setItem('orto_device_id', id); } catch (_) {}
+    }
+    return id;
+}
+
+// Надо ли гейтить этот аккаунт? (только мобильный/PWA + кассирские аккаунты)
+function posDeviceGateNeeded(username) {
+    if (!isMobilePos()) return false;
+    const key = String(username || '').trim().toLowerCase();
+    return POS_DEVICE_GATED.includes(key);
+}
+
+// Статус устройства БЕЗ пароля (для автовхода/перепроверки).
+// Возвращает 'approved'|'pending'|'denied'|'unknown'|'error'.
+async function posDeviceStatus(username) {
+    const key = String(username || '').trim().toLowerCase();
+    try {
+        const url = `${BARCODE_SVC_URL}/api/pos?action=device-status`
+            + `&account_key=${encodeURIComponent(key)}&device_id=${encodeURIComponent(getDeviceId())}`;
+        const res = await fetch(url, { headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET } });
+        const j = await res.json();
+        return j && j.status ? j.status : 'unknown';
+    } catch (_) { return 'error'; }
+}
+
+// Запрос к backend: проверка логина/пароля НА СЕРВЕРЕ + статус устройства.
+// Возвращает { status: 'approved'|'pending'|'denied'|'bad_credentials'|'error', ... }
+async function posDeviceCheck(username, password) {
+    const key = String(username || '').trim().toLowerCase();
+    try {
+        const res = await fetch(`${BARCODE_SVC_URL}/api/pos?action=device-check`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+            body: JSON.stringify({
+                account_key: key, password: String(password || '').trim(),
+                device_id: getDeviceId(),
+                label: (navigator.platform || '') + ' · ' + (navigator.userAgent || '').slice(0, 80),
+            }),
+        });
+        return await res.json();
+    } catch (e) {
+        return { status: 'error', error: String(e && e.message || e) };
+    }
+}
+
+// Экран «Ожидаем одобрения» с автоповтором каждые 5с.
+let _devicePollTimer = null;
+function showDeviceWaiting(username, password) {
+    stopDeviceWaiting();
+    let ov = document.getElementById('deviceWaitOverlay');
+    if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'deviceWaitOverlay';
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#171614;color:#e8e8e6;font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:24px;';
+        ov.innerHTML = `
+          <div style="max-width:420px;text-align:center;background:#1f1e1c;border:1px solid #393836;border-radius:16px;padding:32px 28px;box-shadow:0 10px 40px rgba(0,0,0,.4);">
+            <div style="width:56px;height:56px;margin:0 auto 18px;border:4px solid #393836;border-top-color:#4F98A3;border-radius:50%;animation:devspin 1s linear infinite;"></div>
+            <h2 style="margin:0 0 10px;font-size:20px;font-weight:700;color:#fff;">Ожидаем одобрения</h2>
+            <p style="margin:0 0 6px;font-size:15px;line-height:1.5;color:#cdccca;">Заявка на вход с этого устройства отправлена администратору.</p>
+            <p style="margin:0 0 20px;font-size:14px;color:#797876;">Как только её одобрят — вход произойдёт автоматически.</p>
+            <div id="deviceWaitStatus" style="font-size:13px;color:#797876;margin-bottom:16px;">Проверяем…</div>
+            <button id="deviceWaitCancel" style="background:transparent;border:1px solid #393836;color:#cdccca;border-radius:10px;padding:10px 18px;font-size:14px;cursor:pointer;">Отмена</button>
+          </div>`;
+        const style = document.createElement('style');
+        style.textContent = '@keyframes devspin{to{transform:rotate(360deg)}}';
+        document.head.appendChild(style);
+        document.body.appendChild(ov);
+        ov.querySelector('#deviceWaitCancel').addEventListener('click', () => {
+            stopDeviceWaiting(); ov.remove();
+        });
+    } else {
+        ov.style.display = 'flex';
+    }
+    const poll = async () => {
+        const r = await posDeviceCheck(username, password);
+        const st = document.getElementById('deviceWaitStatus');
+        if (r.status === 'approved') {
+            stopDeviceWaiting();
+            const el = document.getElementById('deviceWaitOverlay'); if (el) el.remove();
+            _doLoginApproved(username, password);
+        } else if (r.status === 'denied') {
+            stopDeviceWaiting();
+            if (st) { st.style.color = '#D163A7'; st.textContent = 'Устройство отклонено администратором.'; }
+        } else if (st) {
+            st.textContent = 'Ожидаем… ' + new Date().toLocaleTimeString('ru-RU');
+        }
+    };
+    poll();
+    _devicePollTimer = setInterval(poll, 5000);
+}
+function stopDeviceWaiting() {
+    if (_devicePollTimer) { clearInterval(_devicePollTimer); _devicePollTimer = null; }
+}
+
+// Фактический вход после одобрения устройства (локальная проверка пароля как раньше).
+function _doLoginApproved(username, password) {
+    if (login(username, password)) {
+        const err = document.getElementById('loginError'); if (err) err.style.display = 'none';
+    } else {
+        showError('Неверное имя пользователя или пароль.', 'loginError');
+    }
+}
+
 // Права доступа текущего пользователя: '*' (полный) или массив id вкладок.
 let currentAllowedTabs = '*';
 // Разрешённая касса для логина магазина (точное имя) или null = все кассы.
@@ -1527,7 +1656,7 @@ function login(username, password) {
         _applyAccount(account);
         // ЗАПОМИНАЕМ ВХОД: сохраняем только ключ аккаунта (НЕ пароль).
         // При следующем открытии касса войдёт автоматически.
-        try { localStorage.setItem('ortoSession', acctKey); } catch (_) {}
+        try { localStorage.setItem('ortoSession', acctKey); localStorage.setItem('ortoSessionEpoch', SESSION_EPOCH); } catch (_) {}
         applyTabAccess();
 
         loadData().then(() => {
@@ -1571,12 +1700,33 @@ function logout() {
 
 // Автовход по сохранённой сессии (вызывается при загрузке страницы).
 // Возвращает true, если успешно вошли без запроса логина/пароля.
+// ЭПОХА СЕССИЙ: бамп этого числа разлогинивает ВСЕ уже вошедшие устройства.
+// Увеличен для выполнения «выйди из всех аккаунтов» при внедрении гейта устройств.
+const SESSION_EPOCH = '2026-07-31-device-gate';
+
 function restoreSession() {
     let acctKey = null;
     try { acctKey = localStorage.getItem('ortoSession'); } catch (_) {}
     if (!acctKey) return false;
+    // Сброс всех сессий: если эпоха не совпадает — требуем повторный вход.
+    let epoch = null;
+    try { epoch = localStorage.getItem('ortoSessionEpoch'); } catch (_) {}
+    if (epoch !== SESSION_EPOCH) {
+        try { localStorage.removeItem('ortoSession'); } catch (_) {}
+        return false;
+    }
     const account = ADMIN_ACCOUNTS[acctKey];
     if (!account) { try { localStorage.removeItem('ortoSession'); } catch (_) {} return false; }
+    // Мобильная/PWA-касса: при автовходе перепроверяем статус устройства
+    // (вдруг его отозвали). Без одобрения — на экран входа.
+    if (posDeviceGateNeeded(acctKey)) {
+        posDeviceStatus(acctKey).then(status => {
+            if (status !== 'approved') {
+                try { localStorage.removeItem('ortoSession'); } catch (_) {}
+                logout();
+            }
+        });
+    }
     _applyAccount(account);
     applyTabAccess();
     loadData().then(() => {
@@ -2974,10 +3124,33 @@ function loadAllTables() {
 // Event listeners
 document.addEventListener('DOMContentLoaded', function() {
     // Login form
-    document.getElementById('loginForm').addEventListener('submit', function(e) {
+    document.getElementById('loginForm').addEventListener('submit', async function(e) {
         e.preventDefault();
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
+
+        // МОБИЛЬНАЯ/PWA-КАССА: вход только через одобренное устройство.
+        // На ПК и для админов — обычный вход (ветка else ниже).
+        if (posDeviceGateNeeded(username)) {
+            const btn = this.querySelector('button[type="submit"]');
+            if (btn) { btn.disabled = true; btn.textContent = 'Проверяем…'; }
+            const r = await posDeviceCheck(username, password);
+            if (btn) { btn.disabled = false; btn.textContent = 'Войти'; }
+            if (r.status === 'approved') {
+                document.getElementById('loginError').style.display = 'none';
+                _doLoginApproved(username, password);
+            } else if (r.status === 'pending') {
+                document.getElementById('loginError').style.display = 'none';
+                showDeviceWaiting(username, password);
+            } else if (r.status === 'denied') {
+                showError('Это устройство отклонено администратором.', 'loginError');
+            } else if (r.status === 'bad_credentials') {
+                showError('Неверное имя пользователя или пароль.', 'loginError');
+            } else {
+                showError('Нет связи с сервером. Попробуйте ещё раз.', 'loginError');
+            }
+            return;
+        }
 
         if (login(username, password)) {
             document.getElementById('loginError').style.display = 'none';

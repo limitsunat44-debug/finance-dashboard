@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260730-215550">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260731-095405">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -17,7 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20260730-215550"></script>
+  <script src="fonts-dejavu.js?v=20260731-095405"></script>
 </head>
 <body>
 
@@ -72,6 +72,7 @@
         <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
         <button class="sb-item" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
         <button class="sb-item" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
+        <button class="sb-item" data-view="devices"><span class="sb-ic">📱</span> Устройства касс</button>
         <button class="sb-item" data-view="audit"><span class="sb-ic">📋</span> Журнал действий</button>
         <button class="sb-item" data-view="settings"><span class="sb-ic">⚙</span> Настройки РМК</button>
         <button class="sb-item" data-view="stats"><span class="sb-ic">📈</span> Статистика</button>
@@ -166,6 +167,11 @@
           <div id="usBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ УСТРОЙСТВА КАСС ═══ -->
+        <section class="view" id="view-devices">
+          <div id="dvBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ЖУРНАЛ ДЕЙСТВИЙ ═══ -->
         <section class="view" id="view-audit">
           <div id="auBody"><div class="loading">⏳ Загрузка…</div></div>
@@ -218,6 +224,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260730-215550"></script>
+  <script src="admin-rmk.js?v=20260731-095405"></script>
 </body>
 </html>

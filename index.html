@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260731-201957">
+    <link rel="stylesheet" href="style.css?v=20260731-202736">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -149,6 +149,14 @@
     .pos-modal-head{display:flex;align-items:center;justify-content:space-between;padding:17px 18px;border-bottom:1px solid var(--pos-line);font-size:18px;font-weight:800;color:var(--pos-teal-2);}
     .pos-modal-x{border:none;background:none;font-size:22px;cursor:pointer;color:var(--pos-muted);line-height:1;}
     .pos-modal-body{padding:16px 18px 22px;overflow-y:auto;}
+    /* Оверлей-лоадер (закрытие смены и т.п.) */
+    .pos-busy{position:fixed;inset:0;z-index:3000;background:rgba(15,58,60,.55);display:none;align-items:center;justify-content:center;padding:24px;}
+    .pos-busy.show{display:flex;}
+    .pos-busy-card{background:var(--pos-cream-2);border-radius:20px;padding:28px 26px;max-width:340px;width:100%;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.28);}
+    .pos-busy-spin{width:46px;height:46px;margin:0 auto 16px;border:4px solid var(--pos-line);border-top-color:var(--pos-teal);border-radius:50%;animation:posBusySpin .8s linear infinite;}
+    @keyframes posBusySpin{to{transform:rotate(360deg);}}
+    .pos-busy-title{font-size:17px;font-weight:800;color:var(--pos-teal-2);margin-bottom:6px;}
+    .pos-busy-sub{font-size:14px;color:var(--pos-muted);line-height:1.4;}
     .pos-paygrand{font-size:20px;font-weight:900;margin-bottom:14px;padding:14px 16px;background:linear-gradient(135deg,var(--pos-teal-3),var(--pos-teal));border-radius:16px;color:#fff;box-shadow:0 4px 14px rgba(15,139,145,.25);}
     .pos-paymode-btns{display:flex;gap:8px;}
     .pos-paymode-btns .pos-btn{flex:1;}
@@ -2650,6 +2658,15 @@
             </div>
 
             <!-- МОДАЛЬ: итоги смены при закрытии (разбивка выручки по способам оплаты) -->
+            <!-- ОВЕРЛЕЙ-ЛОАДЕР: закрытие смены -->
+            <div id="posBusyOverlay" class="pos-busy" aria-live="polite">
+              <div class="pos-busy-card">
+                <div class="pos-busy-spin"></div>
+                <div class="pos-busy-title" id="posBusyTitle">Смена закрывается…</div>
+                <div class="pos-busy-sub" id="posBusySub">Подождите, идёт закрытие смены и подсчёт выручки.</div>
+              </div>
+            </div>
+
             <div id="posShiftSummaryModal" class="pos-modal" style="display:none;">
               <div class="pos-modal-box">
                 <div class="pos-modal-head">
@@ -3021,7 +3038,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260731-201957"></script>
+    <script src="app.js?v=20260731-202736"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

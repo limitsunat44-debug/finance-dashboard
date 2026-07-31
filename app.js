@@ -11340,10 +11340,26 @@ async function posStopCamera() {
     if (btn) btn.textContent = '📷 Включить камеру';
 }
 
+// Показать/скрыть полноэкранный лоадер (напр. при закрытии смены).
+function posShowBusy(title, sub) {
+    const ov = document.getElementById('posBusyOverlay');
+    if (!ov) return;
+    const t = document.getElementById('posBusyTitle');
+    const s = document.getElementById('posBusySub');
+    if (t && title != null) t.textContent = title;
+    if (s && sub != null) s.textContent = sub;
+    ov.classList.add('show');
+}
+function posHideBusy() {
+    const ov = document.getElementById('posBusyOverlay');
+    if (ov) ov.classList.remove('show');
+}
+
 async function posCloseShift() {
     if (!POS.shift) return;
     if (!confirm('Закрыть кассовую смену?')) return;
     posError('');
+    posShowBusy('Смена закрывается…', 'Подождите, идёт закрытие смены и подсчёт выручки.');
     try {
         await posStopCamera();
         const r = await posApi('?action=close-shift', {
@@ -11369,8 +11385,10 @@ async function posCloseShift() {
             posSelectKassa(POS.kassas[0]);
         }
         // Показываем итоги смены — разбивка выручки по способам оплаты.
+        posHideBusy();
         posShowShiftSummary(closedShift, kassaName);
     } catch (e) {
+        posHideBusy();
         posError('Не удалось закрыть смену: ' + e.message);
     }
 }

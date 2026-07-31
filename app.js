@@ -12915,16 +12915,29 @@ async function pmobSearchPick(p, opts) {
     }
     const ids = variants.map(v => v.id);
     if (ids.length) {
-        // stock_units может отсутствовать — экран должен выжить без экземпляров
+        // stock_units может отсутствовать — экран должен выжить без экземпляров.
+        // ВАЖНО: у Supabase жёсткий серверный лимит (~1000 строк на ответ), который
+        // перекрывает .limit(). У «больших» товаров экземпляров тысячи — поэтому
+        // тянем ПОСТРАНИЧНО через .range(), иначе часть штрихкодов (и счётчик) теряются.
         try {
-            const { data } = await ortobotClient
-                .from('stock_units')
-                .select('variant_id,warehouse_id,size_label,unique_barcode,status')
-                .in('variant_id', ids)
-                .eq('status', 'in_stock')
-                .limit(4000);
-            units = data || [];
-        } catch (_) { units = []; }
+            const PAGE = 1000;
+            let from = 0;
+            for (;;) {
+                const { data, error } = await ortobotClient
+                    .from('stock_units')
+                    .select('variant_id,warehouse_id,size_label,unique_barcode,status')
+                    .in('variant_id', ids)
+                    .eq('status', 'in_stock')
+                    .order('unique_barcode', { ascending: true })
+                    .range(from, from + PAGE - 1);
+                if (error) throw error;
+                const chunk = data || [];
+                units = units.concat(chunk);
+                if (chunk.length < PAGE) break;   // последняя страница
+                from += PAGE;
+                if (from > 100000) break;         // предохранитель
+            }
+        } catch (_) { /* оставляем то, что успели набрать; счётчик подстрахован stock */ }
     }
     if (opts.refresh) POS.mobWhById = null;   // при ручном обновлении — свежий справочник складов
     const whMap = await pmobLoadWh();
@@ -12961,11 +12974,14 @@ function pmobSearchResultHtml(p, variants, units, whMap) {
     let html = `<div class="pmob-prod-head"><div class="pmob-prod-name">${posEsc(p.name_ru || '—')}</div>` +
         `<div class="pmob-prod-art">Артикул ${posEsc(pmobArt(p))}</div></div>`;
 
+    // Кол-во по размеру = max(остаток из product_variants.stock, число подтянутых штрихкодов).
+    // stock консистентен с числом экземпляров и не зависит от лимита выборки units.
+    const qtyOfSize = sz => Math.max(Number(sz.stock) || 0, sz.codes.length || 0);
     const whIds = Object.keys(byWh).filter(w => {
         const wh = whMap[w];
         if (wh && wh.is_active === false) return false;
         const sizes = byWh[w];
-        return Object.keys(sizes).some(s => (sizes[s].codes.length || sizes[s].stock) > 0);
+        return Object.keys(sizes).some(s => qtyOfSize(sizes[s]) > 0);
     });
     if (!whIds.length) return html + '<div class="pmob-empty">Нет товара в наличии ни на одном складе.</div>';
 
@@ -12973,9 +12989,9 @@ function pmobSearchResultHtml(p, variants, units, whMap) {
     whIds.forEach((w, wi) => {
         const sizes = byWh[w];
         const keys = Object.keys(sizes)
-            .filter(s => (sizes[s].codes.length || sizes[s].stock) > 0)
+            .filter(s => qtyOfSize(sizes[s]) > 0)
             .sort((a, b) => (parseFloat(a) || 0) - (parseFloat(b) || 0) || a.localeCompare(b, 'ru'));
-        const qtyOf = s => sizes[s].codes.length || Number(sizes[s].stock) || 0;
+        const qtyOf = s => qtyOfSize(sizes[s]);
         const total = keys.reduce((acc, s) => acc + qtyOf(s), 0);
         const whName = (whMap[w] && whMap[w].name) || 'Склад';
         html += `<div class="pmob-wh">` +
@@ -12986,11 +13002,14 @@ function pmobSearchResultHtml(p, variants, units, whMap) {
             `<tr><th>В наличии</th>${keys.map((s, i) => `<td data-codes="${wi}-${i}"><b>${qtyOf(s)}</b></td>`).join('')}</tr>` +
             `</tbody></table>`;
         keys.forEach((s, i) => {
-            const codes = sizes[s].codes;
+            const codes = sizes[s].codes.slice().sort((a, b) => a.localeCompare(b));
             if (!codes.length) return;
+            const qty = qtyOf(s);
+            const miss = qty > codes.length
+                ? `<span class="pmob-code-more">…ещё ${qty - codes.length}</span>` : '';
             html += `<div class="pmob-codes" data-codes-for="${wi}-${i}" style="display:none;">` +
                 `<span class="pmob-code-cap">Размер ${posEsc(s)}:</span>` +
-                codes.map(c => `<span class="pmob-code-chip">№ ${posEsc(c)}</span>`).join('') +
+                codes.map(c => `<span class="pmob-code-chip">№ ${posEsc(c)}</span>`).join('') + miss +
                 `</div>`;
         });
         html += `<div class="pmob-codes-hint">Нажмите на размер, чтобы увидеть штрихкоды экземпляров.</div></div>`;

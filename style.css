@@ -4457,6 +4457,7 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
     border: 1px solid var(--pm-line); font-size: 12px; font-weight: 700;
     color: var(--pm-ink); font-variant-numeric: tabular-nums;
 }
+.pmob-code-more { padding: 5px 9px; font-size: 12px; font-weight: 700; color: var(--pm-muted); }
 
 /* — печать чека возврата (мобильная касса) — */
 #pmobPrintArea { display: none; }

@@ -12886,14 +12886,18 @@ async function pmobSearchSuggest(q) {
     });
 }
 
-async function pmobSearchPick(p) {
+async function pmobSearchPick(p, opts) {
+    opts = opts || {};
+    POS.mobSearchLast = p;                 // запоминаем товар для кнопки «Обновить»
     const sug = pmobEl('pmobSearchSug');
     if (sug) { sug.innerHTML = ''; sug.style.display = 'none'; }
     const inp = pmobEl('pmobSearchInput');
-    if (inp) { inp.value = p.name_ru || ''; inp.blur(); }
+    if (inp && !opts.refresh) { inp.value = p.name_ru || ''; inp.blur(); }
+    const refreshBtn = pmobEl('pmobSearchRefresh');
+    if (refreshBtn) { refreshBtn.disabled = false; refreshBtn.classList.add('spinning'); }
     const res = pmobEl('pmobSearchRes');
-    if (!res) return;
-    res.innerHTML = '<div class="pmob-empty">Загружаю остатки…</div>';
+    if (!res) { if (refreshBtn) refreshBtn.classList.remove('spinning'); return; }
+    if (!opts.refresh) res.innerHTML = '<div class="pmob-empty">Загружаю остатки…</div>';
     let variants = [];
     let units = [];
     try {
@@ -12904,6 +12908,7 @@ async function pmobSearchPick(p) {
         if (error) throw error;
         variants = data || [];
     } catch (e) {
+        if (refreshBtn) refreshBtn.classList.remove('spinning');
         res.innerHTML = '<div class="pmob-empty">Не удалось загрузить остатки: ' +
             posEsc((e && e.message) || 'ошибка сети') + '</div>';
         return;
@@ -12921,14 +12926,18 @@ async function pmobSearchPick(p) {
             units = data || [];
         } catch (_) { units = []; }
     }
+    if (opts.refresh) POS.mobWhById = null;   // при ручном обновлении — свежий справочник складов
     const whMap = await pmobLoadWh();
-    res.innerHTML = pmobSearchResultHtml(p, variants, units, whMap);
+    const stamp = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    res.innerHTML = pmobSearchResultHtml(p, variants, units, whMap) +
+        `<div class="pmob-search-stamp">Обновлено в ${posEsc(stamp)}</div>`;
     res.querySelectorAll('.pmob-size-tbl [data-codes]').forEach(el => {
         el.addEventListener('click', () => {
             const box = el.closest('.pmob-wh').querySelector('[data-codes-for="' + el.dataset.codes + '"]');
             if (box) box.style.display = (box.style.display === 'none' || !box.style.display) ? 'flex' : 'none';
         });
     });
+    if (refreshBtn) refreshBtn.classList.remove('spinning');
 }
 
 function pmobSearchResultHtml(p, variants, units, whMap) {
@@ -12992,6 +13001,8 @@ function pmobSearchResultHtml(p, variants, units, whMap) {
 function pmobOpenSearch() {
     const res = pmobEl('pmobSearchRes');
     if (res && !res.innerHTML) res.innerHTML = '<div class="pmob-empty">Введите название товара, чтобы посмотреть остатки по складам.</div>';
+    const rb = pmobEl('pmobSearchRefresh');
+    if (rb) { rb.disabled = !POS.mobSearchLast; rb.classList.remove('spinning'); }
     pmobShow('search');
     setTimeout(() => { const i = pmobEl('pmobSearchInput'); if (i) i.focus(); }, 120);
 }
@@ -13232,6 +13243,12 @@ function pmobBindEvents() {
         if (s) { s.innerHTML = ''; s.style.display = 'none'; }
         const r = pmobEl('pmobSearchRes');
         if (r) r.innerHTML = '<div class="pmob-empty">Введите название товара, чтобы посмотреть остатки по складам.</div>';
+        POS.mobSearchLast = null;
+        const rb = pmobEl('pmobSearchRefresh');
+        if (rb) { rb.disabled = true; rb.classList.remove('spinning'); }
+    });
+    on('pmobSearchRefresh', () => {
+        if (POS.mobSearchLast) pmobSearchPick(POS.mobSearchLast, { refresh: true });
     });
     const si = pmobEl('pmobSearchInput');
     if (si) si.addEventListener('input', pmobSearchInputHandler);

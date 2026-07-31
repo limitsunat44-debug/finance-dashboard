@@ -221,6 +221,16 @@ const SYNC_SECRET = '76b944f4444be766b2c27b7988118aec521c814d824b191a86cf8b6c420
 // ── Сервис уникальных штрихкодов (отдельный от 1c-sync, чтобы не ломать синхронизацию) ──
 const BARCODE_SVC_URL = 'https://1c-sync-barcodes.vercel.app';
 const BARCODE_SVC_SECRET = 'TySog2bN1bMJHsssoTvyCZO3IKOef1z0';
+
+// ── АКЦИЯ «2+1»: стельки Ortosalon LV. При 2 платных экземплярах этой номенклатуры
+//    в чеке кассир может добавить 3-ю такую же стельку в подарок (пробивается по 0 через скидку 100%).
+//    productC1Ref — c1_ref номенклатуры LV в 1С.
+const PROMO_2PLUS1 = {
+    productC1Ref: '8837ffc3-b722-11f0-8f1d-c8d3ffd5b968',
+    label: 'Ortosalon стельки LV',
+    minPaid: 2,   // сколько платных экземпляров этой модели должно быть в чеке
+    giftQty: 1,   // сколько дарим
+};
 // Описание всех типов синхронизации: метка sync_type в логе, эндпоинт, cron-расписание (UTC) и название.
 // schedule: { type:'hourly' } | { type:'everyN', hours:N } | { type:'daily', hourUtc:H }
 const SYNC_TYPES = [
@@ -10769,12 +10779,178 @@ function posRenderTotals() {
             warn.style.display = 'none';
         }
     }
+    posRenderPromo();
+}
+
+// ═════ АКЦИЯ «2+1» на стельки LV ═════
+// Сколько ПЛАТНЫХ экземпляров акционной номенклатуры в чеке (без подарков).
+function posPromoPaidCount() {
+    let n = 0;
+    POS.cart.forEach(l => {
+        if (l.isGift) return;
+        if (l.productC1Ref === PROMO_2PLUS1.productC1Ref) n += (Number(l.qty) || 0);
+    });
+    return n;
+}
+// Сколько подарков этой модели уже в чеке.
+function posPromoGiftCount() {
+    let n = 0;
+    POS.cart.forEach(l => {
+        if (l.isGift && l.productC1Ref === PROMO_2PLUS1.productC1Ref) n += (Number(l.qty) || 0);
+    });
+    return n;
+}
+// Сколько подарков полагается: на каждые minPaid платных — giftQty.
+function posPromoEntitledGifts() {
+    return Math.floor(posPromoPaidCount() / PROMO_2PLUS1.minPaid) * PROMO_2PLUS1.giftQty;
+}
+// Все unique_barcode этой модели, уже стоящие в чеке (чтобы не предлагать их как подарок).
+function posPromoUsedBarcodes() {
+    const set = [];
+    POS.cart.forEach(l => {
+        if (l.productC1Ref !== PROMO_2PLUS1.productC1Ref) return;
+        (Array.isArray(l.scans) ? l.scans : []).forEach(c => set.push(String(c)));
+    });
+    return set;
+}
+
+// Рисуем кнопку «🎁 Добавить 3-ю в подарок» над кнопкой «К оплате».
+// Не трогаем HTML-разметку — кнопка создаётся динамически.
+function posRenderPromo() {
+    const toPay = document.getElementById('posToPayment');
+    let btn = document.getElementById('posPromoBtn');
+    const entitled = posPromoEntitledGifts();
+    const gifts = posPromoGiftCount();
+    const canAdd = entitled > gifts && !posCartHasOutOfStock();
+    if (!toPay || !canAdd) {
+        if (btn) btn.style.display = 'none';
+        return;
+    }
+    if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'posPromoBtn';
+        btn.type = 'button';
+        btn.className = 'pos-btn pos-btn-promo';
+        btn.style.cssText = 'width:100%;margin:10px 0 0;padding:12px;border:0;border-radius:10px;background:linear-gradient(90deg,#16a34a,#22c55e);color:#fff;font-weight:700;font-size:15px;cursor:pointer;';
+        btn.onclick = posPromoOpen;
+        toPay.parentNode.insertBefore(btn, toPay);
+    }
+    const left = entitled - gifts;
+    btn.textContent = left > 1 ? `🎁 Добавить ${left} в подарок` : '🎁 Добавить 3-ю в подарок';
+    btn.style.display = '';
+}
+
+// Открыть попап выбора подарка: шаг 1 — размер.
+async function posPromoOpen() {
+    let modal = document.getElementById('posPromoModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'posPromoModal';
+        modal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;';
+        modal.innerHTML =
+            '<div style="background:var(--color-surface,#fff);color:var(--color-text,#111);width:100%;max-width:420px;max-height:85vh;overflow:auto;border-radius:16px;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,.3);">' +
+            '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">' +
+            '<h3 style="margin:0;font-size:17px;">🎁 Подарок: стельки LV</h3>' +
+            '<button type="button" id="posPromoClose" style="border:0;background:transparent;font-size:24px;line-height:1;cursor:pointer;color:inherit;">×</button></div>' +
+            '<div id="posPromoBody"></div></div>';
+        document.body.appendChild(modal);
+        modal.addEventListener('click', e => { if (e.target === modal) posPromoCloseModal(); });
+    }
+    modal.style.display = 'flex';
+    document.getElementById('posPromoClose').onclick = posPromoCloseModal;
+    const body = document.getElementById('posPromoBody');
+    body.innerHTML = '<div style="text-align:center;padding:24px;color:var(--color-text-secondary,#888);">⏳ Загружаю доступные размеры…</div>';
+    try {
+        const wh = encodeURIComponent(posShopWh() || '');
+        const ex = encodeURIComponent(posPromoUsedBarcodes().join(','));
+        const r = await posApiTimeout(`?action=promo-units&prodRef=${encodeURIComponent(PROMO_2PLUS1.productC1Ref)}&wh=${wh}&exclude=${ex}`, { method: 'GET' }, 12000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        POS._promoSizes = (r.data.sizes || []).filter(s => s.units && s.units.length);
+        posPromoRenderSizes();
+    } catch (e) {
+        body.innerHTML = `<div style="padding:16px;color:#dc2626;">⚠️ Не удалось загрузить размеры: ${posEsc(e.message)}</div>`;
+    }
+}
+
+function posPromoCloseModal() {
+    const modal = document.getElementById('posPromoModal');
+    if (modal) modal.style.display = 'none';
+}
+
+// Шаг 1: список размеров (только те, где есть свободные штуки на складе кассы).
+function posPromoRenderSizes() {
+    const body = document.getElementById('posPromoBody');
+    const sizes = POS._promoSizes || [];
+    if (!sizes.length) {
+        body.innerHTML = '<div style="padding:16px;color:var(--color-text-secondary,#888);">Нет доступных экземпляров этой модели на складе этой кассы.</div>';
+        return;
+    }
+    body.innerHTML =
+        '<div style="margin-bottom:10px;font-size:14px;color:var(--color-text-secondary,#888);">Шаг 1 · выберите размер</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px;">' +
+        sizes.map((s, i) =>
+            `<button type="button" class="pos-promo-size" data-i="${i}" style="padding:14px 8px;border:1px solid var(--color-border,#ddd);border-radius:10px;background:var(--color-bg,#f7f6f2);cursor:pointer;font-weight:700;font-size:16px;color:inherit;">` +
+            `${posEsc(s.size)}<div style="font-weight:400;font-size:11px;color:var(--color-text-secondary,#888);margin-top:2px;">${s.units.length} шт</div></button>`
+        ).join('') +
+        '</div>';
+    body.querySelectorAll('.pos-promo-size').forEach(b => {
+        b.onclick = () => posPromoRenderUnits(parseInt(b.dataset.i, 10));
+    });
+}
+
+// Шаг 2: список штрихкодов выбранного размера по последним 4 цифрам.
+function posPromoRenderUnits(sizeIdx) {
+    const body = document.getElementById('posPromoBody');
+    const s = (POS._promoSizes || [])[sizeIdx];
+    if (!s) { posPromoRenderSizes(); return; }
+    body.innerHTML =
+        `<div style="margin-bottom:10px;"><button type="button" id="posPromoBack" style="border:0;background:transparent;color:var(--color-primary,#01696f);cursor:pointer;font-size:14px;padding:0;">‹ Назад к размерам</button></div>` +
+        `<div style="margin-bottom:10px;font-size:14px;color:var(--color-text-secondary,#888);">Шаг 2 · размер <b>${posEsc(s.size)}</b> · выберите штрихкод (последние 4 цифры)</div>` +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:8px;">' +
+        s.units.map((u, i) =>
+            `<button type="button" class="pos-promo-unit" data-i="${i}" style="padding:14px 8px;border:1px solid var(--color-border,#ddd);border-radius:10px;background:var(--color-bg,#f7f6f2);cursor:pointer;font-weight:700;font-size:16px;color:inherit;">№ ${posEsc(u.last4)}</button>`
+        ).join('') +
+        '</div>';
+    document.getElementById('posPromoBack').onclick = posPromoRenderSizes;
+    body.querySelectorAll('.pos-promo-unit').forEach(b => {
+        b.onclick = () => posPromoAddGift(s, s.units[parseInt(b.dataset.i, 10)]);
+    });
+}
+
+// Добавляем подарок в чек: отдельная строка с discountPct=100 и флагом isGift → итог 0.
+function posPromoAddGift(size, unit) {
+    if (!unit || !unit.uniqueBarcode) return;
+    // защита: штрихкод не должен уже быть в чеке
+    if (posPromoUsedBarcodes().includes(String(unit.uniqueBarcode))) {
+        posError('Этот экземпляр уже в чеке.');
+        return;
+    }
+    const line = {
+        key: 'L' + (POS.keySeq++), kind: 'instance',
+        barcode: unit.uniqueBarcode, uniqueBarcode: unit.uniqueBarcode,
+        scans: [unit.uniqueBarcode],
+        name: PROMO_2PLUS1.label + ' 🎁 подарок',
+        sizeLabel: size.sizeLabel || ('размер:' + size.size),
+        price: Number(size.price) || 0, qty: 1,
+        discountPct: 100, isGift: true,
+        productC1Ref: PROMO_2PLUS1.productC1Ref, charC1Ref: size.charC1Ref || null,
+        warehouseC1Ref: posShopWh() || null,
+        warning: null, availableAtShop: null, status: 'in_stock',
+    };
+    POS.cart.push(line);
+    POS.activeKey = line.key;
+    posPromoCloseModal();
+    posRenderCart();
+    const hint = document.getElementById('posScanHint');
+    if (hint) hint.innerHTML = `🎁 Подарок добавлен: <b>размер ${posEsc(size.size)}</b> · №${posEsc(unit.last4)} · 0 с.`;
+    if (POS.isMobile && typeof pmobToast === 'function') pmobToast('🎁 Подарок добавлен', `размер ${size.size} · №${unit.last4}`, false);
 }
 
 // ── Быстрые скидки ──
 function posApply5Item() {
     const l = POS.cart.find(x => x.key === POS.activeKey) || POS.cart[POS.cart.length - 1];
     if (!l) { posError('Сначала отсканируйте товар.'); return; }
+    if (l.isGift) { posError('Подарок уже идёт по 0 — скидка не нужна.'); return; }
     l.discountPct = l.discountPct >= 5 ? 0 : 5; // повторное нажатие снимает
     posRenderCart();
 }
@@ -11590,38 +11766,61 @@ function pmobRenderLines() {
         if (l.sizeLabel) parts.push('Размер: ' + l.sizeLabel);
         if (codeStr) parts.push(codeStr);
         const warn = l.warning || (oos ? 'Не числится на складе этой кассы' : '');
-        const hasDisc = (l.discountPct || 0) >= 5;
+        const isGift = !!l.isGift;
+        const hasDisc = !isGift && (l.discountPct || 0) >= 5;
         const di = posLineDiscInfo(l);
         // Фактический % скидки (после округления вниз): 1 знак, без лишнего .0
         const realPct = di.pct % 1 === 0 ? String(Math.round(di.pct)) : di.pct.toFixed(1);
         const row = document.createElement('div');
-        row.className = 'pmob-line' + (oos ? ' oos' : '');
+        row.className = 'pmob-line' + (oos ? ' oos' : '') + (isGift ? ' gift' : '');
         // Количество = число отсканированных штрихкодов (только чтение, без степпера).
+        // Для подарка: скрываем кнопку скидки 5% и показываем бейдж «🎁 подарок · 0 с.».
         row.innerHTML = `
             <div class="pmob-line-info">
               <div class="pmob-line-name">${posEsc(l.name)}</div>
               ${parts.length ? `<div class="pmob-line-sub">${posEsc(parts.join(' | '))}</div>` : ''}
               ${warn ? `<div class="pmob-line-warn">⚠️ ${posEsc(warn)}</div>` : ''}
-              <button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
+              ${isGift
+                ? `<div class="pmob-line-gift" style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:6px;background:#dcfce7;color:#166534;font-size:12px;font-weight:700;">🎁 подарок · 0 с.</div>`
+                : `<button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
                       title="Скидка 5% на эту позицию (с округлением вниз до 10)">${hasDisc ? '−5%' : '5%'}</button>
-              ${hasDisc ? `<div class="pmob-line-discinfo">Скидка: −${pmobMoney(di.amount)} · ${realPct}%</div>` : ''}
+              ${hasDisc ? `<div class="pmob-line-discinfo">Скидка: −${pmobMoney(di.amount)} · ${realPct}%</div>` : ''}`}
             </div>
             <div class="pmob-line-right">
               <div class="pmob-line-price">${pmobMoney(di.net)}</div>
-              ${hasDisc ? `<div class="pmob-line-old">${pmobMoney(di.gross)}</div>` : ''}
+              ${(hasDisc || isGift) ? `<div class="pmob-line-old">${pmobMoney(di.gross)}</div>` : ''}
               <div class="pmob-line-qty">${l.qty} шт.</div>
             </div>
             <button type="button" class="pmob-line-rm" aria-label="Удалить позицию">×</button>`;
         row.querySelector('.pmob-line-rm').addEventListener('click', () => posRemoveLine(l.key));
-        row.querySelector('.pmob-line-disc').addEventListener('click', () => pmobToggleLineDisc(l.key));
+        const discBtn = row.querySelector('.pmob-line-disc');
+        if (discBtn) discBtn.addEventListener('click', () => pmobToggleLineDisc(l.key));
         box.appendChild(row);
     });
+    // Кнопка акции «2+1» под списком (мобильный кассир).
+    pmobRenderPromo(box);
+}
+
+// Кнопка «🎁 Добавить 3-ю в подарок» в мобильном списке чека.
+function pmobRenderPromo(box) {
+    if (!box) return;
+    const entitled = posPromoEntitledGifts();
+    const gifts = posPromoGiftCount();
+    if (!(entitled > gifts) || posCartHasOutOfStock()) return;
+    const left = entitled - gifts;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pmob-promo-btn';
+    btn.style.cssText = 'width:100%;margin:10px 0 0;padding:14px;border:0;border-radius:12px;background:linear-gradient(90deg,#16a34a,#22c55e);color:#fff;font-weight:700;font-size:16px;cursor:pointer;';
+    btn.textContent = left > 1 ? `🎁 Добавить ${left} в подарок` : '🎁 Добавить 3-ю в подарок';
+    btn.addEventListener('click', posPromoOpen);
+    box.appendChild(btn);
 }
 
 // Скидка 5% на КОНКРЕТНУЮ позицию (повторное нажатие снимает).
 function pmobToggleLineDisc(key) {
     const l = POS.cart.find(x => x.key === key);
-    if (!l) return;
+    if (!l || l.isGift) return;
     l.discountPct = (l.discountPct || 0) >= 5 ? 0 : 5;
     POS.activeKey = key;
     posRenderCart();   // общая перерисовка: ПК-корзина + итоги + мобильный список

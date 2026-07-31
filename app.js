@@ -11490,7 +11490,7 @@ async function posReturnFind() {
         if (!r.data.sellable) throw new Error(r.data.reason || 'Возврат невозможен для этого экземпляра');
         POS._return.look = r.data;
         posRetRenderSale(r.data);
-        posRetFillRefundOptions(r.data);
+        await posRetFillRefundOptions(r.data);
         // сброс причины к «Обмен»
         document.querySelectorAll('.pos-ret-reason').forEach((b, i) => b.classList.toggle('active', i === 0));
         posRetShowStep('confirm');
@@ -11521,16 +11521,32 @@ function posRetRenderSale(d) {
         <div class="pr-line pr-grand"><span>К возврату</span><span>${posMoney(d.product.price)} сом</span></div>`;
 }
 
-function posRetFillRefundOptions(d) {
+// Гарантированно догружаем все способы оплаты (наличные + карты/кошельки).
+// Возвращает POS.paytypes. Безопасно вызывать много раз — грузит только при пустом списке.
+async function posEnsurePaytypes() {
+    const has = POS.paytypes && ((POS.paytypes.cash && POS.paytypes.cash.length) || (POS.paytypes.cards && POS.paytypes.cards.length));
+    if (has) return POS.paytypes;
+    try {
+        const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
+        const r = await posApi(`?action=paytypes&shop=${shop}`, { method: 'GET' });
+        if (r.ok && r.data.ok && r.data.paytypes) POS.paytypes = r.data.paytypes;
+    } catch (_) { /* — */ }
+    return POS.paytypes;
+}
+
+async function posRetFillRefundOptions(d) {
     const sel = document.getElementById('posRetRefund');
     if (!sel) return;
-    sel.innerHTML = '';
+    // важно: сначала догружаем способы, чтобы не остаться только с «Наличными»
+    await posEnsurePaytypes();
     const pt = POS.paytypes || {};
     const list = (pt.cash || []).concat(pt.cards || []);
+    sel.innerHTML = '';
     if (!list.length) {
         const o = document.createElement('option');
         o.value = ''; o.textContent = 'Наличные (по умолчанию)';
         sel.appendChild(o);
+        if (typeof pmobFillRetRefund === 'function') pmobFillRetRefund();
         return;
     }
     list.forEach(p => {
@@ -11540,6 +11556,8 @@ function posRetFillRefundOptions(d) {
     });
     // по умолчанию — наличные, если есть
     if (pt.cash && pt.cash[0]) sel.value = pt.cash[0].ref;
+    // зеркалим в мобайл-селект
+    if (typeof pmobFillRetRefund === 'function') pmobFillRetRefund();
 }
 
 // Шаг 2 → оформление возврата
@@ -12439,7 +12457,7 @@ function pmobSaleNew() {
 // ============================================================
 
 // posOpenReturn() уже сбросил POS._return и открыл ПК-модаль — прячем её и рисуем своё.
-function pmobReturnOpened() {
+async function pmobReturnOpened() {
     if (!POS.isMobile) return;
     const m = pmobEl('posReturnModal');
     if (m) m.style.display = 'none';
@@ -12449,20 +12467,17 @@ function pmobReturnOpened() {
     if (err) { err.style.display = 'none'; err.textContent = ''; }
     const rc = pmobEl('pmobRetReceipt');
     if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
-    pmobEnsurePaytypes();
     pmobShow('return');
+    // догружаем способы оплаты и заполняем селект возврата (все методы)
+    await pmobEnsurePaytypes();
 }
 
 // Способы возврата средств берутся из POS.paytypes — подгружаем, не открывая модаль оплаты.
 async function pmobEnsurePaytypes() {
-    if (POS.paytypes) return;
-    try {
-        const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
-        const r = await posApi(`?action=paytypes&shop=${shop}`, { method: 'GET' });
-        if (r.ok && r.data.ok) POS.paytypes = r.data.paytypes;
-    } catch (_) { /* — */ }
-    if (POS.paytypes && (POS._return && POS._return.look)) {
-        posRetFillRefundOptions(POS._return.look);
+    await posEnsurePaytypes();
+    if (POS._return && POS._return.look) {
+        await posRetFillRefundOptions(POS._return.look);
+    } else {
         pmobFillRetRefund();
     }
 }
@@ -12508,7 +12523,7 @@ async function pmobRetHandleCode(code) {
 }
 
 // Показать экран возврата с полным чеком продажи.
-function pmobRetShowReceipt() {
+async function pmobRetShowReceipt() {
     if (!POS.isMobile) return;
     const m = pmobEl('posReturnModal');
     if (m) m.style.display = 'none';
@@ -12516,6 +12531,8 @@ function pmobRetShowReceipt() {
     if (scr) scr.style.display = 'none';
     pmobCloseScan();
     pmobFillRetReason();
+    // догружаем способы и заполняем десктоп-селект (все методы), затем зеркалим в мобайл
+    await posRetFillRefundOptions(POS._return && POS._return.look);
     pmobFillRetRefund();
     pmobRenderRetReceipt();
     const err = pmobEl('pmobRetError');

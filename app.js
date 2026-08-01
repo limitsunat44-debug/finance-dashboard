@@ -11086,6 +11086,7 @@ async function posOpenPayment() {
     posSetPayMode('cash');
     const cg = document.getElementById('posCashGiven'); if (cg) cg.value = '';
     const mc = document.getElementById('posMixCash'); if (mc) mc.value = '';
+    POS.mixBanks = [{ ref: '', amount: 0 }];  // сброс смешанной оплаты
     document.getElementById('posChangeRow').style.display = 'none';
     const modal = document.getElementById('posPayModal'); if (modal) modal.style.display = 'flex';
 }
@@ -11110,6 +11111,72 @@ function posSetPayMode(mode) {
     document.getElementById('posPayCash').style.display = mode === 'cash' ? '' : 'none';
     document.getElementById('posPayCard').style.display = mode === 'card' ? '' : 'none';
     document.getElementById('posPayMixed').style.display = mode === 'mixed' ? '' : 'none';
+    // при первом входе в «Смешанную» — если банков нет, добавим одну строку
+    if (mode === 'mixed') {
+        if (!Array.isArray(POS.mixBanks) || !POS.mixBanks.length) {
+            POS.mixBanks = [{ ref: '', amount: 0 }];
+        }
+        posRenderMixBanks();
+    }
+    posRecalcChange();
+}
+
+// —─ СМЕШАННАЯ ОПЛАТА: наличные + НЕСКОЛЬКО банков ──
+function posMixCards() {
+    const pt = POS.paytypes || {};
+    return pt.cards || [];
+}
+
+// Отрисовка строк банков в смешанной оплате (десктоп).
+function posRenderMixBanks() {
+    const box = document.getElementById('posMixBanks');
+    if (!box) return;
+    const cards = posMixCards();
+    if (!Array.isArray(POS.mixBanks)) POS.mixBanks = [];
+    box.innerHTML = '';
+    POS.mixBanks.forEach((row, idx) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'pos-mix-bank';
+        // select банка
+        const sel = document.createElement('select');
+        sel.className = 'pos-select';
+        const ph = document.createElement('option');
+        ph.value = ''; ph.textContent = '— выберите банк —';
+        sel.appendChild(ph);
+        cards.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.ref; o.textContent = c.name;
+            if (c.ref === row.ref) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', () => { POS.mixBanks[idx].ref = sel.value; posRecalcChange(); });
+        // сумма
+        const amt = document.createElement('input');
+        amt.type = 'number'; amt.className = 'pos-input'; amt.inputMode = 'decimal';
+        amt.min = '0'; amt.step = 'any'; amt.placeholder = '0';
+        amt.value = row.amount ? String(row.amount) : '';
+        amt.addEventListener('input', () => { POS.mixBanks[idx].amount = Math.max(0, Number(amt.value) || 0); posRecalcChange(); });
+        // кнопка удалить
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'pos-mix-del'; del.textContent = '×';
+        del.title = 'Убрать банк';
+        del.addEventListener('click', () => { POS.mixBanks.splice(idx, 1); if (!POS.mixBanks.length) POS.mixBanks.push({ ref: '', amount: 0 }); posRenderMixBanks(); posRecalcChange(); });
+        wrap.appendChild(sel);
+        wrap.appendChild(amt);
+        wrap.appendChild(del);
+        box.appendChild(wrap);
+    });
+}
+
+// Кнопка «+ Добавить банк». Новая строка получает остаток (grand − cash − уже распределённое).
+function posMixAddBank() {
+    if (!Array.isArray(POS.mixBanks)) POS.mixBanks = [];
+    const t = posTotals();
+    const cash = Math.max(0, Number((document.getElementById('posMixCash') || {}).value) || 0);
+    const usedBanks = POS.mixBanks.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const rest = Math.max(0, t.grand - cash - usedBanks);
+    POS.mixBanks.push({ ref: '', amount: rest });
+    posRenderMixBanks();
     posRecalcChange();
 }
 
@@ -11126,9 +11193,24 @@ function posRecalcChange() {
             val.textContent = (change < 0 ? 'не хватает ' + posMoney(-change) : posMoney(change)) + ' сом';
         } else { row.style.display = 'none'; }
     } else if (POS.payMode === 'mixed') {
-        const cash = Number(document.getElementById('posMixCash').value) || 0;
-        const rest = Math.max(0, t.grand - cash);
-        document.getElementById('posMixCardVal').textContent = posMoney(rest) + ' сом';
+        const cash = Math.max(0, Number(document.getElementById('posMixCash').value) || 0);
+        const banks = (POS.mixBanks || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+        const distributed = cash + banks;
+        const diff = t.grand - distributed;
+        const row = document.getElementById('posMixBalanceRow');
+        const val = document.getElementById('posMixBalanceVal');
+        if (val) {
+            if (Math.abs(diff) < 0.5) {
+                val.textContent = posMoney(distributed) + ' сом ✓';
+                if (row) row.classList.remove('neg');
+            } else if (diff > 0) {
+                val.textContent = posMoney(distributed) + ' сом · осталось ' + posMoney(diff);
+                if (row) row.classList.remove('neg');
+            } else {
+                val.textContent = posMoney(distributed) + ' сом · перебор ' + posMoney(-diff);
+                if (row) row.classList.add('neg');
+            }
+        }
     }
 }
 
@@ -11153,17 +11235,28 @@ function posBuildPayments() {
         if (!ref) return { error: 'Выберите платёжную карту' };
         return { payments: [{ payTypeC1Ref: ref, amount: t.grand, terminalC1Ref: term, payName: posPayName(ref) }] };
     }
-    // mixed
+    // mixed — наличные + НЕСКОЛЬКО банков
     const cash = Math.round(Number(document.getElementById('posMixCash').value) || 0);
-    const ref = document.getElementById('posMixCardType').value;
-    const rest = t.grand - cash;
-    if (cash <= 0) return { error: 'Укажите сумму наличными' };
-    if (cash >= t.grand) return { error: 'Наличные покрывают весь чек — выберите «Наличные»' };
-    if (!ref) return { error: 'Выберите платёжную карту для остатка' };
-    return { payments: [
-        { payTypeC1Ref: cashRef, amount: cash, payName: cashName },
-        { payTypeC1Ref: ref, amount: rest, terminalC1Ref: term, payName: posPayName(ref) },
-    ], error: cashRef ? null : 'Нет вида оплаты «Наличные»' };
+    const banks = (POS.mixBanks || []).map(r => ({ ref: r.ref, amount: Math.round(Number(r.amount) || 0) }));
+    const filledBanks = banks.filter(b => b.amount > 0);
+    if (cash < 0) return { error: 'Сумма наличными не может быть отрицательной' };
+    if (!filledBanks.length && cash <= 0) return { error: 'Укажите суммы оплаты' };
+    // каждый банк с суммой > 0 должен иметь выбранный банк
+    for (const b of filledBanks) {
+        if (!b.ref) return { error: 'Выберите банк для каждой суммы' };
+    }
+    const distributed = cash + filledBanks.reduce((s, b) => s + b.amount, 0);
+    if (Math.abs(distributed - t.grand) >= 1) {
+        const diff = t.grand - distributed;
+        return { error: diff > 0 ? ('Не распределено ' + posMoney(diff) + ' сом') : ('Перебор на ' + posMoney(-diff) + ' сом') };
+    }
+    const payments = [];
+    if (cash > 0) payments.push({ payTypeC1Ref: cashRef, amount: cash, payName: cashName });
+    if (cash > 0 && !cashRef) return { error: 'Нет вида оплаты «Наличные»' };
+    filledBanks.forEach(b => {
+        payments.push({ payTypeC1Ref: b.ref, amount: b.amount, terminalC1Ref: term, payName: posPayName(b.ref) });
+    });
+    return { payments };
 }
 
 // ── Чек-сверка ──
@@ -12254,26 +12347,65 @@ function pmobRenderPayList() {
 function pmobOpenMix() {
     const err = pmobEl('pmobPayError');
     if (err) err.style.display = 'none';
-    // Заполняем список карт для остатка (переиспользуем ПК-элементы + мобильный select).
     posPopulateCardSelects();
-    const sel = pmobEl('pmobMixCard');
-    const cards = (POS.paytypes && POS.paytypes.cards) || [];
-    if (sel) {
-        sel.innerHTML = '';
-        cards.forEach(c => {
-            const o = document.createElement('option');
-            o.value = c.ref; o.textContent = c.name;
-            sel.appendChild(o);
-        });
-    }
     const cashInput = pmobEl('pmobMixCash');
     if (cashInput) cashInput.value = '';
+    POS.mixBanks = [{ ref: '', amount: 0 }];  // сброс
+    pmobRenderMixBanks();
     const list = pmobEl('pmobPayList');
     if (list) list.style.display = 'none';
     const panel = pmobEl('pmobMixPanel');
     if (panel) panel.style.display = 'block';
     pmobMixRecalc();
     if (cashInput) setTimeout(() => cashInput.focus(), 60);
+}
+
+// Отрисовка строк банков (мобайл).
+function pmobRenderMixBanks() {
+    const box = pmobEl('pmobMixBanks');
+    if (!box) return;
+    const cards = (POS.paytypes && POS.paytypes.cards) || [];
+    if (!Array.isArray(POS.mixBanks)) POS.mixBanks = [];
+    box.innerHTML = '';
+    POS.mixBanks.forEach((row, idx) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'pmob-mix-bank';
+        const sel = document.createElement('select');
+        sel.className = 'pmob-mix-input';
+        const ph = document.createElement('option');
+        ph.value = ''; ph.textContent = '— банк —';
+        sel.appendChild(ph);
+        cards.forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.ref; o.textContent = c.name;
+            if (c.ref === row.ref) o.selected = true;
+            sel.appendChild(o);
+        });
+        sel.addEventListener('change', () => { POS.mixBanks[idx].ref = sel.value; pmobMixRecalc(); });
+        const amt = document.createElement('input');
+        amt.type = 'number'; amt.className = 'pmob-mix-input'; amt.inputMode = 'decimal';
+        amt.min = '0'; amt.step = 'any'; amt.placeholder = '0';
+        amt.value = row.amount ? String(row.amount) : '';
+        amt.addEventListener('input', () => { POS.mixBanks[idx].amount = Math.max(0, Number(amt.value) || 0); pmobMixRecalc(); });
+        const del = document.createElement('button');
+        del.type = 'button'; del.className = 'pmob-mix-del'; del.textContent = '×';
+        del.addEventListener('click', () => { POS.mixBanks.splice(idx, 1); if (!POS.mixBanks.length) POS.mixBanks.push({ ref: '', amount: 0 }); pmobRenderMixBanks(); pmobMixRecalc(); });
+        wrap.appendChild(sel);
+        wrap.appendChild(amt);
+        wrap.appendChild(del);
+        box.appendChild(wrap);
+    });
+}
+
+function pmobMixAddBank() {
+    if (!Array.isArray(POS.mixBanks)) POS.mixBanks = [];
+    const t = posTotals();
+    const cash = Math.max(0, Number((pmobEl('pmobMixCash') || {}).value) || 0);
+    const used = POS.mixBanks.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const rest = Math.max(0, t.grand - cash - used);
+    POS.mixBanks.push({ ref: '', amount: rest });
+    pmobRenderMixBanks();
+    pmobMixRecalc();
 }
 
 // Закрыть панель, вернуться к списку способов.
@@ -12286,37 +12418,35 @@ function pmobCloseMix() {
     if (err) err.style.display = 'none';
 }
 
-// Пересчёт остатка картой = К оплате − наличные.
+// Пересчёт распределения: наличные + все банки vs итог чека.
 function pmobMixRecalc() {
     const t = posTotals();
-    const cash = Math.round(Number((pmobEl('pmobMixCash') || {}).value) || 0);
-    const rest = t.grand - cash;
+    const cash = Math.max(0, Number((pmobEl('pmobMixCash') || {}).value) || 0);
+    const banks = (POS.mixBanks || []).reduce((s, r) => s + (Number(r.amount) || 0), 0);
+    const distributed = cash + banks;
+    const diff = t.grand - distributed;
     const restEl = pmobEl('pmobMixRest');
     if (restEl) {
-        if (cash <= 0) restEl.textContent = 'Остаток картой: ' + pmobMoney(t.grand);
-        else if (cash >= t.grand) restEl.textContent = 'Наличные покрывают весь чек — выберите «Наличными»';
-        else restEl.textContent = 'Остаток картой: ' + pmobMoney(rest);
-        restEl.classList.toggle('warn', cash >= t.grand);
+        if (Math.abs(diff) < 0.5) restEl.textContent = 'Распределено: ' + pmobMoney(distributed) + ' ✓';
+        else if (diff > 0) restEl.textContent = 'Распределено: ' + pmobMoney(distributed) + ' · осталось ' + pmobMoney(diff);
+        else restEl.textContent = 'Распределено: ' + pmobMoney(distributed) + ' · перебор ' + pmobMoney(-diff);
+        restEl.classList.toggle('warn', diff < -0.5);
     }
 }
 
 // Подтвердить смешанную оплату → переиспользуем ПК-логику posBuildPayments('mixed').
 function pmobConfirmMix() {
-    const t = posTotals();
-    const cash = Math.round(Number((pmobEl('pmobMixCash') || {}).value) || 0);
-    const cardRef = (pmobEl('pmobMixCard') || {}).value || '';
     const err = pmobEl('pmobPayError');
     const showErr = (m) => { if (err) { err.style.display = 'block'; err.textContent = '⚠️ ' + m; } };
-    if (cash <= 0) { showErr('Укажите сумму наличными'); return; }
-    if (cash >= t.grand) { showErr('Наличные покрывают весь чек — выберите «Наличными»'); return; }
-    if (!cardRef) { showErr('Выберите карту для остатка'); return; }
-    // Пишем значения в ПК-элементы, которые читает posBuildPayments (mixed).
+    // Синхронизируем наличные в ПК-поле, POS.mixBanks уже общий массив.
+    const cash = Math.max(0, Number((pmobEl('pmobMixCash') || {}).value) || 0);
     const mc = pmobEl('posMixCash'); if (mc) mc.value = String(cash);
-    const mct = pmobEl('posMixCardType'); if (mct) mct.value = cardRef;
-    posSetPayMode('mixed');
+    POS.payMode = 'mixed';
     if (err) err.style.display = 'none';
+    // Валидируем через общий posBuildPayments.
+    const pb = posBuildPayments();
+    if (pb.error) { showErr(pb.error); return; }
     posShowReceipt();
-    // Если posShowReceipt выставил ошибку в ПК-поле — продублируем в мобильное.
     const perr = pmobEl('posPayError');
     if (perr && perr.style.display !== 'none' && perr.textContent) { showErr(perr.textContent.replace(/^⚠️\s*/, '')); }
 }
@@ -12913,7 +13043,12 @@ function pmobSearchInputHandler() {
     POS.mobSearchT = setTimeout(() => pmobSearchSuggest(nameQ, sizeQ), 280);
 }
 
-// Поиск товара: nameQ — по name_ru (вкл. цифры в названии/коде), sizeQ — отдельный фильтр по product_variants.size_label.
+// Сколько подсказок показывать сразу (до кнопки «Показать все»).
+const PMOB_SUG_LIMIT = 12;
+
+// Поиск товара: nameQ — по name_ru (вкл. цифры в названии/коде), sizeQ — фильтр по размеру.
+// ВАЖНО: при поиске по размеру показываем ТОЛЬКО товары, у которых есть экземпляры в наличии
+// (stock_units.status='in_stock') этого размера — источник истины по остаткам.
 async function pmobSearchSuggest(nameQ, sizeQ) {
     const sug = pmobEl('pmobSearchSug');
     if (!sug) return;
@@ -12922,41 +13057,82 @@ async function pmobSearchSuggest(nameQ, sizeQ) {
     const seq = ++POS.mobSearchSeq;
     sug.style.display = 'block';
     sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Ищу…</span></div>';
-    // карта product_id -> набор найденных размеров (для подписи «размер 42»)
+    // карта product_id -> набор найденных размеров В НАЛИЧИИ (для подписи «размер 42»)
     const sizeHits = {};
     let rows = [];
     try {
-        // Строим базовый запрос по названию (если задано).
-        // Если задан размер — сначала находим product_id по size_label, затем пересекаем с названием.
         let sizePids = null;
         if (sizeQ) {
-            const { data: vdata, error: verr } = await ortobotClient
-                .from('product_variants')
-                .select('product_id,size_label')
-                .ilike('size_label', '%' + sizeQ + '%')
-                .limit(500);
-            if (verr) throw verr;
+            // 1) экземпляры В НАЛИЧИИ нужного размера -> variant_id (постранично, лимит Supabase ~1000)
+            const variantIds = new Set();
+            const varSizeLabel = {};   // variant_id -> исходный size_label (для нормализации подписи)
+            const PAGE = 1000;
+            let from = 0;
+            for (;;) {
+                const { data, error } = await ortobotClient
+                    .from('stock_units')
+                    .select('variant_id,size_label')
+                    .eq('status', 'in_stock')
+                    .ilike('size_label', '%' + sizeQ + '%')
+                    .order('variant_id', { ascending: true })
+                    .range(from, from + PAGE - 1);
+                if (error) throw error;
+                const chunk = data || [];
+                chunk.forEach(u => {
+                    if (u.variant_id) { variantIds.add(u.variant_id); varSizeLabel[u.variant_id] = u.size_label; }
+                });
+                if (chunk.length < PAGE) break;
+                from += PAGE;
+                if (from > 100000) break;
+            }
+            if (seq !== POS.mobSearchSeq) return;
+            if (!variantIds.size) {
+                sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Нет товаров этого размера в наличии</span></div>';
+                return;
+            }
+            // 2) variant_id -> product_id (+ собираем размеры для подписи)
+            const vidArr = Array.from(variantIds);
             sizePids = [];
-            (vdata || []).forEach(v => {
-                const nz = normalizeSizeLabel(v.size_label) || (v.size_label || '');
-                if (!sizeHits[v.product_id]) sizeHits[v.product_id] = new Set();
-                sizeHits[v.product_id].add(nz);
-                if (sizePids.indexOf(v.product_id) < 0) sizePids.push(v.product_id);
-            });
+            const CH = 200;
+            for (let i = 0; i < vidArr.length; i += CH) {
+                const slice = vidArr.slice(i, i + CH);
+                const { data: vdata, error: verr } = await ortobotClient
+                    .from('product_variants')
+                    .select('id,product_id,size_label')
+                    .in('id', slice);
+                if (verr) throw verr;
+                (vdata || []).forEach(v => {
+                    const nz = normalizeSizeLabel(v.size_label || varSizeLabel[v.id]) || (v.size_label || '');
+                    if (!sizeHits[v.product_id]) sizeHits[v.product_id] = new Set();
+                    sizeHits[v.product_id].add(nz);
+                    if (sizePids.indexOf(v.product_id) < 0) sizePids.push(v.product_id);
+                });
+            }
+            if (seq !== POS.mobSearchSeq) return;
             if (!sizePids.length) {
-                if (seq !== POS.mobSearchSeq) return;
-                sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Нет товаров с таким размером</span></div>';
+                sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Нет товаров этого размера в наличии</span></div>';
                 return;
             }
         }
-        let prodQ = ortobotClient
-            .from('products')
-            .select('id,name_ru,c1_ref');
-        if (nameQ) prodQ = prodQ.ilike('name_ru', '%' + nameQ + '%');
-        if (sizePids) prodQ = prodQ.in('id', sizePids.slice(0, 150));
-        const { data, error } = await prodQ.limit(25);
-        if (error) throw error;
-        rows = data || [];
+        // 3) products по названию и/или найденным product_id
+        if (sizePids) {
+            // товаров может быть много — тянем постранично чанками по product_id
+            const CH = 100;
+            for (let i = 0; i < sizePids.length; i += CH) {
+                const slice = sizePids.slice(i, i + CH);
+                let q = ortobotClient.from('products').select('id,name_ru,c1_ref').in('id', slice);
+                if (nameQ) q = q.ilike('name_ru', '%' + nameQ + '%');
+                const { data, error } = await q;
+                if (error) throw error;
+                rows = rows.concat(data || []);
+            }
+        } else {
+            const { data, error } = await ortobotClient
+                .from('products').select('id,name_ru,c1_ref')
+                .ilike('name_ru', '%' + nameQ + '%').limit(60);
+            if (error) throw error;
+            rows = data || [];
+        }
     } catch (e) {
         if (seq !== POS.mobSearchSeq) return;
         sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Не удалось загрузить: ' +
@@ -12964,17 +13140,29 @@ async function pmobSearchSuggest(nameQ, sizeQ) {
         return;
     }
     if (seq !== POS.mobSearchSeq) return;
+    // дедуп + сортировка по названию
+    const seen = {};
+    rows = rows.filter(p => (seen[p.id] ? false : (seen[p.id] = 1)));
+    rows.sort((a, b) => String(a.name_ru || '').localeCompare(String(b.name_ru || ''), 'ru'));
     if (!rows.length) {
         sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Ничего не найдено</span></div>';
         return;
     }
+    pmobRenderSug(rows, sizeQ, sizeHits, false);
+}
+
+// Рендер списка подсказок с лимитом и кнопкой «Показать все».
+function pmobRenderSug(rows, sizeQ, sizeHits, showAll) {
+    const sug = pmobEl('pmobSearchSug');
+    if (!sug) return;
     sug.innerHTML = '';
-    rows.forEach(p => {
+    const total = rows.length;
+    const shown = showAll ? rows : rows.slice(0, PMOB_SUG_LIMIT);
+    shown.forEach(p => {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'pmob-sug-item';
         let sub = 'Артикул ' + pmobArt(p);
-        // если искали по размеру — показываем найденные размеры
         if (sizeQ && sizeHits[p.id] && sizeHits[p.id].size) {
             const szList = Array.from(sizeHits[p.id]).filter(Boolean).slice(0, 6).join(', ');
             if (szList) sub += ' · размер ' + szList;
@@ -12984,6 +13172,14 @@ async function pmobSearchSuggest(nameQ, sizeQ) {
         b.addEventListener('click', () => pmobSearchPick(p));
         sug.appendChild(b);
     });
+    if (!showAll && total > PMOB_SUG_LIMIT) {
+        const more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'pmob-sug-more';
+        more.textContent = `Показать все (${total})`;
+        more.addEventListener('click', () => pmobRenderSug(rows, sizeQ, sizeHits, true));
+        sug.appendChild(more);
+    }
 }
 
 async function pmobSearchPick(p, opts) {
@@ -13284,8 +13480,7 @@ function pmobBindEvents() {
     // смешанная оплата
     const mixCash = pmobEl('pmobMixCash');
     if (mixCash) mixCash.addEventListener('input', pmobMixRecalc);
-    const mixCard = pmobEl('pmobMixCard');
-    if (mixCard) mixCard.addEventListener('change', pmobMixRecalc);
+    on('pmobMixAddBank', pmobMixAddBank);
     on('pmobMixCancel', pmobCloseMix);
     on('pmobMixOk', pmobConfirmMix);
     on('pmobMoreBack', () => pmobShow('cart'));
@@ -13443,6 +13638,9 @@ function posBindEvents() {
     if (cashGiven) cashGiven.addEventListener('input', posRecalcChange);
     const mixCash = document.getElementById('posMixCash');
     if (mixCash) mixCash.addEventListener('input', posRecalcChange);
+    // Смешанная оплата: кнопка «+ Добавить банк»
+    const mixAddBank = document.getElementById('posMixAddBank');
+    if (mixAddBank) mixAddBank.addEventListener('click', posMixAddBank);
     // Переход к экрану-чеку (сверка)
     const toReceipt = document.getElementById('posToReceipt');
     if (toReceipt) toReceipt.addEventListener('click', posShowReceipt);

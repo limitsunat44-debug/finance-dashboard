@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260801-075443">
+    <link rel="stylesheet" href="style.css?v=20260801-081807">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -81,6 +81,12 @@
     .pos-btn-accent:not(:disabled):hover{background:var(--pos-orange-2);}
     .pos-btn-danger{background:var(--pos-orange-2);color:#fff;}
     .pos-btn-danger:hover{background:#c95a0d;}
+    /* смешанная оплата — строки банков (десктоп) */
+    .pos-mix-bank{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+    .pos-mix-bank .pos-select{flex:1 1 auto;min-width:0;}
+    .pos-mix-bank .pos-input{flex:0 0 34%;min-width:0;}
+    .pos-mix-del{flex:0 0 auto;width:40px;min-height:50px;border:2px solid var(--pos-line);background:var(--pos-cream);color:#a12c3b;border-radius:12px;font-size:20px;font-weight:800;cursor:pointer;line-height:1;}
+    .pos-mix-del:hover{border-color:#f3b9c2;background:#fdecef;}
     .pos-btn-block{width:100%;}
     .pos-btn-sm{padding:9px 14px;font-size:14px;min-height:auto;border-radius:12px;}
     .pos-row-btns{display:flex;gap:10px;}
@@ -2277,11 +2283,10 @@
                     <span>💵 Наличными</span>
                     <input type="number" inputmode="decimal" id="pmobMixCash" class="pmob-mix-input" placeholder="0" min="0">
                   </label>
-                  <label class="pmob-mix-field">
-                    <span>💳 Остаток картой</span>
-                    <select id="pmobMixCard" class="pmob-mix-input"></select>
-                  </label>
-                  <div class="pmob-mix-rest" id="pmobMixRest">Остаток картой: 0 с.</div>
+                  <div id="pmobMixBanks"></div>
+                  <button type="button" class="pmob-mix-addbank" id="pmobMixAddBank">+ Добавить банк</button>
+                  <div class="pmob-mix-rest" id="pmobMixRest">Распределено: 0 с.</div>
+                  <select id="pmobMixCard" style="display:none;"></select>
                   <div class="pmob-mix-actions">
                     <button type="button" class="pmob-mix-cancel" id="pmobMixCancel">Отмена</button>
                     <button type="button" class="pmob-mix-ok" id="pmobMixOk">Оплатить смешанно</button>
@@ -2632,10 +2637,14 @@
                       <input type="number" id="posMixCash" class="pos-input" inputmode="decimal" placeholder="0" min="0" step="any">
                     </div>
                     <div class="pos-field">
-                      <label>Электронными (остаток)</label>
-                      <select id="posMixCardType" class="pos-select"></select>
-                      <div class="pos-change" id="posMixCardRow" style="margin-top:8px;">С карты: <b id="posMixCardVal">0</b></div>
+                      <label>Банки / карты</label>
+                      <div id="posMixBanks"></div>
+                      <button type="button" class="pos-btn pos-btn-ghost pos-btn-block" id="posMixAddBank" style="margin-top:8px;">+ Добавить банк</button>
                     </div>
+                    <div class="pos-change" id="posMixBalanceRow" style="margin-top:8px;">Распределено: <b id="posMixBalanceVal">0</b></div>
+                    <!-- старые скрытые элементы для обратной совместимости -->
+                    <select id="posMixCardType" style="display:none;"></select>
+                    <b id="posMixCardVal" style="display:none;">0</b>
                   </div>
 
                   <button class="pos-btn pos-btn-primary pos-btn-block" id="posToReceipt" type="button" style="margin-top:6px;">Проверить чек →</button>
@@ -3043,7 +3052,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260801-075443"></script>
+    <script src="app.js?v=20260801-081807"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

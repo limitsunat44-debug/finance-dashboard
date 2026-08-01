@@ -12900,84 +12900,63 @@ function pmobArt(p) {
 
 function pmobSearchInputHandler() {
     const inp = pmobEl('pmobSearchInput');
-    const q = ((inp && inp.value) || '').trim();
+    const szInp = pmobEl('pmobSizeInput');
+    const nameQ = ((inp && inp.value) || '').trim();
+    const sizeQ = ((szInp && szInp.value) || '').trim();
     if (POS.mobSearchT) clearTimeout(POS.mobSearchT);
-    if (q.length < 2) {
+    // Ищем, когда в названии ≥ 2 символов либо указан размер (хотя бы 1 символ).
+    if (nameQ.length < 2 && !sizeQ) {
         const sug = pmobEl('pmobSearchSug');
         if (sug) { sug.innerHTML = ''; sug.style.display = 'none'; }
         return;
     }
-    POS.mobSearchT = setTimeout(() => pmobSearchSuggest(q), 280);
+    POS.mobSearchT = setTimeout(() => pmobSearchSuggest(nameQ, sizeQ), 280);
 }
 
-// Разбивает запрос на «текстовую» часть (название) и «размерную» (число/S,M,L…).
-// Примеры: "стельки 42" -> {name:"стельки", size:"42"}; "42" -> {name:"", size:"42"}; "стельки" -> {name:"стельки", size:""}.
-function pmobParseSearchQuery(q) {
-    const tokens = String(q || '').trim().split(/\s+/).filter(Boolean);
-    const sizeTokens = [];
-    const nameTokens = [];
-    tokens.forEach(t => {
-        // размер: число (возм. с . или ,) либо короткая буквенная метка (S/M/L/XL/XXL)
-        if (/^\d+([.,]\d+)?$/.test(t) || /^(xxs|xs|s|m|l|xl|xxl|xxxl)$/i.test(t)) {
-            sizeTokens.push(t.replace(',', '.'));
-        } else {
-            nameTokens.push(t);
-        }
-    });
-    return { name: nameTokens.join(' '), size: sizeTokens.join(' ') };
-}
-
-async function pmobSearchSuggest(q) {
+// Поиск товара: nameQ — по name_ru (вкл. цифры в названии/коде), sizeQ — отдельный фильтр по product_variants.size_label.
+async function pmobSearchSuggest(nameQ, sizeQ) {
     const sug = pmobEl('pmobSearchSug');
     if (!sug) return;
+    nameQ = (nameQ || '').trim();
+    sizeQ = (sizeQ || '').trim();
     const seq = ++POS.mobSearchSeq;
     sug.style.display = 'block';
     sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Ищу…</span></div>';
-    const parsed = pmobParseSearchQuery(q);
     // карта product_id -> набор найденных размеров (для подписи «размер 42»)
     const sizeHits = {};
-    let byName = [];
-    let bySize = [];
+    let rows = [];
     try {
-        // 1) поиск по названию (если есть текстовая часть; иначе — по всему запросу)
-        const nameQ = parsed.name || (parsed.size ? '' : q);
-        if (nameQ) {
-            const { data, error } = await ortobotClient
-                .from('products')
-                .select('id,name_ru,c1_ref')
-                .ilike('name_ru', '%' + nameQ + '%')
-                .limit(20);
-            if (error) throw error;
-            byName = data || [];
-        }
-        // 2) поиск по размеру — через product_variants.size_label
-        if (parsed.size) {
-            let vq = ortobotClient
+        // Строим базовый запрос по названию (если задано).
+        // Если задан размер — сначала находим product_id по size_label, затем пересекаем с названием.
+        let sizePids = null;
+        if (sizeQ) {
+            const { data: vdata, error: verr } = await ortobotClient
                 .from('product_variants')
                 .select('product_id,size_label')
-                .ilike('size_label', '%' + parsed.size + '%')
-                .limit(300);
-            const { data: vdata, error: verr } = await vq;
+                .ilike('size_label', '%' + sizeQ + '%')
+                .limit(500);
             if (verr) throw verr;
-            const pids = [];
+            sizePids = [];
             (vdata || []).forEach(v => {
                 const nz = normalizeSizeLabel(v.size_label) || (v.size_label || '');
                 if (!sizeHits[v.product_id]) sizeHits[v.product_id] = new Set();
                 sizeHits[v.product_id].add(nz);
-                if (pids.indexOf(v.product_id) < 0) pids.push(v.product_id);
+                if (sizePids.indexOf(v.product_id) < 0) sizePids.push(v.product_id);
             });
-            if (pids.length) {
-                // если есть текстовая часть — ограничиваем пересечением по найденным по названию
-                let prodQ = ortobotClient
-                    .from('products')
-                    .select('id,name_ru,c1_ref')
-                    .in('id', pids.slice(0, 100));
-                if (parsed.name) prodQ = prodQ.ilike('name_ru', '%' + parsed.name + '%');
-                const { data: pdata, error: perr } = await prodQ.limit(20);
-                if (perr) throw perr;
-                bySize = pdata || [];
+            if (!sizePids.length) {
+                if (seq !== POS.mobSearchSeq) return;
+                sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Нет товаров с таким размером</span></div>';
+                return;
             }
         }
+        let prodQ = ortobotClient
+            .from('products')
+            .select('id,name_ru,c1_ref');
+        if (nameQ) prodQ = prodQ.ilike('name_ru', '%' + nameQ + '%');
+        if (sizePids) prodQ = prodQ.in('id', sizePids.slice(0, 150));
+        const { data, error } = await prodQ.limit(25);
+        if (error) throw error;
+        rows = data || [];
     } catch (e) {
         if (seq !== POS.mobSearchSeq) return;
         sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Не удалось загрузить: ' +
@@ -12985,19 +12964,6 @@ async function pmobSearchSuggest(q) {
         return;
     }
     if (seq !== POS.mobSearchSeq) return;
-    // слияние результатов. Если был размер и текст — показываем пересечение (bySize уже отфильтровано по названию).
-    let merged;
-    if (parsed.size && parsed.name) {
-        merged = bySize;
-    } else if (parsed.size) {
-        merged = bySize;
-    } else {
-        merged = byName;
-    }
-    // дедуп по id
-    const seen = {};
-    const rows = [];
-    merged.forEach(p => { if (!seen[p.id]) { seen[p.id] = 1; rows.push(p); } });
     if (!rows.length) {
         sug.innerHTML = '<div class="pmob-sug-item"><span class="pmob-sug-name">Ничего не найдено</span></div>';
         return;
@@ -13009,7 +12975,7 @@ async function pmobSearchSuggest(q) {
         b.className = 'pmob-sug-item';
         let sub = 'Артикул ' + pmobArt(p);
         // если искали по размеру — показываем найденные размеры
-        if (parsed.size && sizeHits[p.id] && sizeHits[p.id].size) {
+        if (sizeQ && sizeHits[p.id] && sizeHits[p.id].size) {
             const szList = Array.from(sizeHits[p.id]).filter(Boolean).slice(0, 6).join(', ');
             if (szList) sub += ' · размер ' + szList;
         }
@@ -13399,12 +13365,22 @@ function pmobBindEvents() {
         POS.mobSearchLast = null;
         const rb = pmobEl('pmobSearchRefresh');
         if (rb) { rb.disabled = true; rb.classList.remove('spinning'); }
+        // перезапуск поиска, если остался только размер
+        pmobSearchInputHandler();
+    });
+    // Отдельное поле размера
+    on('pmobSizeClear', () => {
+        const z = pmobEl('pmobSizeInput');
+        if (z) { z.value = ''; z.focus(); }
+        pmobSearchInputHandler();
     });
     on('pmobSearchRefresh', () => {
         if (POS.mobSearchLast) pmobSearchPick(POS.mobSearchLast, { refresh: true });
     });
     const si = pmobEl('pmobSearchInput');
     if (si) si.addEventListener('input', pmobSearchInputHandler);
+    const szi = pmobEl('pmobSizeInput');
+    if (szi) szi.addEventListener('input', pmobSearchInputHandler);
     ov.querySelectorAll('.pmob-nav-btn').forEach(b => {
         b.addEventListener('click', () => {
             const to = b.dataset.pmob;

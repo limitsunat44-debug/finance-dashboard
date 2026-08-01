@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260731-224905">
+    <link rel="stylesheet" href="style.css?v=20260801-075443">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2488,8 +2488,13 @@
                 </div>
                 <div class="pmob-search-box">
                   <span class="pmob-search-ico">🔎</span>
-                  <input type="search" id="pmobSearchInput" class="pmob-search-input" placeholder="Название, размер или код" autocomplete="off">
+                  <input type="search" id="pmobSearchInput" class="pmob-search-input" placeholder="Название или код товара" autocomplete="off">
                   <button type="button" class="pmob-search-clr" id="pmobSearchClear" aria-label="Очистить">×</button>
+                </div>
+                <div class="pmob-search-box pmob-size-box">
+                  <span class="pmob-search-ico">📏</span>
+                  <input type="search" id="pmobSizeInput" class="pmob-search-input" placeholder="Размер (необязательно): 42, L, XL…" autocomplete="off">
+                  <button type="button" class="pmob-search-clr" id="pmobSizeClear" aria-label="Очистить размер">×</button>
                 </div>
                 <div class="pmob-sug" id="pmobSearchSug"></div>
                 <div class="pmob-search-res" id="pmobSearchRes"></div>
@@ -3038,7 +3043,7 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260731-224905"></script>
+    <script src="app.js?v=20260801-075443"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260801-081807">
+    <link rel="stylesheet" href="style.css?v=20260809-180254">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -117,6 +117,20 @@
     .pos-line-sub{font-size:12px;color:var(--pos-muted);margin-top:2px;}
     .pos-line-sub .pos-disc-tag{color:var(--pos-orange-2);font-weight:700;}
     .pos-line-warn{font-size:12px;color:#a12c3b;margin-top:2px;font-weight:600;}
+    /* Поиск по последним цифрам — список результатов */
+    .pos-suffix-results{margin-top:10px;display:flex;flex-direction:column;gap:8px;}
+    .pos-suffix-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 12px;border:1px solid var(--pos-line);border-radius:12px;background:#fff;cursor:pointer;transition:border-color .12s,background .12s;}
+    .pos-suffix-item:hover{border-color:var(--pos-teal-3);background:var(--pos-cream);}
+    .pos-suffix-item:disabled{opacity:.6;cursor:default;}
+    .pos-suffix-item .psi-main{flex:1;min-width:0;}
+    .pos-suffix-item .psi-name{font-weight:700;color:var(--pos-ink,#28251d);font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .pos-suffix-item .psi-sub{font-size:12px;color:var(--pos-ink-2,#7a7974);margin-top:2px;font-variant-numeric:tabular-nums;}
+    .pos-suffix-item .psi-price{flex:0 0 auto;font-weight:800;color:var(--pos-teal-2);font-variant-numeric:tabular-nums;}
+    .pos-suffix-badge{display:inline-block;font-size:11px;font-weight:700;border-radius:7px;padding:1px 7px;margin-left:6px;}
+    .pos-suffix-badge.b-ok{color:#1f7a3d;background:#e6f4ea;}
+    .pos-suffix-badge.b-out{color:#8a5a12;background:#fbeecb;}
+    .pos-suffix-badge.b-dead{color:#a12c3b;background:#fbe0e4;}
+    .pos-suffix-empty{font-size:13px;color:var(--pos-ink-2,#7a7974);padding:6px 2px;}
     /* отсканированные штрихкоды (последние 4 цифры) */
     .pos-line-codes{margin-top:4px;}
     .pos-line-code{display:inline-block;font-size:12px;font-weight:700;color:var(--pos-teal-2);background:var(--pos-cream);border:1px solid var(--pos-line);border-radius:8px;padding:2px 8px;font-variant-numeric:tabular-nums;letter-spacing:.5px;}
@@ -1997,6 +2011,33 @@
 
                 <div id="csError" class="error-message" style="display:none;margin-bottom:12px;"></div>
 
+                <!-- ── БЫСТРЫЙ ЦЕННИК ПО ШТРИХКОДУ (без выбора склада/модели) ── -->
+                <div class="card" style="margin-bottom:18px;background:var(--color-bg-1,#f7f7f7);border:1px solid var(--color-primary,#2d7ff9);">
+                    <h4 style="margin:0 0 6px 0;">🏷️ Быстрый ценник по штрихкоду</h4>
+                    <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 10px 0;">
+                        Впишите последние 5 цифр штрихкода (или полный код) — система сама найдёт товар. Склад и модель выбирать не нужно.<br>
+                        Можно вписать <b>сразу несколько</b> — по одному в строке (или через запятую/пробел) — и все ценники напечатаются <b>одним документом</b>.
+                    </p>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;">
+                        <div class="prod-filter-group" style="flex:1;min-width:240px;">
+                            <label for="csQuickTails">Штрихкоды (хвосты по 5 цифр или полные коды)</label>
+                            <textarea id="csQuickTails" class="form-control" rows="3" placeholder="напр.:&#10;52868&#10;12345&#10;2000000098765" autocomplete="off" style="font-size:16px;letter-spacing:1px;resize:vertical;"></textarea>
+                        </div>
+                        <div style="display:flex;flex-direction:column;gap:8px;padding-top:22px;">
+                            <button class="btn btn-primary" onclick="csQuickByTails()" style="height:42px;white-space:nowrap;">🔍 Найти и печатать всё</button>
+                            <button class="btn btn-secondary" onclick="document.getElementById('csQuickTails').value='';document.getElementById('csQuickResult').innerHTML='';" style="height:36px;white-space:nowrap;">Очистить</button>
+                        </div>
+                    </div>
+                    <div id="csQuickResult" style="margin-top:12px;"></div>
+                </div>
+
+                <details class="card bc-collapsible" style="margin-bottom:14px;background:var(--color-bg-1,#f7f7f7);">
+                    <summary style="cursor:pointer;font-weight:600;list-style:none;">
+                        ⚙️ Подробно: выбор склада, товара и размеров
+                        <span style="font-weight:400;font-size:12px;color:var(--color-text-secondary);">(нажмите, чтобы развернуть)</span>
+                    </summary>
+                    <div style="margin-top:12px;">
+
                 <div class="prod-filters">
                     <div class="prod-filter-group">
                         <label for="csWarehouse">Магазин / склад</label>
@@ -2048,6 +2089,9 @@
                     <button class="btn btn-primary" id="csPrintBtn" onclick="csPrint()" disabled>🖨️ Напечатать выбранное</button>
                     <span id="csPrintSummary" style="color:var(--color-text-secondary);font-size:13px;"></span>
                 </div>
+                    </div>
+                </details>
+                <!-- /подробный режим -->
             </div>
         </section>
 
@@ -2133,6 +2177,18 @@
                   <input type="text" id="posScanInput" class="pos-input pos-input-scan" inputmode="numeric"
                          placeholder="Наведите сканер или введите код…" autocomplete="off">
                   <p class="pos-hint" id="posScanHint">Ожидание сканирования…</p>
+                </div>
+
+                <!-- Поиск по последним 5 цифрам штрихкода (независимо от статуса) -->
+                <div class="pos-field pos-find-suffix">
+                  <label for="posSuffixInput">🔎 Найти по последним цифрам штрихкода</label>
+                  <div style="display:flex;gap:8px;align-items:stretch;">
+                    <input type="text" id="posSuffixInput" class="pos-input pos-input-scan" inputmode="numeric"
+                           maxlength="8" placeholder="напр.: 48334" autocomplete="off" style="flex:1;">
+                    <button class="pos-btn pos-btn-primary" id="posSuffixBtn" type="button" style="flex:0 0 auto;">Найти</button>
+                  </div>
+                  <p class="pos-hint">Находит товар по последним 5 цифрам (мин. 3) — даже если товар не в наличии. Кликните по найденному — добавится в чек.</p>
+                  <div id="posSuffixResults" class="pos-suffix-results"></div>
                 </div>
               </div>
 
@@ -2223,6 +2279,22 @@
                   <span class="pmob-scan-title">Отсканировать товар</span>
                   <span class="pmob-scan-sub">Наведите камеру на штрихкод</span>
                 </button>
+
+                <!-- Поиск по последним цифрам штрихкода (мобайл, v1.2.32) -->
+                <div class="pmob-suffix">
+                  <div class="pmob-suffix-head">
+                    <span class="pmob-suffix-ico" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+                    </span>
+                    <span>Найти по последним цифрам штрихкода</span>
+                  </div>
+                  <div class="pmob-suffix-row">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" class="pmob-suffix-input" id="pmobSuffixInput" placeholder="напр.: 48334" autocomplete="off">
+                    <button type="button" class="pmob-suffix-btn" id="pmobSuffixBtn">Найти</button>
+                  </div>
+                  <div class="pmob-suffix-note">Находит товар по последним 5 цифрам (мин. 3) — даже если товара нет в наличии. Нажмите на найденный — добавится в чек.</div>
+                  <div class="pmob-suffix-results" id="pmobSuffixResults"></div>
+                </div>
 
                 <button type="button" class="pmob-receipt-bar" id="pmobReceiptBar">
                   <span class="pmob-receipt-l">
@@ -2379,9 +2451,25 @@
                   <span class="pmob-scan-sub">Для возврата наведите камеру<br>на штрихкод товара</span>
                 </button>
 
+                <!-- Возврат: поиск по последним цифрам штрихкода (когда камера не считывает) -->
+                <div class="pmob-suffix">
+                  <div class="pmob-suffix-head">
+                    <span class="pmob-suffix-ico" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+                    </span>
+                    <span>Найти товар по последним цифрам штрихкода</span>
+                  </div>
+                  <div class="pmob-suffix-row">
+                    <input type="text" inputmode="numeric" pattern="[0-9]*" class="pmob-suffix-input" id="pmobRetSuffixInput" placeholder="напр.: 32221" autocomplete="off">
+                    <button type="button" class="pmob-suffix-btn" id="pmobRetSuffixBtn">Найти</button>
+                  </div>
+                  <div class="pmob-suffix-note">Если камера не считывает — введите последние 5 цифр штрихкода (мин. 3). Нажмите на найденный — откроется чек продажи.</div>
+                  <div class="pmob-suffix-results" id="pmobRetSuffixResults"></div>
+                </div>
+
                 <div class="pmob-info">
                   <div class="pmob-info-head"><span class="pmob-info-ico">ⓘ</span>Информация</div>
-                  <p>Отсканируйте любой товар из чека продажи — система найдёт чек и покажет все проданные товары с ценой.</p>
+                  <p>Отсканируйте любой товар из чека продажи (или найдите по цифрам) — система найдёт чек и покажет все проданные товары с ценой.</p>
                 </div>
               </section>
 
@@ -3052,7 +3140,8 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="app.js?v=20260801-081807"></script>
+    <script>window.__APP_BUILD = '20260809-035004';</script>
+    <script src="app.js?v=20260809-180254"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->
@@ -3091,6 +3180,107 @@
           });
         });
       }
+    </script>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- АВТО-ОБНОВЛЕНИЕ КАССЫ ПРИ УСТАРЕВШЕМ КЭШЕ -->
+    <!-- Касса знает свой билд (window.__APP_BUILD). Периодически и при -->
+    <!-- возврате на вкладку спрашивает /version.json (всегда из сети). -->
+    <!-- Если серверный билд НОВЕЕ: при ПУСТОЙ корзине — тихо обновляемся -->
+    <!-- сразу; если в чеке есть товар — показываем мягкую плашку с -->
+    <!-- кнопкой «Обновить», чтобы не терять незавершённый чек. -->
+    <!-- Откат: удалить этот блок (стиль #appUpdateBar ниже) и версию -->
+    <!-- вернуть к прежнему ?v=. Живые данные это не затрагивает. -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <style>
+      #appUpdateBar {
+        position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%) translateY(140%);
+        z-index: 99999; display: flex; align-items: center; gap: 12px;
+        max-width: calc(100vw - 24px); box-sizing: border-box;
+        padding: 12px 14px 12px 16px; border-radius: 14px;
+        background: #0f172a; color: #fff; box-shadow: 0 10px 30px rgba(0,0,0,.28);
+        font: 500 14px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        opacity: 0; transition: transform .28s ease, opacity .28s ease;
+      }
+      #appUpdateBar.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+      #appUpdateBar .aub-ico { font-size: 18px; }
+      #appUpdateBar .aub-txt { display: flex; flex-direction: column; }
+      #appUpdateBar .aub-txt b { font-weight: 700; }
+      #appUpdateBar .aub-txt span { font-size: 12px; opacity: .75; }
+      #appUpdateBar button {
+        border: 0; cursor: pointer; border-radius: 10px; padding: 9px 16px;
+        font: 700 14px/1 system-ui, sans-serif; background: #22c55e; color: #06210f;
+      }
+      #appUpdateBar button:active { transform: scale(.97); }
+      @media (prefers-reduced-motion: reduce) { #appUpdateBar { transition: opacity .2s ease; } }
+    </style>
+    <div id="appUpdateBar" role="alert" aria-live="polite">
+      <span class="aub-ico">⬆️</span>
+      <span class="aub-txt"><b>Доступно обновление кассы</b><span>Нажмите «Обновить», когда закончите чек</span></span>
+      <button type="button" id="appUpdateBtn">Обновить</button>
+    </div>
+    <script>
+      (function () {
+        var CURRENT = String(window.__APP_BUILD || '').trim();
+        if (!CURRENT) return;                 // без известного билда не мешаем работе
+        var CHECK_MS = 5 * 60 * 1000;         // как часто опрашивать версию во время смены
+        var MIN_GAP_MS = 60 * 1000;           // не чаще раза в минуту (фокус + таймер)
+        var lastCheck = 0, updating = false, barShown = false;
+
+        function cartEmpty() {
+          try { return !(window.POS && Array.isArray(POS.cart) && POS.cart.length); }
+          catch (e) { return true; }
+        }
+        function doReload() {
+          if (updating) return; updating = true;
+          // Чистим кэши приложения, чтобы SW отдал свежий app.js, затем перезагружаем.
+          var done = function () { location.reload(); };
+          try {
+            if (window.caches && caches.keys) {
+              caches.keys().then(function (keys) {
+                return Promise.all(keys.filter(function (k) {
+                  return k.indexOf('orto-kassa-static-') === 0;
+                }).map(function (k) { return caches.delete(k); }));
+              }).then(done, done);
+            } else { done(); }
+          } catch (e) { done(); }
+        }
+        function showBar() {
+          if (barShown) return; barShown = true;
+          var bar = document.getElementById('appUpdateBar');
+          if (!bar) { doReload(); return; }   // нет плашки — просто обновимся
+          bar.classList.add('show');
+          var btn = document.getElementById('appUpdateBtn');
+          if (btn) btn.onclick = doReload;
+        }
+        function onNewer() {
+          // Пустой чек — обновляемся сразу и незаметно. Иначе ждём кассира.
+          if (cartEmpty()) doReload(); else showBar();
+        }
+        function check(force) {
+          var now = Date.now();
+          if (!force && now - lastCheck < MIN_GAP_MS) return;
+          lastCheck = now;
+          if (updating) return;
+          fetch('version.json?ts=' + now, { cache: 'no-store' })
+            .then(function (r) { return r && r.ok ? r.json() : null; })
+            .then(function (d) {
+              var srv = d && String(d.build || '').trim();
+              if (srv && srv !== CURRENT) onNewer();
+            })
+            .catch(function () { /* офлайн/сеть — тихо игнорируем */ });
+        }
+
+        // 1) первичная проверка вскоре после загрузки
+        setTimeout(function () { check(true); }, 8000);
+        // 2) периодически во время работы
+        setInterval(function () { check(false); }, CHECK_MS);
+        // 3) при возврате на вкладку/окно (частый кейс на телефоне кассира)
+        document.addEventListener('visibilitychange', function () {
+          if (!document.hidden) check(false);
+        });
+        window.addEventListener('focus', function () { check(false); });
+      })();
     </script>
 
 </body>

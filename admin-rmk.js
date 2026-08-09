@@ -4,6 +4,317 @@
    Доступ: только админы с полным доступом (allowedTabs === '*')
    ══════════════════════════════════════════════════════════ */
 
+// ─────────── ВЕРСИЯ РМК ───────────
+// При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
+// Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
+const RMK_VERSION = '1.2.31';
+const RMK_CHANGELOG = [
+  {
+    v: '1.2.31', date: '09.08.2026', title: 'Возврат: поиск товара по последним цифрам штрихкода (мобайл)',
+    items: [
+      'На экране возврата (мобильная касса) под кнопкой скана — поиск по последним 5 цифрам штрихкода (мин. 3), как в продаже.',
+      'Нужно, когда камера не считывает штрихкод (мятая/мелкая этикетка, блик).',
+      'Клик по найденному — открывает чек продажи (тот же путь, что и скан камерой — lookup-sale-receipt).',
+      'Находит экземпляры НЕЗАВИСИМО от статуса (продан/списан) — возврат возможен даже без сканирования.',
+    ],
+  },
+  {
+    v: '1.2.30', date: '09.08.2026', title: 'Поступление: подстановка цены из базы + каскад цены на все варианты',
+    items: [
+      'При добавлении товара в поступление — если у него уже есть цена в базе, она подставляется в редактируемое поле «Продажная цена».',
+      'Цену можно изменить вручную; кнопка «использовать» возвращает расчёт калькулятора.',
+      'Если цена изменена (≠ цены в базе) — при проведении она каскадом обновляется у ВСЕХ вариантов товара (все размеры/склады, прошлые и нынешние).',
+      'Визуальный индикатор «Цена изменена» и счётчик обновлённых вариантов в итоговом сообщении.',
+    ],
+  },
+  {
+    v: '1.2.29', date: '09.08.2026', title: 'Касса: поиск товара по последним цифрам штрихкода',
+    items: [
+      'На кассе под полем сканирования — поиск товара по последним 5 цифрам штрихкода (мин. 3).',
+      'Находит экземпляры НЕЗАВИСИМО от статуса (в наличии / продан / списан) — полезно, когда штрихкод плохо сканируется.',
+      'Клик по найденному — добавляет экземпляр в чек (тот же путь, что и обычный скан).',
+      'Сортировка: сначала в наличии на складе кассы, затем другие склады, затем проданные/списанные.',
+    ],
+  },
+  {
+    v: '1.2.28', date: '08.08.2026', title: 'Автономное открытие смены — без зависимости от 1С',
+    items: [
+      'При паузе синхронизации открытие кассовой смены больше НЕ обращается к серверу 1С — ни за складом продажи, ни за сменой ККМ.',
+      'Смена открывается мгновенно на Supabase; склад берётся из кэша (pos_kassa_templates). Статус синхронизации смены — «skipped».',
+      'Касса полностью автономна: нет задержек и ошибок при недоступном 1С.',
+    ],
+  },
+  {
+    v: '1.2.27', date: '08.08.2026', title: 'Печать документа перемещения из журнала',
+    items: [
+      'В журнале перемещений у каждого документа появилась кнопка 🖨 для печати.',
+      'Кнопка «🖨 Печать» также добавлена в карточку открытого документа.',
+      'Печатная форма: шапка, номер/дата/статус, маршрут (Откуда→Куда), таблица товаров (наименование/размер/штрихкод) и места под подписи «Сдал/Принял».',
+    ],
+  },
+  {
+    v: '1.2.26', date: '08.08.2026', title: 'Перемещение без проверок наличия — можно переместить любой штрихкод (чужой склад / проданный / списанный)',
+    items: [
+      'Сняты предохранители: перемещение больше НЕ проверяет, числится ли товар на складе-отправителе.',
+      'Любой найденный штрихкод можно отсканировать и переместить — независимо от того, где он числится.',
+      'Проданный или списанный экземпляр при перемещении автоматически восстанавливается в «в наличии».',
+      'После перемещения товар числится на складе-получателе и сразу доступен к продаже.',
+      'Скан «чужого» товара теперь показывает только инфо-подсказку (без блокировки).',
+    ],
+  },
+  {
+    v: '1.2.25', date: '08.08.2026', title: 'Касса открывается без 1С — список касс и продавцов берётся из Supabase, если 1С недоступна',
+    items: [
+      'Исправлено «Кассы не найдены»: раньше список касс и продавцов читался только из 1С — при недоступной 1С касса не открывалась.',
+      'Теперь при недоступной 1С кассы и продавцы автоматически берутся из истории чеков Supabase (автономный режим).',
+    ],
+  },
+  {
+    v: '1.2.24', date: '07.08.2026', title: 'Единый формат размеров — товар больше не «пропадает» из отчёта остатков',
+    items: [
+      'Размеры приведены к единому формату по всей базе: «размер:24» → «24» (18405 экземпляров + 4311 вариантов).',
+      'Раньше один и тот же размер мог быть записан двумя способами («24» и «размер:24») — в отчёте остатков это превращалось в дубли-варианты, и товар показывался как отсутствующий.',
+      'Слиты дубли-варианты на одном складе (экземпляры сведены в один, остатки пересчитаны по факту).',
+      'Отчёт остатков теперь СУММИРУЕТ количество при совпадении размера на складе — пустой дубль больше не скроет реальный остаток.'
+    ]
+  },
+  {
+    v: '1.2.23', date: '07.08.2026', title: 'Перепроведение прихода со сменой склада перемещает товар на новый склад',
+    items: [
+      'Если у уже проведённого документа прихода сменить склад и пересохранить (напр. Айни → Сиёма) — экземпляры (штрихкоды) и варианты теперь «переезжают» на новый склад.',
+      'Раньше перепроведение обновляло только цены — товар оставался на старом складе.',
+      'Перемещаются только экземпляры в наличии (in_stock); проданные/списанные не трогаются. Остатки обоих складов пересчитываются по факту — без двойного счёта.',
+      'Если на новом складе уже есть такой товар/размер — экземпляры приклеиваются к существующему варианту (без дублей).'
+    ]
+  },
+  {
+    v: '1.2.22', date: '07.08.2026', title: 'Возврат в отчёте снятия ДС вычитается из наличных того же магазина',
+    items: [
+      'Возврат больше НЕ выносится отдельным пунктом-магазином в отчёте снятия ДС — теперь минусуется прямо из «Наличных» этого же магазина, итог пересчитывается.',
+      'Причина: чек-возврата не получал shop_c1_ref — теперь он берётся из исходного чека продажи (фолбэк — по названию магазина).',
+      'Отчёт стал устойчивее: если у чека нет shop_c1_ref, группирует по названию магазина — старые возвраты без ref не создают лишний блок.'
+    ]
+  },
+  {
+    v: '1.2.21', date: '07.08.2026', title: 'Авто-обновление кассы + убрана плашка «уже продан/списан»',
+    items: [
+      'Касса сама подхватывает новую версию при устаревшем кэше: проверяет version.json (при запуске, каждые 5 мин и при возврате на вкладку).',
+      'Если чек пуст — обновляется тихо сразу; если в чеке есть товар — мягкая плашка «Обновить», чтобы не потерять незавершённый чек.',
+      'Больше не нужно вручную чистить кэш на телефоне кассира после обновления.',
+      'Убрана плашка «Экземпляр не в наличии (уже продан/списан)» после сканирования — она смущала кассира (продажа и так идёт).'
+    ]
+  },
+  {
+    v: '1.2.20', date: '07.08.2026', title: 'Продажа разрешена при нулевом остатке (без плашек и блокировок)',
+    items: [
+      'Касса теперь продаёт любой товар, даже если остаток на складе = 0.',
+      'Фронт (app.js): убраны блокировки «Товара нет на складе» и «только N шт.» + погашены все плашки о нулевом/превышенном остатке.',
+      'Бэкенд (pos.js action=sell): сняты guard-ошибки «остаток 0. Продажа невозможна» и «на складе только N шт.».',
+      'Остаток в минус не уходит: если свободный экземпляр есть — спишется; нет — остаток не трогаем.'
+    ]
+  },
+  {
+    v: '1.2.19', date: '07.08.2026', title: 'Витринный ценник печатается для любого штрихкода (статус не важен)',
+    items: [
+      'Раздел «Ценник для витрины» (быстрый ценник по штрихкоду) писал «Ничего не найдено среди товаров в наличии».',
+      'Причина: поиск фильтровал только status=in_stock — списанный/проданный код не находился.',
+      'Теперь витринный ценник печатается для ЛЮБОГО штрихкода из базы — продан/списан/резерв тоже можно.',
+      'Если один код встречается с разными статусами — берём экземпляр «в наличии» (актуальные данные).'
+    ]
+  },
+  {
+    v: '1.2.18', date: '07.08.2026', title: 'Возврат по коду списанного/проданного экземпляра (поиск последней продажи)',
+    items: [
+      'Возврат отказывал: «Экземпляр в статусе written_off», хотя по коду была продажа.',
+      'Теперь возврат ищет ПОСЛЕДНЮЮ продажу по штрихкоду (журнал продаж), а не смотрит на статус экземпляра.',
+      'Нашлась продажа → возврат оформляется, товар возвращается на склад (+1 к остатку), экземпляр снова «в наличии».',
+      'Возврат оформляется автономно в базе РМК (без ожидания 1С) — догон в 1С после снятия паузы синхронизации.',
+      'Защита от повторного возврата: если по коду уже был возврат после продажи — повторно не даёт.'
+    ]
+  },
+  {
+    v: '1.2.17', date: '07.08.2026', title: 'Продажа разрешена по товарному остатку (статус экземпляра не блокирует)',
+    items: [
+      'Касса отказывала при скане: «экземпляр не в наличии (продан/списан)», хотя товар физически есть.',
+      'Причина: недавние списания излишков пометили часть экземпляров как sold/списанные.',
+      'Теперь статус экземпляра НЕ блокирует продажу — продаём, если товарный остаток в шт. позволяет.',
+      'Бэкенд списывает свободный (in_stock) экземпляр того же размера на складе кассы (как для родных 220-кодов).',
+      'Снята серверная блокировка: «Экземпляр №… уже продан» больше не отклоняет чек, если остаток есть.',
+      'Убрана плашка после скана «товар уже продан/списан» — смущала кассира (продажа всё равно идёт).',
+      'Раньше правило работало только для 220-кодов — теперь для любых штрихкодов.'
+    ]
+  },
+  {
+    v: '1.2.16', date: '07.08.2026', title: 'Восстановлена история продаж кассира',
+    items: [
+      'У кассира перестала отображаться история продаж (пустой список за текущий день).',
+      'Причина: история продаж кассира читалась только из 1С, а синхронизация 1С на паузе — свежие чеки её не достигали.',
+      'Теперь история продаж читается из базы РМК (Supabase) — показывает продажи сразу, без ожидания 1С.',
+      'При необходимости старое чтение из 1С доступно обратно (параметр src=1c в API).'
+    ]
+  },
+  {
+    v: '1.2.15', date: '07.08.2026', title: 'Обзор и отчёты читают возвраты из одного источника',
+    items: [
+      'Исправлено расхождение суммы продаж между «Обзором» и «Отчётом по снятию ДС».',
+      'Причина: Обзор брал возвраты из 1С, а отчёты — из базы РМК (Supabase). Теперь все читают из Supabase.',
+      'Цифры продаж, возвратов и чистой выручки в разных разделах теперь совпадают.',
+      'При необходимости старое чтение возвратов из 1С доступно обратно (параметр src=1c в API).'
+    ]
+  },
+  {
+    v: '1.2.14', date: '07.08.2026', title: 'Новая вкладка «Продажи по товарам»',
+    items: [
+      'Добавлена вкладка аналитики продаж по конкретному товару: поиск по названию или последним 5 цифрам штрихкода.',
+      'Карточка товара: остаток, средняя цена, первая/последняя продажа.',
+      'Таблицы: продажи по размерам и построчная детализация (магазин/касса/продавец/чек/оплата).',
+      'Графики: выручка по дням и выручка по дням в разрезе магазинов.',
+      'Блоки «Наиболее продающиеся товары» (топ-5 + полный список) и «Быстрая статистика».',
+      'Все данные — из базы РМК (Supabase), без обращения к 1С; учитывают выбранный период.'
+    ]
+  },
+  {
+    v: '1.2.13', date: '07.08.2026', title: 'Касса работает автономно — без 1С',
+    items: [
+      'Продажа теперь проводится полностью в базе РМК: чек получает свой локальный номер (RMK-000001…).',
+      '1С в момент продажи больше НЕ вызывается — если 1С недоступна, касса всё равно работает.',
+      'Смены открываются и закрываются без зависимости от 1С (склад продажи берётся из кэша базы).',
+      'Товар можно продать на любой кассе, если уникальный штрихкод есть в базе и остаток позволяет.',
+      'Отложенная досылка чека в 1С убрана; выгрузка в 1С будет отдельной операцией-«догоном» позже.'
+    ]
+  },
+  {
+    v: '1.2.12', date: '07.08.2026', title: 'Фикс: при перемещении остаток «не доезжал» до целевого склада',
+    items: [
+      'При перемещении товар иногда менял склад, но остаток на целевом складе оставался 0 — теперь исправлено.',
+      'Перемещённый экземпляр теперь всегда привязывается к варианту целевого склада (найдёт или создаст его).',
+      'Остатки обоих складов пересчитываются автоматически после каждого перемещения.',
+      'Касается всех перемещений: проведение/отмена документа, добавление/удаление строки, кнопка перемещения в кассе.'
+    ]
+  },
+  {
+    v: '1.2.11', date: '07.08.2026', title: 'Перемещение: журнал локальных документов (RMK-) с редактированием',
+    items: [
+      'В разделе «Перемещение» появились две вкладки: «Новое перемещение» и «Журнал документов».',
+      'Каждое перемещение — документ с номером RMK-000001, RMK-000002 и т.д.',
+      'Открываем документ — можно добавить/убрать товар по штрихкоду, провести, отменить проведение или удалить.',
+      'Отмена проведения возвращает товар на склад-отправитель; редактирование проведённого документа сразу корректирует остатки.'
+    ]
+  },
+  {
+    v: '1.2.10', date: '06.08.2026', title: 'Ценник: авто-подгонка шрифта под длинные названия и размеры',
+    items: [
+      'Длинный размер (напр. «стандарт», «XXL-Large») больше не обрезается — шрифт уменьшается под ширину ячейки.',
+      'Длинное название товара авто-уменьшается, чтобы больше текста влезало в 2 строки.',
+      'Короткие размеры («38») остаются крупными.',
+      'Работает и в админке («Поступление»), и на кассе («Ценник для витрины»).'
+    ]
+  },
+  {
+    v: '1.2.9', date: '06.08.2026', title: 'Исправлены отрицательные остатки товаров',
+    items: [
+      'Товары больше не показывают отрицательный остаток (напр. «-9 шт») — артефакт рассинхрона счётчика считается как 0.',
+      'Разово выровнены 79 вариантов с минусовым остатком в базе.'
+    ]
+  },
+  {
+    v: '1.2.8', date: '06.08.2026', title: 'Удаление чеков администратором',
+    items: [
+      'В окне редактирования чека появилась кнопка «Удалить чек» с подтверждением.',
+      'Битые дубли (не попавшие в 1С) удаляются полностью, проведённые — аннулируются (исчезают из истории и отчётов).',
+      'Каждое удаление записывается в журнал аудита.'
+    ]
+  },
+  {
+    v: '1.2.7', date: '06.08.2026', title: 'Мгновенное закрытие смены (синхронизация с 1С — фоном)',
+    items: [
+      'Закрытие смены теперь мгновенное: кассир сразу видит выручку, больше нет долгого спиннера.',
+      'Синхронизация с 1С (закрытие документа смены и формирование ОРП) уходит в фон после закрытия.',
+      'ОРП в 1С формируется быстрее: простановка ссылок в чеках идёт параллельно.'
+    ]
+  },
+  {
+    v: '1.2.6', date: '05.08.2026', title: 'Витринный ценник для товаров без 1С (оприходованных в РМК)',
+    items: [
+      '«Быстрый ценник по штрихкоду» теперь корректно печатает товары, оприходованные через «Поступление» (без 1С).',
+      'Для таких товаров имя, цена и размер берутся из каталога (product_variants/products) по variant_id, а не только из 1С.',
+      'Фолбэк работает и в режиме выбора по размерам, и в быстром ценнике по штрихкоду.'
+    ]
+  },
+  {
+    v: '1.2.5', date: '05.08.2026', title: 'Витринный ценник — цена из РМК и чистый размер',
+    items: [
+      'На витринном ценнике больше не дублируется слово «Размер»: если в характеристике 1С было «Размер: 35», печатается только «35».',
+      'Цена на витринном ценнике теперь берётся из РМК (если цена переопределена в админке), а не из 1С.'
+    ]
+  },
+  {
+    v: '1.2.4', date: '05.08.2026', title: 'Витринный ценник — единый шаблон 58×40 мм',
+    items: [
+      'Раздел «Ценник для витрины» (и быстрый ценник по штрихкоду, и выбор по размерам) теперь печатает тот же шаблон, что и при поступлении товара: НАЗВАНИЕ / РАЗМЕР | ЦЕНА / штрихкод EAN-13.',
+      'Строгий размер этикетки 58×40 мм (без зависимости от выбранного ранее пресета).'
+    ]
+  },
+  {
+    v: '1.2.3', date: '05.08.2026', title: 'Редактирование цены товара прямо в РМК',
+    items: [
+      'В разделе «Товары» при выборе ячейки (размер + склад) появился блок «Цена в РМК» — можно задать новую цену прямо в администраторе.',
+      'Новая цена применяется ТОЛЬКО в РМК и НЕ меняется в 1С. Синхронизация цен из 1С такой товар пропускает (метка «РМК»).',
+      'Цену можно применить ко всем размерам товара сразу или вернуть вариант под синхронизацию 1С.',
+    ],
+  },
+  {
+    v: '1.2.2', date: '05.08.2026', title: 'Родные коды 220 — продажа всегда',
+    items: [
+      'Штрихкоды, начинающиеся на 220 (родные коды поставщика), теперь пробиваются на кассе всегда, даже если экземпляр числится проданным в другом магазине.',
+      'Остаток при такой продаже всё равно списывается.',
+    ],
+  },
+  {
+    v: '1.2.1', date: '05.08.2026', title: 'Фикс: возврат вычитает продажу и бонус врача',
+    items: [
+      'Возврат товара, проданного с указанием врача, теперь уменьшает сумму продаж, число чеков и бонус врача в разделе «Продажи по врачам».',
+      'Отчёт по врачам считает нетто = продажи − возвраты; врачи с полностью возвращёнными продажами скрываются.',
+    ],
+  },
+  {
+    v: '1.2.0', date: '05.08.2026', title: 'Новый раздел: Продажи по врачам',
+    items: [
+      'Новый раздел «Продажи по врачам»: отчёт о продажах и бонусах врачей с фильтрами по периоду, врачу и магазину.',
+      'Расчёт к выплате: 10% от суммы продаж + 10 с. за каждый чек.',
+      'Сохранение номера кошелька врача (постоянный, редактируемый) + кнопка копирования.',
+      'Отметка «Выплачено» за период (зелёная строка + бейдж), экспорт в CSV.',
+      'На кассе выбранный врач теперь сохраняется в чеке отдельно от клиента.',
+    ],
+  },
+  {
+    v: '1.1.1', date: '05.08.2026', title: 'Фикс: новые продажи не попадали в отчёты',
+    items: [
+      'Исправлена причина, по которой сегодняшние продажи не отображались в разделах Обзор / Чеки / Отчёты (чек проводился в 1С, но не сохранялся в базе РМК).',
+      'Теперь каждый чек с кассы гарантированно записывается в базу РМК в момент продажи — отчёты больше не отстают.',
+    ],
+  },
+  {
+    v: '1.1.0', date: '05.08.2026', title: 'Редактирование чеков + отчёты из Supabase',
+    items: [
+      'Редактор проведённого чека для админа: можно менять сумму, способы оплаты и позиции (кнопка «Редактировать» в карточке чека).',
+      'Аннулирование чека (исключение из отчётов без удаления).',
+      'Каждая правка логируется (кто/когда/что изменил, before/after).',
+      'Отчёты продаж, состав чека и снятие ДС теперь строятся из Supabase (быстрее, с авто-фолбэком в 1С).',
+      'Новые чеки сначала сохраняются в базе РМК, потом проводятся в 1С (не теряются при сбое 1С).',
+      'Показ текущей версии и истории обновлений в панели (клик по номеру версии внизу меню).',
+    ],
+  },
+  {
+    v: '1.0.0', date: 'базовая', title: 'Первая рабочая версия РМК',
+    items: [
+      'Касса-телефон (PWA), продажи, возвраты, смены.',
+      'Админ-панель: чеки, отчёты, скидки, карты, поиск/история товара, пользователи, поступление, перемещение.',
+      'Интеграция с 1С (штрихкоды, номенклатура, проведение продаж) и ежедневные бэкапы.',
+    ],
+  },
+];
+
 // ─────────── Backend РМК ───────────
 const BARCODE_SVC_URL = 'https://1c-sync-barcodes.vercel.app';
 const BARCODE_SVC_SECRET = 'TySog2bN1bMJHsssoTvyCZO3IKOef1z0';
@@ -152,6 +463,43 @@ function doLogout() {
   localStorage.removeItem(LS_KEY);
   location.reload();
 }
+
+// Модалка с историей обновлений РМК
+function showChangelog() {
+  let ov = document.getElementById('clogOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'clogOverlay';
+  ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) ov.remove(); });
+  const blocks = (RMK_CHANGELOG || []).map((r, i) => `
+    <div class="clog-rel${i === 0 ? ' clog-latest' : ''}">
+      <div class="clog-rel-h">
+        <span class="clog-ver">v${esc(r.v)}</span>
+        ${i === 0 ? '<span class="clog-badge">текущая</span>' : ''}
+        <span class="clog-date">${esc(r.date || '')}</span>
+      </div>
+      ${r.title ? `<div class="clog-title">${esc(r.title)}</div>` : ''}
+      <ul class="clog-items">${(r.items || []).map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+    </div>`).join('');
+  ov.innerHTML = `
+    <div class="rcedit-modal" role="dialog" style="max-width:600px">
+      <div class="rcedit-head">
+        <h3>✨ Обновления РМК</h3>
+        <button class="rcedit-x" title="Закрыть">✕</button>
+      </div>
+      <div class="rcedit-body">
+        <div class="clog-cur">Текущая версия: <b>v${esc(RMK_VERSION)}</b></div>
+        ${blocks}
+      </div>
+      <div class="rcedit-foot">
+        <button class="rce-save" id="clogClose">Понятно</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('.rcedit-x').onclick = () => ov.remove();
+  ov.querySelector('#clogClose').onclick = () => ov.remove();
+}
 function initLogin() {
   $('loginForm').addEventListener('submit', (e) => {
     e.preventDefault();
@@ -191,8 +539,10 @@ const VIEW_META = {
   returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
+  doctors:   { title: 'Продажи по врачам', sub: 'Отчёт о продажах и бонусах врачей' },
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
+  productsales:{ title: 'Продажи по товарам', sub: 'Анализ продаж по конкретным товарам и штрихкодам' },
   users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
   devices:   { title: 'Устройства касс', sub: 'Заявки на вход с мобильных устройств и одобренные устройства' },
   audit:     { title: 'Журнал действий', sub: 'Смены, продажи и возвраты в хронологии' },
@@ -200,10 +550,12 @@ const VIEW_META = {
   stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
   monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
   cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
+  shiftreports:{ title: 'Отчёты по продажам за день', sub: 'Отчёт по каждой закрытой смене: чеки, способы оплаты, нал/безнал' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
+  receiving: { title: 'Поступление товара', sub: 'Приём товара от поставщика: калькулятор цены и генерация штрихкодов' },
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'search', 'history', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'transfer', 'finance'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'doctors', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'finance', 'receiving'];
 
 async function bootApp() {
   // фильтры даты
@@ -214,6 +566,10 @@ async function bootApp() {
   $('fltKassa').addEventListener('change', () => { state.kassa = $('fltKassa').value; onFilterChange(); });
   $('btnSync').addEventListener('click', () => { state.cache = {}; renderView(true); });
   $('btnLogout').addEventListener('click', doLogout);
+
+  // версия + история обновлений
+  const vNum = $('sbVersionNum'); if (vNum) vNum.textContent = 'v' + RMK_VERSION;
+  const vBtn = $('btnVersion'); if (vBtn) vBtn.addEventListener('click', showChangelog);
 
   // бургер-меню (мобильная версия)
   const burger = $('btnBurger');
@@ -319,8 +675,10 @@ function renderView(force) {
   else if (v === 'returns') renderReturns(force);
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
+  else if (v === 'doctors') renderDoctors(force);
   else if (v === 'search') renderSearch(force);
   else if (v === 'history') renderHistory(force);
+  else if (v === 'productsales') renderProductSales(force);
   else if (v === 'users') renderUsers(force);
   else if (v === 'devices') renderDevices(force);
   else if (v === 'audit') renderAudit(force);
@@ -328,8 +686,10 @@ function renderView(force) {
   else if (v === 'stats') renderStats(force);
   else if (v === 'monitoring') renderMonitoring(force);
   else if (v === 'cashreport') renderCashReport(force);
+  else if (v === 'shiftreports') renderShiftReports(force);
   else if (v === 'transfer') renderTransfer(force);
   else if (v === 'finance') renderFinance(force);
+  else if (v === 'receiving') renderReceiving(force);
 }
 
 // общий помощник кеширования запросов
@@ -651,13 +1011,13 @@ async function renderReceipts(force) {
             <table class="tbl tbl-receipts">
               <thead><tr><th style="width:34px"></th><th>№ чека</th><th>Время</th><th>Продавец</th><th>Магазин</th><th class="r">Сумма</th><th class="c">Статус</th></tr></thead>
               <tbody>${rows.length ? rows.map((r, i) => `
-                <tr class="rc-row" data-ref="${esc(r.ref || '')}" data-num="${esc(r.number)}" data-idx="${i}">
+                <tr class="rc-row" data-ref="${esc(r.ref || '')}" data-num="${esc(r.number)}" data-idx="${i}" data-seller="${esc(r.seller||'')}" data-shop="${esc(r.shop||'')}" data-date="${esc(r.date||'')}">
                   <td class="c rc-caret"><span class="caret">›</span></td>
-                  <td class="strong">${esc(r.number)}</td>
+                  <td class="strong rc-num">${esc(r.number)}</td>
                   <td class="muted">${dushTime(r.date,false)}</td>
                   <td>${esc(r.seller)}</td>
                   <td class="muted">${esc(r.shop)}</td>
-                  <td class="r strong tnum">${fmtNum(r.total)}</td>
+                  <td class="r strong tnum">${fmtNum(r.total)} с.</td>
                   <td class="c"><span class="badge ok">Оплачен</span></td>
                 </tr>
                 <tr class="rc-detail" id="rcDet-${i}" style="display:none"><td colspan="7" class="rc-detail-cell"><div class="rc-detail-inner" id="rcDetBody-${i}"></div></td></tr>`).join('')
@@ -948,6 +1308,296 @@ async function renderCards(force) {
 }
 
 // ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ПРОДАЖИ ПО ВРАЧАМ
+// ═════════════════════════════════════════════════════
+const docState = {
+  from: dushToday(),
+  to: dushToday(),
+  q: '',
+  doctor: '',
+  shop: '',
+  page: 0,
+  per: 10,
+  _all: null,
+  _shops: [],
+};
+
+// Лёгкий тост (нет общего в проекте).
+function docToast(msg) {
+  let t = document.getElementById('docToast');
+  if (!t) { t = document.createElement('div'); t.id = 'docToast'; t.className = 'doc-toast'; document.body.appendChild(t); }
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(docToast._t);
+  docToast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+async function renderDoctors(force) {
+  const box = $('docBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю продажи по врачам…</div>`;
+  try {
+    const qs = `?action=doctors-report&from=${docState.from}&to=${docState.to}`
+      + (docState.shop ? `&shop=${encodeURIComponent(docState.shop)}` : '');
+    const d = await posApi(qs, { method: 'GET' });
+    docState._all = d;
+    if (!docState.shop && Array.isArray(d.shops)) docState._shops = d.shops;
+    doctorsRenderBody();
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить продажи по врачам: ' + (e.message || e));
+  }
+}
+
+// Формат даты YYYY-MM-DD -> DD.MM.YYYY.
+function docFmtDate(s) {
+  if (!s) return '';
+  const [y, m, dd] = String(s).split('-');
+  return `${dd}.${m}.${y}`;
+}
+
+function doctorsRenderBody() {
+  const box = $('docBody');
+  const d = docState._all || { doctors: [], totals: {}, bonusPct: 10, perReceipt: 10 };
+  const allDoctors = d.doctors || [];
+
+  let list = allDoctors.slice();
+  if (docState.doctor) list = list.filter(x => x.c1_ref === docState.doctor);
+  if (docState.q) {
+    const s = docState.q.trim().toLowerCase();
+    list = list.filter(x => (x.name || '').toLowerCase().includes(s) || (x.code || '').toLowerCase().includes(s));
+  }
+
+  const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  const tSales = r2(list.reduce((s, x) => s + (x.salesTotal || 0), 0));
+  const tBonus = r2(list.reduce((s, x) => s + (x.bonus || 0), 0));
+  const tReceipts = list.reduce((s, x) => s + (x.receipts || 0), 0);
+  const tPerRec = r2(list.reduce((s, x) => s + (x.perReceiptTotal || 0), 0));
+  const tPayout = r2(list.reduce((s, x) => s + (x.payout || 0), 0));
+
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / docState.per));
+  if (docState.page >= totalPages) docState.page = totalPages - 1;
+  if (docState.page < 0) docState.page = 0;
+  const off = docState.page * docState.per;
+  const pageRows = list.slice(off, off + docState.per);
+  const pageNow = docState.page + 1;
+
+  const docOpts = `<option value="" ${docState.doctor===''?'selected':''}>Все врачи</option>`
+    + allDoctors.map(x => `<option value="${esc(x.c1_ref)}" ${docState.doctor===x.c1_ref?'selected':''}>${esc(x.name||'Без имени')}${x.code?` (${esc(x.code)})`:''}</option>`).join('');
+  const shopList = docState._shops || [];
+  const shopOpts = `<option value="" ${docState.shop===''?'selected':''}>Все магазины</option>`
+    + shopList.map(s => `<option value="${esc(s.ref)}" ${docState.shop===s.ref?'selected':''}>${esc(s.name)}</option>`).join('');
+
+  box.innerHTML = `
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+      ${kpi('💰','Общая сумма продаж', money(tSales),'g','')}
+      ${kpi('%','Всего бонусов ('+(d.bonusPct||10)+'%)', money(tBonus),'blue','')}
+      ${kpi('🧾','Всего чеков', fmtInt(tReceipts),'gray','')}
+      ${kpi('💳','К выплате', money(tPayout),'amber','+ '+(d.perReceipt||10)+' с. за чек')}
+    </div>
+
+    <div class="card card-pad">
+      <div class="filters filters-row doc-filters">
+        <div class="doc-fld">
+          <label>Период</label>
+          <div class="doc-daterange">
+            <input type="date" class="finput" id="docFrom" value="${esc(docState.from)}">
+            <span class="doc-dash">—</span>
+            <input type="date" class="finput" id="docTo" value="${esc(docState.to)}">
+          </div>
+        </div>
+        <div class="doc-fld" style="flex:2;min-width:220px">
+          <label>Врач</label>
+          <input class="finput" id="docQ" value="${esc(docState.q)}" placeholder="🔍 Поиск по фамилии или коду врача…">
+        </div>
+        <div class="doc-fld" style="min-width:170px">
+          <label>&nbsp;</label>
+          <select class="fselect" id="docDoctor">${docOpts}</select>
+        </div>
+        <div class="doc-fld" style="min-width:170px">
+          <label>&nbsp;</label>
+          <select class="fselect" id="docShop">${shopOpts}</select>
+        </div>
+        <div class="doc-fld doc-fld-btns">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="docReset">↻ Сбросить</button>
+            <button class="btn btn-primary" id="docApply">▽ Применить</button>
+            <button class="btn btn-ghost" id="docExport">⭳ Экспорт</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table class="tbl doc-tbl">
+          <thead><tr>
+            <th style="width:34px">#</th>
+            <th>Врач (код)</th>
+            <th class="r">Сумма продаж</th>
+            <th class="r">${(d.bonusPct||10)}% от продаж</th>
+            <th class="c">Кол-во чеков</th>
+            <th class="r">+${(d.perReceipt||10)} с. за чек</th>
+            <th class="r">К выплате</th>
+            <th style="min-width:210px">Кошелёк / номер</th>
+            <th class="c">Статус</th>
+            <th class="c">Действия</th>
+          </tr></thead>
+          <tbody>${pageRows.length ? pageRows.map((x, i) => doctorRowHtml(x, off + i + 1)).join('')
+            : `<tr><td class="tbl-empty" colspan="10">Нет продаж с врачом за период</td></tr>`}</tbody>
+          <tfoot><tr class="doc-total">
+            <td></td>
+            <td class="strong">Итого</td>
+            <td class="r strong tnum">${fmtNum(tSales)}</td>
+            <td class="r strong tnum">${fmtNum(tBonus)}</td>
+            <td class="c strong tnum">${fmtInt(tReceipts)}</td>
+            <td class="r strong tnum">${fmtNum(tPerRec)}</td>
+            <td class="r strong tnum">${fmtNum(tPayout)}</td>
+            <td colspan="3"></td>
+          </tr></tfoot>
+        </table>
+      </div>
+
+      <div class="pager">
+        <div class="pager-per">Показать по:
+          <select class="fselect" id="docPer" style="width:auto;display:inline-block;margin-left:6px">
+            <option value="10" ${docState.per===10?'selected':''}>10</option>
+            <option value="25" ${docState.per===25?'selected':''}>25</option>
+            <option value="50" ${docState.per===50?'selected':''}>50</option>
+          </select>
+        </div>
+        <button class="btn" id="docPrev" ${docState.page<=0?'disabled':''}>← Назад</button>
+        <span class="pager-info">Стр. ${pageNow} из ${totalPages} · всего ${fmtInt(total)}</span>
+        <button class="btn" id="docNext" ${pageNow>=totalPages?'disabled':''}>Вперёд →</button>
+      </div>
+    </div>
+  `;
+
+  doctorsBindEvents();
+}
+
+function doctorRowHtml(x, num) {
+  const paidCls = x.paid ? ' doc-row-paid' : '';
+  const statusCell = x.paid
+    ? `<span class="badge g">Выплачено</span>`
+    : `<span class="muted">—</span>`;
+  const actionCell = x.paid
+    ? `<button class="btn btn-sm doc-paid-btn" data-unpay="${esc(x.c1_ref)}" title="Снять отметку выплаты">✓ Выплачено</button>`
+    : `<button class="btn btn-sm btn-primary doc-pay-btn" data-pay="${esc(x.c1_ref)}">Выплатить</button>`;
+  return `<tr class="doc-row${paidCls}" data-ref="${esc(x.c1_ref)}">
+    <td class="c muted">${num}</td>
+    <td><div class="strong">${esc(x.name||'Без имени')}</div><div class="muted" style="font-size:12px">${esc(x.code||'')}</div></td>
+    <td class="r strong tnum">${fmtNum(x.salesTotal)}</td>
+    <td class="r tnum">${fmtNum(x.bonus)}</td>
+    <td class="c tnum">${fmtInt(x.receipts)}</td>
+    <td class="r tnum">${fmtNum(x.perReceiptTotal)}</td>
+    <td class="r strong tnum">${fmtNum(x.payout)}</td>
+    <td>
+      <div class="doc-wallet">
+        <input class="finput doc-wallet-inp" data-wref="${esc(x.c1_ref)}" value="${esc(x.wallet||'')}" placeholder="Введите номер кошелька">
+        <button class="btn btn-sm btn-ghost doc-copy-btn" data-copy="${esc(x.c1_ref)}" title="Копировать">⧉</button>
+      </div>
+    </td>
+    <td class="c">${statusCell}</td>
+    <td class="c">${actionCell}</td>
+  </tr>`;
+}
+
+function doctorsBindEvents() {
+  const box = $('docBody');
+  const qa = (sel) => Array.from(box.querySelectorAll(sel));
+  const apply = () => {
+    docState.from = $('docFrom').value || dushToday();
+    docState.to = $('docTo').value || dushToday();
+    docState.q = $('docQ').value.trim();
+    docState.doctor = $('docDoctor').value;
+    docState.shop = $('docShop').value;
+    docState.page = 0;
+    renderDoctors();
+  };
+  $('docApply').addEventListener('click', apply);
+  $('docFrom').addEventListener('change', apply);
+  $('docTo').addEventListener('change', apply);
+  $('docShop').addEventListener('change', apply);
+  $('docQ').addEventListener('keydown', e => { if (e.key === 'Enter') { docState.q = $('docQ').value.trim(); docState.doctor = $('docDoctor').value; docState.page = 0; doctorsRenderBody(); } });
+  $('docDoctor').addEventListener('change', () => { docState.doctor = $('docDoctor').value; docState.q = $('docQ').value.trim(); docState.page = 0; doctorsRenderBody(); });
+  $('docReset').addEventListener('click', () => {
+    docState.from = dushToday(); docState.to = dushToday();
+    docState.q = ''; docState.doctor = ''; docState.shop = ''; docState.page = 0;
+    renderDoctors();
+  });
+  $('docExport').addEventListener('click', doctorsExportCsv);
+  $('docPer').addEventListener('change', () => { docState.per = Number($('docPer').value) || 10; docState.page = 0; doctorsRenderBody(); });
+  $('docPrev').addEventListener('click', () => { if (docState.page > 0) { docState.page--; doctorsRenderBody(); } });
+  $('docNext').addEventListener('click', () => { docState.page++; doctorsRenderBody(); });
+
+  qa('.doc-copy-btn').forEach(b => b.addEventListener('click', () => {
+    const ref = b.getAttribute('data-copy');
+    const inp = box.querySelector(`.doc-wallet-inp[data-wref="${CSS.escape(ref)}"]`);
+    const val = inp ? inp.value.trim() : '';
+    if (!val) { docToast('Кошелёк пуст'); return; }
+    navigator.clipboard.writeText(val).then(() => docToast('Скопировано: ' + val)).catch(() => docToast('Не удалось скопировать'));
+  }));
+
+  qa('.doc-wallet-inp').forEach(inp => {
+    const save = async () => {
+      const ref = inp.getAttribute('data-wref');
+      const wallet = inp.value.trim();
+      const rec = ((docState._all && docState._all.doctors) || []).find(x => x.c1_ref === ref);
+      if (rec && (rec.wallet || '') === wallet) return;
+      try {
+        await posApi('?action=doctor-wallet', { method: 'POST', body: JSON.stringify({ doctorC1Ref: ref, wallet, by: state.user || 'admin' }) });
+        if (rec) rec.wallet = wallet;
+        docToast('Кошелёк сохранён');
+      } catch (e) { docToast('Ошибка сохранения: ' + (e.message || e)); }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
+  });
+
+  qa('.doc-pay-btn').forEach(b => b.addEventListener('click', () => doctorTogglePayout(b.getAttribute('data-pay'), true)));
+  qa('.doc-paid-btn').forEach(b => b.addEventListener('click', () => doctorTogglePayout(b.getAttribute('data-unpay'), false)));
+}
+
+async function doctorTogglePayout(ref, paid) {
+  const rec = ((docState._all && docState._all.doctors) || []).find(x => x.c1_ref === ref);
+  if (!rec) return;
+  if (paid && !confirm(`Отметить выплату ${fmtNum(rec.payout)} с. врачу «${rec.name||''}» за период ${docFmtDate(docState.from)} — ${docFmtDate(docState.to)}?`)) return;
+  if (!paid && !confirm(`Снять отметку выплаты у врача «${rec.name||''}»?`)) return;
+  try {
+    const wref = document.querySelector(`.doc-wallet-inp[data-wref="${CSS.escape(ref)}"]`);
+    const wallet = (wref && wref.value) || rec.wallet || '';
+    await posApi('?action=doctor-payout', {
+      method: 'POST',
+      body: JSON.stringify({
+        doctorC1Ref: ref, from: docState.from, to: docState.to, paid,
+        by: state.user || 'admin',
+        snapshot: { salesTotal: rec.salesTotal, perReceiptTotal: rec.perReceiptTotal, payout: rec.payout, receipts: rec.receipts, wallet },
+      }),
+    });
+    rec.paid = paid;
+    doctorsRenderBody();
+    docToast(paid ? 'Выплата отмечена' : 'Отметка выплаты снята');
+  } catch (e) { docToast('Ошибка: ' + (e.message || e)); }
+}
+
+function doctorsExportCsv() {
+  const d = docState._all || { doctors: [] };
+  let list = (d.doctors || []).slice();
+  if (docState.doctor) list = list.filter(x => x.c1_ref === docState.doctor);
+  if (docState.q) { const s = docState.q.trim().toLowerCase(); list = list.filter(x => (x.name||'').toLowerCase().includes(s) || (x.code||'').toLowerCase().includes(s)); }
+  if (!list.length) { docToast('Нет данных для экспорта'); return; }
+  const head = ['Врач','Код','Сумма продаж','Бонус','Кол-во чеков','За чеки','К выплате','Кошелёк','Статус'];
+  const rows = list.map(x => [x.name||'', x.code||'', x.salesTotal, x.bonus, x.receipts, x.perReceiptTotal, x.payout, x.wallet||'', x.paid?'Выплачено':'Не выплачено']);
+  const csv = '\uFEFF' + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `врачи_${docState.from}_${docState.to}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ═════════════════════════════════════════════════════
 //  РАЗДЕЛ: ПОИСК ТОВАРА (скан/ввод штрихкода)
 // ═════════════════════════════════════════════════════
 const STATUS_META = {
@@ -957,7 +1607,9 @@ const STATUS_META = {
   written_off: { label: 'Списан',    cls: 'r' },
 };
 let scLast = '';
-const psState = { q: '', wh: '', page: 0, per: 30, whList: null };
+const psState = { q: '', wh: '', size: '', page: 0, per: 30, whList: null, expanded: null };
+// Кэш детализации товаров (матрица размер×склад) и выбранной ячейки по id товара.
+const psDetail = {}; // productId -> { data, sel:{size,whId} }
 
 // Селект складов (общий для поиска/истории). sel — текущее значение.
 function whOptions(list, sel) {
@@ -972,7 +1624,8 @@ async function renderSearch(force) {
     const off = psState.page * psState.per;
     const qs = `?action=product-search&limit=${psState.per}&offset=${off}`
       + (psState.q ? `&q=${encodeURIComponent(psState.q)}` : '')
-      + (psState.wh ? `&wh=${encodeURIComponent(psState.wh)}` : '');
+      + (psState.wh ? `&wh=${encodeURIComponent(psState.wh)}` : '')
+      + (psState.size ? `&size=${encodeURIComponent(psState.size)}` : '');
     const d = await posApi(qs, { method: 'GET' });
     if (d.warehouses) psState.whList = d.warehouses;
     const rows = d.products || [];
@@ -993,25 +1646,31 @@ async function renderSearch(force) {
       <div class="card card-pad" style="margin-top:16px">
         <div class="card-h-row"><h3>Каталог товаров${psState.q||psState.wh?` — найдено ${fmtInt(total)}`:` — ${fmtInt(total)}`}</h3></div>
         <div class="filters filters-row">
-          <input class="finput" id="psQ" value="${esc(psState.q)}" placeholder="Поиск по названию товара…" style="flex:2;min-width:220px">
-          <select class="fselect" id="psWh" style="flex:1;min-width:170px">${whOptions(psState.whList, psState.wh)}</select>
+          <input class="finput" id="psQ" value="${esc(psState.q)}" placeholder="Поиск по названию товара…" style="flex:2;min-width:200px">
+          <input class="finput" id="psSize" value="${esc(psState.size)}" inputmode="numeric" placeholder="Размер (напр. 22)" style="flex:0 0 150px;min-width:120px">
+          <select class="fselect" id="psWh" style="flex:1;min-width:160px">${whOptions(psState.whList, psState.wh)}</select>
           <button class="btn btn-primary" id="psSearch">Найти</button>
           <button class="btn" id="psReset">Сброс</button>
         </div>
         <div class="tbl-wrap">
-          <table class="tbl">
-            <thead><tr><th style="width:30px">#</th><th>Товар</th><th class="c">Цена</th><th class="c">Остаток</th><th>По складам</th></tr></thead>
+          <table class="tbl ps-tbl">
+            <thead><tr><th style="width:30px">#</th><th style="width:34px"></th><th>Товар</th><th class="c">Цена</th><th class="c">Остаток</th><th>По складам</th></tr></thead>
             <tbody>${rows.length ? rows.map((p,i)=>{
               const priceTxt = p.priceMin>0 ? (p.priceMax>p.priceMin ? money(p.priceMin)+'–'+money(p.priceMax) : money(p.priceMin)) : '—';
               const whTxt = (p.byWarehouse||[]).length ? (p.byWarehouse||[]).map(w=>`${esc(w.name)}: <b>${fmtInt(w.stock)}</b>`).join(' · ') : '<span class="muted">нет остатка</span>';
-              return `<tr>
+              const isOpen = psState.expanded === p.id;
+              return `<tr class="ps-row${isOpen?' ps-row-open':''}" data-pid="${esc(p.id)}">
                 <td class="c muted">${off+i+1}</td>
+                <td class="c"><span class="ps-caret${isOpen?' open':''}">▶</span></td>
                 <td><div class="strong">${esc(p.name)}</div>${p.category?`<div class="muted" style="font-size:12px">${esc(p.category)}</div>`:''}</td>
                 <td class="c tnum">${priceTxt}</td>
                 <td class="c tnum"><span class="badge ${p.totalStock>0?'g':'gray'}">${fmtInt(p.totalStock)} шт</span></td>
                 <td style="font-size:12.5px">${whTxt}</td>
+              </tr>
+              <tr class="ps-detail-row" data-detail="${esc(p.id)}" style="display:${isOpen?'table-row':'none'}">
+                <td colspan="6" class="ps-detail-cell"><div class="ps-detail" id="psDet_${esc(p.id)}">${isOpen?'<div class="loading">⏳ Загружаю размеры…</div>':''}</div></td>
               </tr>`;
-            }).join('') : `<tr><td class="tbl-empty" colspan="5">Товары не найдены</td></tr>`}</tbody>
+            }).join('') : `<tr><td class="tbl-empty" colspan="6">Товары не найдены</td></tr>`}</tbody>
           </table>
         </div>
         <div class="pager">
@@ -1021,19 +1680,256 @@ async function renderSearch(force) {
         </div>
       </div>`;
 
-    const doSearch = () => { psState.q = $('psQ').value.trim(); psState.wh = $('psWh').value; psState.page = 0; renderSearch(); };
+    const doSearch = () => { psState.q = $('psQ').value.trim(); psState.wh = $('psWh').value; psState.size = $('psSize').value.trim(); psState.page = 0; psState.expanded = null; renderSearch(); };
     $('psSearch').addEventListener('click', doSearch);
     $('psQ').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+    $('psSize').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
     $('psWh').addEventListener('change', doSearch);
-    $('psReset').addEventListener('click', () => { psState.q=''; psState.wh=''; psState.page=0; renderSearch(); });
-    $('psPrev').addEventListener('click', () => { if (psState.page>0){ psState.page--; renderSearch(); } });
-    $('psNext').addEventListener('click', () => { if (pageNow<totalPages){ psState.page++; renderSearch(); } });
+    $('psReset').addEventListener('click', () => { psState.q=''; psState.wh=''; psState.size=''; psState.page=0; psState.expanded=null; renderSearch(); });
+    $('psPrev').addEventListener('click', () => { if (psState.page>0){ psState.page--; psState.expanded=null; renderSearch(); } });
+    $('psNext').addEventListener('click', () => { if (pageNow<totalPages){ psState.page++; psState.expanded=null; renderSearch(); } });
+
+    // Раскрытие товара — клик по строке (дропдаун с матрицей размер×склад)
+    box.querySelectorAll('tr.ps-row').forEach(tr => {
+      tr.addEventListener('click', () => {
+        const pid = tr.getAttribute('data-pid');
+        const detRow = box.querySelector(`tr.ps-detail-row[data-detail="${pid}"]`);
+        const caret = tr.querySelector('.ps-caret');
+        const isOpen = psState.expanded === pid;
+        // закрыть все остальные
+        box.querySelectorAll('tr.ps-detail-row').forEach(r => { r.style.display = 'none'; });
+        box.querySelectorAll('tr.ps-row').forEach(r => { r.classList.remove('ps-row-open'); const c=r.querySelector('.ps-caret'); if(c) c.classList.remove('open'); });
+        if (isOpen) { psState.expanded = null; return; }
+        psState.expanded = pid;
+        tr.classList.add('ps-row-open');
+        if (caret) caret.classList.add('open');
+        if (detRow) { detRow.style.display = 'table-row'; }
+        loadProductDetail(pid);
+      });
+    });
+    // если был раскрыт товар до перерисовки — подгрузить его детализацию
+    if (psState.expanded && box.querySelector(`#psDet_${cssIdEsc(psState.expanded)}`)) loadProductDetail(psState.expanded);
     const scanGo = () => scanOne($('scScan').value.trim());
     $('scScanGo').addEventListener('click', scanGo);
     $('scScan').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); scanGo(); } });
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить товары: ' + (e.message || e));
+  }
+}
+
+// Безопасный id для CSS-селектора (uuid с дефисами — ок, но на всякий случай)
+function cssIdEsc(id) { return String(id).replace(/[^a-zA-Z0-9_-]/g, '_'); }
+
+// ---- Матрица размер×склад в дропдауне товара ----
+async function loadProductDetail(pid) {
+  const host = $('psDet_' + pid) || document.getElementById('psDet_' + cssIdEsc(pid));
+  if (!host) return;
+  host.innerHTML = `<div class="loading">⏳ Загружаю размеры…</div>`;
+  try {
+    let cached = psDetail[pid];
+    if (!cached || !cached.data) {
+      const d = await posApi(`?action=product-detail&id=${encodeURIComponent(pid)}`, { method: 'GET' });
+      if (!d.found) { host.innerHTML = `<div class="muted" style="padding:8px">Детализация недоступна</div>`; return; }
+      cached = psDetail[pid] = { data: d, sel: null };
+    }
+    renderDetailMatrix(pid);
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось загрузить размеры: ' + (e.message || e));
+  }
+}
+
+function renderDetailMatrix(pid) {
+  const host = $('psDet_' + pid) || document.getElementById('psDet_' + cssIdEsc(pid));
+  if (!host) return;
+  const cached = psDetail[pid];
+  if (!cached || !cached.data) return;
+  const d = cached.data;
+  const sizes = d.sizes || [];
+  const whs = d.warehouses || [];
+  const cells = d.cells || {};
+  if (!sizes.length || !whs.length) {
+    host.innerHTML = `<div class="muted" style="padding:10px">Нет размеров/остатков по этому товару.</div>`;
+    return;
+  }
+  const head = `<tr><th class="psm-wh">Склад \ Размер</th>${sizes.map(s=>`<th class="c">${esc(s)}</th>`).join('')}</tr>`;
+  const body = whs.map(w => {
+    const tds = sizes.map(s => {
+      const cell = cells[s] && cells[s][w.id];
+      const qty = cell ? cell.qty : 0;
+      if (!cell || qty <= 0) return `<td class="c psm-zero">—</td>`;
+      const selCls = (cached.sel && cached.sel.size===s && cached.sel.whId===w.id) ? ' psm-sel' : '';
+      return `<td class="c psm-cell${selCls}" data-size="${esc(s)}" data-wh="${esc(w.id)}" data-vid="${esc(cell.variantId)}"><span class="psm-pill">${fmtInt(qty)} шт</span></td>`;
+    }).join('');
+    return `<tr><td class="psm-wh">${esc(w.name)}</td>${tds}</tr>`;
+  }).join('');
+  const totalRow = `<tr class="psm-total"><td class="psm-wh">Итого по размеру</td>${sizes.map(s=>`<td class="c"><b>${fmtInt((d.totalBySize&&d.totalBySize[s])||0)}</b></td>`).join('')}</tr>`;
+
+  const infoIcon = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.5" r=".6" fill="currentColor" stroke="none"/></svg>`;
+  host.innerHTML = `
+    <div class="psm-wrap"><table class="psm-tbl"><thead>${head}</thead><tbody>${body}${totalRow}</tbody></table></div>
+    <div class="psm-panel" id="psmPanel_${esc(pid)}"></div>
+    <div class="psm-hint">${infoIcon}<span>Нажмите на количество в ячейке, чтобы увидеть уникальные коды и присвоить новый EAN-13.</span></div>`;
+
+  host.querySelectorAll('td.psm-cell').forEach(td => {
+    td.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const size = td.getAttribute('data-size');
+      const whId = td.getAttribute('data-wh');
+      const vid = td.getAttribute('data-vid');
+      cached.sel = { size, whId, vid };
+      renderDetailMatrix(pid); // перерисовать для подсветки выбранной ячейки
+      loadUnitsPanel(pid);
+    });
+  });
+  // предотвратить сворачивание товара при клике внутри детализации
+  host.addEventListener('click', (ev) => ev.stopPropagation(), { once: false });
+  if (cached.sel) loadUnitsPanel(pid);
+}
+
+async function loadUnitsPanel(pid) {
+  const cached = psDetail[pid];
+  const panel = document.getElementById('psmPanel_' + cssIdEsc(pid)) || document.getElementById('psmPanel_' + pid);
+  if (!cached || !cached.sel || !panel) return;
+  const sel = cached.sel;
+  const whName = (cached.data.warehouses.find(w=>w.id===sel.whId)||{}).name || '—';
+  const cellInfo = (cached.data.cells && cached.data.cells[sel.size] && cached.data.cells[sel.size][sel.whId]) || {};
+  const curPrice = Number(cellInfo.price) || 0;
+  const curOld = cellInfo.priceOld != null ? Number(cellInfo.priceOld) : null;
+  const isOverridden = cellInfo.priceOverridden === true;
+  panel.innerHTML = `<div class="loading">⏳ Загружаю коды…</div>`;
+  try {
+    const d = await posApi(`?action=variant-units&variant_id=${encodeURIComponent(sel.vid)}`, { method: 'GET' });
+    const units = d.units || [];
+    const chips = units.length
+      ? units.map(u => {
+          const al = (u.aliases||[]).length ? `<span class="psm-alias" title="доп. коды: ${esc((u.aliases||[]).join(', '))}">+${(u.aliases||[]).length}</span>` : '';
+          return `<span class="psm-chip" title="${esc(u.barcode||'')}"><span class="psm-dot"></span>⋯${esc(u.last4||'')}${al}</span>`;
+        }).join('')
+      : `<div class="psm-nounits">Нет экземпляров в наличии</div>`;
+    const infoIcon = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.5" r=".6" fill="currentColor" stroke="none"/></svg>`;
+    panel.innerHTML = `
+      <div class="psm-panel-head"><span>Размер <b>${esc(sel.size)}</b> — ${esc(whName)} <span class="psm-cnt">(${fmtInt(units.length)} шт)</span></span><button class="psm-close" id="psmClose_${esc(pid)}" title="Закрыть">×</button></div>
+      <div class="psm-grid">
+        <div class="psm-col">
+          <div class="psm-sub">Уникальные коды (последние 4 цифры)</div>
+          <div class="psm-chips">${chips}</div>
+        </div>
+        <div class="psm-col">
+          <div class="psm-sub">Присвоить уникальный код (EAN-13)</div>
+          <div class="psm-assign">
+            <input class="finput" id="psmEan_${esc(pid)}" inputmode="numeric" maxlength="13" placeholder="2000000123456">
+            <button class="btn btn-primary" id="psmAssign_${esc(pid)}" ${units.length?'':'disabled'}>Присвоить</button>
+          </div>
+          <div class="psm-info">${infoIcon}<span>Код будет присвоен размеру <b>${esc(sel.size)}</b> на складе <b>${esc(whName)}</b>. Количество НЕ увеличится.</span></div>
+          <div class="psm-msg" id="psmMsg_${esc(pid)}"></div>
+        </div>
+        <div class="psm-col psm-price-col">
+          <div class="psm-sub">Цена в РМК ${isOverridden ? '<span class="psm-badge-rmk" title="Цена задана в РМК и не перезапишется из 1С">РМК</span>' : ''}</div>
+          <div class="psm-price-now">Текущая: <b>${money(curPrice)}</b>${curOld && curOld>curPrice ? ` <span class="psm-old">${money(curOld)}</span>` : ''}</div>
+          <div class="psm-assign">
+            <input class="finput" id="psmPrice_${esc(pid)}" inputmode="decimal" placeholder="${curPrice||''}" value="${curPrice||''}">
+            <button class="btn btn-primary" id="psmPriceSave_${esc(pid)}">Сохранить</button>
+          </div>
+          <label class="psm-price-all"><input type="checkbox" id="psmPriceAll_${esc(pid)}"> Применить ко всем размерам товара</label>
+          <div class="psm-info">${infoIcon}<span>Новая цена применяется <b>только в РМК</b> и <b>не меняется в 1С</b>. Синхронизация цен из 1С такой товар пропускает.</span></div>
+          ${isOverridden ? `<button class="psm-price-clear" id="psmPriceClear_${esc(pid)}">Вернуть под синхронизацию 1С</button>` : ''}
+          <div class="psm-msg" id="psmPriceMsg_${esc(pid)}"></div>
+        </div>
+      </div>`;
+    const closeBtn = document.getElementById('psmClose_' + cssIdEsc(pid)) || document.getElementById('psmClose_' + pid);
+    if (closeBtn) closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); cached.sel = null; renderDetailMatrix(pid); });
+    const btn = document.getElementById('psmAssign_' + cssIdEsc(pid)) || document.getElementById('psmAssign_' + pid);
+    const inp = document.getElementById('psmEan_' + cssIdEsc(pid)) || document.getElementById('psmEan_' + pid);
+    if (btn) btn.addEventListener('click', (ev) => { ev.stopPropagation(); assignBarcode(pid); });
+    if (inp) inp.addEventListener('keydown', (ev) => { if (ev.key==='Enter'){ ev.preventDefault(); assignBarcode(pid); } });
+    // --- смена цены варианта (только РМК) ---
+    const priceBtn = document.getElementById('psmPriceSave_' + cssIdEsc(pid)) || document.getElementById('psmPriceSave_' + pid);
+    const priceInp = document.getElementById('psmPrice_' + cssIdEsc(pid)) || document.getElementById('psmPrice_' + pid);
+    const priceClear = document.getElementById('psmPriceClear_' + cssIdEsc(pid)) || document.getElementById('psmPriceClear_' + pid);
+    if (priceBtn) priceBtn.addEventListener('click', (ev) => { ev.stopPropagation(); saveVariantPrice(pid); });
+    if (priceInp) priceInp.addEventListener('keydown', (ev) => { if (ev.key==='Enter'){ ev.preventDefault(); saveVariantPrice(pid); } });
+    if (priceClear) priceClear.addEventListener('click', (ev) => { ev.stopPropagation(); clearVariantPrice(pid); });
+  } catch (e) {
+    panel.innerHTML = errBar('Не удалось загрузить коды: ' + (e.message || e));
+  }
+}
+
+async function assignBarcode(pid) {
+  const cached = psDetail[pid];
+  if (!cached || !cached.sel) return;
+  const inp = document.getElementById('psmEan_' + cssIdEsc(pid)) || document.getElementById('psmEan_' + pid);
+  const msg = document.getElementById('psmMsg_' + cssIdEsc(pid)) || document.getElementById('psmMsg_' + pid);
+  const code = (inp && inp.value || '').trim();
+  if (msg) msg.innerHTML = '';
+  if (!/^\d{13}$/.test(code)) { if (msg) msg.innerHTML = `<span class="psm-err">Нужно ровно 13 цифр (EAN-13).</span>`; return; }
+  try {
+    const r = await posApi(`?action=assign-barcode`, { method: 'POST', body: JSON.stringify({ variantId: cached.sel.vid, barcode: code }) });
+    if (r.ok) {
+      if (msg) msg.innerHTML = r.alreadyAssigned
+        ? `<span class="psm-ok">Код уже был присвоен этому экземпляру.</span>`
+        : `<span class="psm-ok">✓ Код <b>${esc(code)}</b> присвоен. Количество не изменилось.</span>`;
+      if (inp) inp.value = '';
+      loadUnitsPanel(pid); // обновить чипы (покажет alias)
+    } else {
+      if (msg) msg.innerHTML = `<span class="psm-err">${esc(r.error || 'Ошибка присвоения')}</span>`;
+    }
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span class="psm-err">${esc(e.message || e)}</span>`;
+  }
+}
+
+// --- СМЕНА ЦЕНЫ варианта прямо в РМК (только Supabase, 1С не трогаем) ---
+async function saveVariantPrice(pid) {
+  const cached = psDetail[pid];
+  if (!cached || !cached.sel) return;
+  const inp = document.getElementById('psmPrice_' + cssIdEsc(pid)) || document.getElementById('psmPrice_' + pid);
+  const msg = document.getElementById('psmPriceMsg_' + cssIdEsc(pid)) || document.getElementById('psmPriceMsg_' + pid);
+  const allEl = document.getElementById('psmPriceAll_' + cssIdEsc(pid)) || document.getElementById('psmPriceAll_' + pid);
+  const applyAll = !!(allEl && allEl.checked);
+  const raw = (inp && inp.value || '').trim().replace(',', '.');
+  if (msg) msg.innerHTML = '';
+  const price = Number(raw);
+  if (!isFinite(price) || price < 0) { if (msg) msg.innerHTML = `<span class="psm-err">Введите корректную цену (число ≥ 0).</span>`; return; }
+  try {
+    const payload = { price, by: 'admin' };
+    if (applyAll) { payload.productId = pid; payload.applyToAllSizes = true; }
+    else { payload.variantId = cached.sel.vid; }
+    const r = await posApi(`?action=set-variant-price`, { method: 'POST', body: JSON.stringify(payload) });
+    if (r.ok) {
+      if (msg) msg.innerHTML = `<span class="psm-ok">✓ Цена сохранена в РМК: <b>${money(price)}</b>${applyAll ? ` (${fmtInt(r.affected||0)} размер.)` : ''}. В 1С не изменена.</span>`;
+      // сбросить кэш детали, чтобы подтянуть новую цену и флаг
+      const keepSel = cached.sel;
+      delete psDetail[pid];
+      await loadProductDetail(pid);
+      const c2 = psDetail[pid]; if (c2) { c2.sel = keepSel; renderDetailMatrix(pid); }
+    } else {
+      if (msg) msg.innerHTML = `<span class="psm-err">${esc(r.error || 'Ошибка сохранения цены')}</span>`;
+    }
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span class="psm-err">${esc(e.message || e)}</span>`;
+  }
+}
+
+async function clearVariantPrice(pid) {
+  const cached = psDetail[pid];
+  if (!cached || !cached.sel) return;
+  const msg = document.getElementById('psmPriceMsg_' + cssIdEsc(pid)) || document.getElementById('psmPriceMsg_' + pid);
+  if (msg) msg.innerHTML = '';
+  if (!confirm('Вернуть этот вариант под синхронизацию цен из 1С? Текущая цена РМК останется, но при следующей синхронизации может быть перезаписана из 1С.')) return;
+  try {
+    const r = await posApi(`?action=set-variant-price`, { method: 'POST', body: JSON.stringify({ variantId: cached.sel.vid, clearOverride: true }) });
+    if (r.ok) {
+      if (msg) msg.innerHTML = `<span class="psm-ok">✓ Вариант возвращён под синхронизацию 1С.</span>`;
+      const keepSel = cached.sel;
+      delete psDetail[pid];
+      await loadProductDetail(pid);
+      const c2 = psDetail[pid]; if (c2) { c2.sel = keepSel; renderDetailMatrix(pid); }
+    } else {
+      if (msg) msg.innerHTML = `<span class="psm-err">${esc(r.error || 'Ошибка')}</span>`;
+    }
+  } catch (e) {
+    if (msg) msg.innerHTML = `<span class="psm-err">${esc(e.message || e)}</span>`;
   }
 }
 
@@ -1250,6 +2146,388 @@ async function histOne(code, targetId) {
     rbox.innerHTML = errBar('Ошибка загрузки истории: ' + (e.message || e));
   } finally {
     const el = $('htInput'); if (el) el.select();
+  }
+}
+
+// ═════════════════════════════════════════════════════
+//  РАЗДЕЛ: ПРОДАЖИ ПО ТОВАРАМ
+//  Аналитика по конкретному товару (nom_c1_ref) из Supabase.
+//  Backend: ?action=product-sales&sub=top|shops|barcode|all|...
+// ═════════════════════════════════════════════════════
+const PSA = {
+  q: '',            // строка поиска по названию
+  code: '',         // последние цифры штрихкода
+  nom: '',          // выбранный товар (nom_c1_ref)
+  shop: '',         // shop_c1_ref фильтра «Все магазины» (пусто = все)
+  shops: null,      // кэш списка магазинов [{shop_c1_ref, shop_name}]
+  topMetric: 'revenue', // сортировка топ-5: revenue|qty
+  card: null, size: [], lines: [], day: [], dayshop: [], top: [],
+  linePage: 0, linePer: 20,
+};
+const PSA_SHOP_COLORS = ['#10b981', '#22b8cf', '#845ef7', '#f59e0b', '#ff8787', '#4dabf7', '#a9e34b', '#e64980'];
+const psaMoney0 = (n) => `${fmtInt(Math.round(Number(n)||0))} <span class="cur">${CUR}</span>`;
+function psaFmtDate(d) { // 'YYYY-MM-DD' → 'DD.MM.YYYY'
+  if (!d) return '—';
+  const s = String(d).slice(0, 10); const p = s.split('-');
+  return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : s;
+}
+function psaPeriodQS() {
+  return `&from=${encodeURIComponent(state.from)}&to=${encodeURIComponent(state.to)}`;
+}
+// Имя кассы по kassa_c1_ref из справочника (state.kassas загружается loadKassas)
+function psaKassaName(ref) {
+  if (!ref) return '';
+  const list = state.kassas || [];
+  const k = list.find(x => x.ref === ref);
+  return k ? (k.name || k.rawName || '') : '';
+}
+
+async function renderProductSales(force) {
+  const box = $('psaBody');
+  // Полная перерисовка каркаса только при первом заходе или force
+  if (force || !box.querySelector('.psa-wrap')) {
+    box.innerHTML = `
+      <div class="psa-wrap">
+        <!-- Строка поиска -->
+        <div class="card card-pad psa-search">
+          <div class="psa-search-grid">
+            <div class="psa-search-col">
+              <div class="psa-lbl">Поиск по названию товара</div>
+              <div class="psa-input-ic"><span class="psa-ic">🔍</span>
+                <input class="finput" id="psaQ" autocomplete="off" placeholder="Введите название, артикул или часть названия…" value="${esc(PSA.q)}">
+              </div>
+            </div>
+            <div class="psa-or">или</div>
+            <div class="psa-search-col">
+              <div class="psa-lbl">Поиск по уникальному штрихкоду (последние 5 цифр)</div>
+              <div class="psa-input-ic"><span class="psa-ic">🔍</span>
+                <input class="finput" id="psaCode" inputmode="numeric" autocomplete="off" placeholder="Введите последние 5 цифр штрихкода…" value="${esc(PSA.code)}">
+              </div>
+            </div>
+            <button class="btn btn-primary psa-find" id="psaFind">Найти</button>
+          </div>
+          <div id="psaSuggest" class="psa-suggest" style="display:none"></div>
+        </div>
+
+        <!-- Двухколоночная сетка контента -->
+        <div class="psa-grid">
+          <div class="psa-main" id="psaMain">
+            <div class="psa-empty card card-pad">Введите название товара или последние цифры штрихкода и нажмите «Найти».</div>
+          </div>
+          <div class="psa-side" id="psaSide"></div>
+        </div>
+      </div>`;
+
+    // Обработчики поиска
+    const doFind = () => {
+      PSA.q = $('psaQ').value.trim();
+      PSA.code = $('psaCode').value.trim();
+      psaSearch();
+    };
+    $('psaFind').addEventListener('click', doFind);
+    $('psaQ').addEventListener('keydown', e => { if (e.key === 'Enter') doFind(); });
+    $('psaCode').addEventListener('keydown', e => { if (e.key === 'Enter') doFind(); });
+  }
+  // Всегда обновляем правую колонку (топ-5) под текущий период
+  psaRenderSide();
+  // Если товар уже выбран — перезагрузим его данные под новый период
+  if (PSA.nom) psaLoadProduct(PSA.nom);
+}
+
+// ——— Поиск: по штрихкоду (приоритет) или по названию ———
+async function psaSearch() {
+  const sug = $('psaSuggest');
+  if (PSA.code && PSA.code.replace(/\D/g, '').length >= 3) {
+    sug.style.display = 'block';
+    sug.innerHTML = `<div class="loading">⏳ Ищу по штрихкоду…</div>`;
+    try {
+      const d = await posApi(`?action=product-sales&sub=barcode&code=${encodeURIComponent(PSA.code)}`, { method: 'GET' });
+      const items = d.items || [];
+      if (!items.length) { sug.innerHTML = `<div class="psa-sug-empty">По штрихкоду ничего не найдено</div>`; return; }
+      if (items.length === 1) { sug.style.display = 'none'; psaSelect(items[0].nom_c1_ref); return; }
+      sug.innerHTML = items.map(i => `<div class="psa-sug-item" data-nom="${esc(i.nom_c1_ref)}">${esc(i.name || i.nom_c1_ref)}</div>`).join('');
+      sug.querySelectorAll('.psa-sug-item').forEach(el => el.addEventListener('click', () => { sug.style.display = 'none'; psaSelect(el.dataset.nom); }));
+    } catch (e) { sug.innerHTML = errBar('Ошибка поиска: ' + (e.message || e)); }
+    return;
+  }
+  // поиск по названию — используем топ с параметром q
+  if (PSA.q) {
+    sug.style.display = 'block';
+    sug.innerHTML = `<div class="loading">⏳ Ищу товары…</div>`;
+    try {
+      const d = await posApi(`?action=product-sales&sub=top${psaPeriodQS()}&q=${encodeURIComponent(PSA.q)}&limit=20`, { method: 'GET' });
+      const items = d.items || [];
+      if (!items.length) { sug.innerHTML = `<div class="psa-sug-empty">Товары не найдены за период</div>`; return; }
+      if (items.length === 1) { sug.style.display = 'none'; psaSelect(items[0].nom_c1_ref); return; }
+      sug.innerHTML = items.map(i => `<div class="psa-sug-item" data-nom="${esc(i.nom_c1_ref)}">
+        <span>${esc(i.name || i.nom_c1_ref)}</span>
+        <span class="psa-sug-meta">${fmtInt(i.qty)} шт · ${psaMoney0(i.revenue)}</span></div>`).join('');
+      sug.querySelectorAll('.psa-sug-item').forEach(el => el.addEventListener('click', () => { sug.style.display = 'none'; psaSelect(el.dataset.nom); }));
+    } catch (e) { sug.innerHTML = errBar('Ошибка поиска: ' + (e.message || e)); }
+    return;
+  }
+  sug.style.display = 'none';
+}
+
+function psaSelect(nom) {
+  PSA.nom = nom;
+  PSA.linePage = 0;
+  psaLoadProduct(nom);
+}
+
+// ——— Загрузка полной аналитики по товару ———
+async function psaLoadProduct(nom) {
+  const host = $('psaMain');
+  host.innerHTML = `<div class="card card-pad"><div class="loading">⏳ Загружаю аналитику по товару…</div></div>`;
+  try {
+    const shopQS = PSA.shop ? `&shop=${encodeURIComponent(PSA.shop)}` : '';
+    const d = await posApi(`?action=product-sales&sub=all&nom=${encodeURIComponent(nom)}${psaPeriodQS()}${shopQS}`, { method: 'GET' });
+    PSA.card = d.card || null;
+    PSA.size = d.size || [];
+    PSA.lines = d.lines || [];
+    PSA.day = d.day || [];
+    PSA.dayshop = d.dayshop || [];
+    psaRenderMain();
+    psaRenderSide(); // обновим быструю статистику
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось загрузить аналитику: ' + (e.message || e));
+  }
+}
+
+// ——— ЛЕВАЯ КОЛОНКА: карточка + размеры + детализация + график по дням ———
+function psaRenderMain() {
+  const host = $('psaMain');
+  const c = PSA.card || {};
+  const sizeTot = PSA.size.reduce((a, r) => ({ qty: a.qty + (+r.qty||0), rev: a.rev + (+r.revenue||0), ret: a.ret + (+r.returns||0), rec: a.rec + (+r.receipts||0) }), { qty:0, rev:0, ret:0, rec:0 });
+  const avgPrice = sizeTot.qty > 0 ? sizeTot.rev / sizeTot.qty : (+c.avg_price || 0);
+
+  // Пагинация детализации
+  const totalLines = PSA.lines.length;
+  const totPages = Math.max(1, Math.ceil(totalLines / PSA.linePer));
+  if (PSA.linePage >= totPages) PSA.linePage = 0;
+  const lineSlice = PSA.lines.slice(PSA.linePage * PSA.linePer, PSA.linePage * PSA.linePer + PSA.linePer);
+
+  host.innerHTML = `
+    <!-- Информация о товаре -->
+    <div class="card card-pad psa-card">
+      <h3 class="psa-h">Информация о товаре</h3>
+      <div class="psa-prod">
+        <div class="psa-photo">📦</div>
+        <div class="psa-prod-info">
+          <div class="psa-prod-name">${esc(c.name || '—')} ${c.is_active ? '<span class="badge g">Активный</span>' : '<span class="badge gray">Неактивный</span>'}</div>
+          <div class="psa-prod-sub">Артикул: <b>${esc(c.c1_code || '—')}</b> &nbsp;·&nbsp; Категория: <b>${esc(c.category || '—')}</b></div>
+        </div>
+        <div class="psa-prod-stats">
+          <div class="psa-ps"><div class="psa-ps-l">Остаток общий</div><div class="psa-ps-v">${fmtInt(c.total_stock)} шт</div></div>
+          <div class="psa-ps"><div class="psa-ps-l">Средняя цена продажи</div><div class="psa-ps-v">${psaMoney0(c.avg_price)}</div></div>
+          <div class="psa-ps"><div class="psa-ps-l">Первая продажа</div><div class="psa-ps-v">${psaFmtDate(c.first_sale)}</div></div>
+          <div class="psa-ps"><div class="psa-ps-l">Последняя продажа</div><div class="psa-ps-v">${psaFmtDate(c.last_sale)}</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Продажи по размерам -->
+    <div class="card card-pad psa-card">
+      <h3 class="psa-h">Продажи по размерам</h3>
+      <div class="tbl-wrap">
+        <table class="tbl psa-tbl">
+          <thead><tr><th>Размер</th><th class="r">Продано</th><th class="r">Выручка</th><th class="r">Возвраты</th><th class="r">Средняя цена</th><th class="r">Кол-во чеков</th></tr></thead>
+          <tbody>${PSA.size.length ? PSA.size.map(r => `<tr>
+            <td class="strong">${esc(r.size_label || '—')}</td>
+            <td class="r">${fmtInt(r.qty)} шт</td>
+            <td class="r">${psaMoney0(r.revenue)}</td>
+            <td class="r">${fmtInt(r.returns)} шт</td>
+            <td class="r">${psaMoney0(r.avg_price)}</td>
+            <td class="r">${fmtInt(r.receipts)}</td></tr>`).join('') : `<tr><td colspan="6" class="tbl-empty">Нет продаж за период</td></tr>`}</tbody>
+          ${PSA.size.length ? `<tfoot><tr class="psa-total">
+            <td class="strong">Итого</td>
+            <td class="r strong">${fmtInt(sizeTot.qty)} шт</td>
+            <td class="r strong">${psaMoney0(sizeTot.rev)}</td>
+            <td class="r strong">${fmtInt(sizeTot.ret)} шт</td>
+            <td class="r strong">${psaMoney0(avgPrice)}</td>
+            <td class="r strong">${fmtInt(sizeTot.rec)}</td></tr></tfoot>` : ''}
+        </table>
+      </div>
+    </div>
+
+    <!-- Детализация продаж -->
+    <div class="card card-pad psa-card">
+      <h3 class="psa-h">Детализация продаж</h3>
+      <div class="tbl-wrap">
+        <table class="tbl psa-tbl psa-tbl-sm">
+          <thead><tr><th>Дата и время</th><th>Магазин</th><th>Касса</th><th>Продавец</th><th>Чек</th><th>Размер</th><th>Штрихкод</th><th class="r">Цена</th><th class="r">Скидка</th><th class="r">Итог</th><th>Оплата</th></tr></thead>
+          <tbody>${lineSlice.length ? lineSlice.map(r => `<tr>
+            <td>${dushTime(r.doc_date, true)}</td>
+            <td>${esc(r.shop_name || '—')}</td>
+            <td>${esc(psaKassaName(r.kassa_c1_ref) || '—')}</td>
+            <td>${esc(r.seller_name || '—')}</td>
+            <td class="muted">${esc(r.receipt_number || '—')}</td>
+            <td>${esc(r.size_label || '—')}</td>
+            <td class="muted">${esc(r.barcode || '—')}</td>
+            <td class="r">${psaMoney0(r.price)}</td>
+            <td class="r">${(+r.discount_pct||0) > 0 ? fmtInt(r.discount_pct)+'%' : '0%'}</td>
+            <td class="r strong">${psaMoney0(r.line_sum)}</td>
+            <td>${esc(r.pay || '—')}</td></tr>`).join('') : `<tr><td colspan="11" class="tbl-empty">Нет строк за период</td></tr>`}</tbody>
+        </table>
+      </div>
+      ${totalLines > PSA.linePer ? `<div class="pager">
+        <button class="btn" id="psaLPrev" ${PSA.linePage<=0?'disabled':''}>← Назад</button>
+        <span class="pager-info">Стр. ${PSA.linePage+1} из ${totPages} · всего ${fmtInt(totalLines)}</span>
+        <button class="btn" id="psaLNext" ${PSA.linePage+1>=totPages?'disabled':''}>Вперёд →</button>
+      </div>` : ''}
+    </div>
+
+    <!-- Выручка по дням (общая) -->
+    <div class="card card-pad psa-card">
+      <h3 class="psa-h">Выручка по дням (общая)</h3>
+      <div class="chart-box" style="height:260px"><canvas id="psaDayChart"></canvas></div>
+    </div>`;
+
+  // Пагинация детализации
+  if (totalLines > PSA.linePer) {
+    const lp = $('psaLPrev'), ln = $('psaLNext');
+    if (lp) lp.addEventListener('click', () => { if (PSA.linePage>0){ PSA.linePage--; psaRenderMain(); } });
+    if (ln) ln.addEventListener('click', () => { if (PSA.linePage+1<totPages){ PSA.linePage++; psaRenderMain(); } });
+  }
+  psaPaintDayChart();
+}
+
+function psaPaintDayChart() {
+  destroyChart('psaDayChart');
+  const el = $('psaDayChart'); if (!el) return;
+  const days = PSA.day || [];
+  if (!days.length) { const ctx = el.getContext('2d'); ctx.clearRect(0,0,el.width,el.height); return; }
+  state.charts['psaDayChart'] = new Chart(el, {
+    type: 'line',
+    data: { labels: days.map(d => psaFmtDate(d.day).slice(0,5)),
+      datasets: [{ label: 'Выручка', data: days.map(d => Math.round(+d.revenue||0)),
+        borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', fill: true, tension: .35, pointRadius: 3, pointBackgroundColor: '#10b981' }] },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { title: items => psaFmtDate(days[items[0].dataIndex].day), label: c => `${fmtNum(c.parsed.y)} ${CUR}` } } },
+      scales: { y: { beginAtZero: true, ticks: { callback: v => v>=1000 ? (v/1000)+'K' : v } } } },
+  });
+}
+
+// ——— ПРАВАЯ КОЛОНКА: топ-5 + быстрая статистика + график по магазинам ———
+async function psaRenderSide() {
+  const side = $('psaSide'); if (!side) return;
+  // Загрузим топ-5 под период/метрику
+  let top = [];
+  try {
+    const d = await posApi(`?action=product-sales&sub=top${psaPeriodQS()}&metric=${PSA.topMetric}&limit=5`, { method: 'GET' });
+    top = d.items || [];
+    PSA.top = top;
+  } catch (e) { /* топ не критичен */ }
+
+  const c = PSA.card;
+  const sizeTot = PSA.size.reduce((a, r) => ({ qty: a.qty + (+r.qty||0), rev: a.rev + (+r.revenue||0), ret: a.ret + (+r.returns||0), retSum: a.retSum + ((+r.returns||0) * (+r.avg_price||0)) }), { qty:0, rev:0, ret:0, retSum:0 });
+
+  side.innerHTML = `
+    <!-- Наиболее продающиеся товары -->
+    <div class="card card-pad psa-card">
+      <div class="psa-h-row">
+        <h3 class="psa-h">Наиболее продающиеся товары</h3>
+        <select class="fselect psa-mini-sel" id="psaTopMetric">
+          <option value="revenue" ${PSA.topMetric==='revenue'?'selected':''}>По выручке</option>
+          <option value="qty" ${PSA.topMetric==='qty'?'selected':''}>По количеству</option>
+        </select>
+      </div>
+      <table class="tbl psa-tbl psa-top-tbl">
+        <thead><tr><th style="width:26px">#</th><th>Товар</th><th class="r">Продано</th><th class="r">Выручка</th></tr></thead>
+        <tbody>${top.length ? top.map((t,i) => `<tr class="psa-top-row" data-nom="${esc(t.nom_c1_ref)}">
+          <td class="c muted">${i+1}</td>
+          <td><div class="psa-top-name">${esc(t.name || '—')}</div></td>
+          <td class="r">${fmtInt(t.qty)} шт</td>
+          <td class="r strong">${psaMoney0(t.revenue)}</td></tr>`).join('') : `<tr><td colspan="4" class="tbl-empty">Нет данных</td></tr>`}</tbody>
+      </table>
+      <button class="btn psa-full-btn" id="psaFullList">Смотреть полный список →</button>
+    </div>
+
+    <!-- Быстрая статистика по товару -->
+    <div class="card card-pad psa-card">
+      <h3 class="psa-h">Быстрая статистика по товару</h3>
+      ${c ? `<div class="psa-qstat">
+        <div class="psa-qs"><span class="psa-qs-ic">🛒</span><span class="psa-qs-l">Продано за период</span><span class="psa-qs-v">${fmtInt(sizeTot.qty || c.qty)} шт</span></div>
+        <div class="psa-qs"><span class="psa-qs-ic">📈</span><span class="psa-qs-l">Выручка за период</span><span class="psa-qs-v">${psaMoney0(sizeTot.rev || c.revenue)}</span></div>
+        <div class="psa-qs"><span class="psa-qs-ic">🏷️</span><span class="psa-qs-l">Средняя цена продажи</span><span class="psa-qs-v">${psaMoney0(c.avg_price)}</span></div>
+        <div class="psa-qs"><span class="psa-qs-ic">↩️</span><span class="psa-qs-l">Возвраты</span><span class="psa-qs-v">${fmtInt(sizeTot.ret)} шт${sizeTot.retSum>0?` (${psaMoney0(sizeTot.retSum)})`:''}</span></div>
+        <div class="psa-qs"><span class="psa-qs-ic">🧾</span><span class="psa-qs-l">Чеков с этим товаром</span><span class="psa-qs-v">${fmtInt(c.receipts)}</span></div>
+        <div class="psa-qs"><span class="psa-qs-ic">📦</span><span class="psa-qs-l">Товаров в чеке (среднее)</span><span class="psa-qs-v">${fmtNum(c.avg_items_per_receipt)} шт</span></div>
+      </div>` : `<div class="psa-side-empty">Выберите товар, чтобы увидеть статистику.</div>`}
+    </div>
+
+    <!-- Выручка по дням по магазинам -->
+    <div class="card card-pad psa-card">
+      <div class="psa-h-row"><h3 class="psa-h">Выручка по дням по магазинам</h3></div>
+      <div id="psaShopLegend" class="legend psa-legend"></div>
+      <div class="chart-box" style="height:240px"><canvas id="psaShopChart"></canvas></div>
+    </div>`;
+
+  $('psaTopMetric').addEventListener('change', () => { PSA.topMetric = $('psaTopMetric').value; psaRenderSide(); });
+  side.querySelectorAll('.psa-top-row').forEach(tr => tr.addEventListener('click', () => psaSelect(tr.dataset.nom)));
+  $('psaFullList').addEventListener('click', () => { PSA.q = ''; PSA.code = ''; if($('psaQ'))$('psaQ').value=''; if($('psaCode'))$('psaCode').value=''; psaShowFullTop(); });
+  psaPaintShopChart();
+}
+
+function psaPaintShopChart() {
+  destroyChart('psaShopChart');
+  const el = $('psaShopChart'); if (!el) return;
+  const rows = PSA.dayshop || [];
+  const legend = $('psaShopLegend');
+  if (!rows.length) { if(legend) legend.innerHTML=''; const ctx = el.getContext('2d'); ctx.clearRect(0,0,el.width,el.height); return; }
+  const days = [...new Set(rows.map(r => r.day))].sort();
+  const shops = [...new Set(rows.map(r => r.shop_name))];
+  const idx = {}; rows.forEach(r => { idx[r.day+'|'+r.shop_name] = +r.revenue||0; });
+  const datasets = shops.map((sh, i) => ({
+    label: sh, data: days.map(d => Math.round(idx[d+'|'+sh] || 0)),
+    backgroundColor: PSA_SHOP_COLORS[i % PSA_SHOP_COLORS.length], borderRadius: 3, barPercentage: .9, categoryPercentage: .8,
+  }));
+  if (legend) legend.innerHTML = shops.map((sh,i) => `<span class="legend-item"><span class="lg-dot" style="background:${PSA_SHOP_COLORS[i % PSA_SHOP_COLORS.length]}"></span>${esc(sh)}</span>`).join('');
+  state.charts['psaShopChart'] = new Chart(el, {
+    type: 'bar',
+    data: { labels: days.map(d => psaFmtDate(d).slice(0,5)), datasets },
+    options: { responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { mode: 'index', callbacks: { title: items => psaFmtDate(days[items[0].dataIndex]), label: c => `${c.dataset.label}: ${fmtNum(c.parsed.y)} ${CUR}` } } },
+      scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { callback: v => v>=1000 ? (v/1000)+'K' : v } } } },
+  });
+}
+
+// Полный список топ-товаров (по клику «Смотреть полный список»)
+async function psaShowFullTop() {
+  const host = $('psaMain');
+  host.innerHTML = `<div class="card card-pad"><div class="loading">⏳ Загружаю полный список…</div></div>`;
+  try {
+    const d = await posApi(`?action=product-sales&sub=top${psaPeriodQS()}&metric=${PSA.topMetric}&limit=200`, { method: 'GET' });
+    const items = d.items || [];
+    host.innerHTML = `
+      <div class="card card-pad psa-card">
+        <div class="psa-h-row">
+          <h3 class="psa-h">Полный список товаров — ${fmtInt(items.length)}</h3>
+          <select class="fselect psa-mini-sel" id="psaFullMetric">
+            <option value="revenue" ${PSA.topMetric==='revenue'?'selected':''}>По выручке</option>
+            <option value="qty" ${PSA.topMetric==='qty'?'selected':''}>По количеству</option>
+          </select>
+        </div>
+        <div class="tbl-wrap">
+          <table class="tbl psa-tbl">
+            <thead><tr><th style="width:34px">#</th><th>Товар</th><th>Артикул</th><th>Категория</th><th class="r">Продано</th><th class="r">Выручка</th><th class="r">Чеков</th></tr></thead>
+            <tbody>${items.length ? items.map((t,i) => `<tr class="psa-top-row" data-nom="${esc(t.nom_c1_ref)}">
+              <td class="c muted">${i+1}</td>
+              <td class="strong">${esc(t.name || '—')}</td>
+              <td class="muted">${esc(t.c1_code || '—')}</td>
+              <td>${esc(t.category || '—')}</td>
+              <td class="r">${fmtInt(t.qty)} шт</td>
+              <td class="r strong">${psaMoney0(t.revenue)}</td>
+              <td class="r">${fmtInt(t.receipts)}</td></tr>`).join('') : `<tr><td colspan="7" class="tbl-empty">Нет данных за период</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>`;
+    $('psaFullMetric').addEventListener('change', () => { PSA.topMetric = $('psaFullMetric').value; psaShowFullTop(); psaRenderSide(); });
+    host.querySelectorAll('.psa-top-row').forEach(tr => tr.addEventListener('click', () => psaSelect(tr.dataset.nom)));
+  } catch (e) {
+    host.innerHTML = errBar('Не удалось загрузить список: ' + (e.message || e));
   }
 }
 
@@ -1760,63 +3038,455 @@ async function renderMonitoring(force) {
 // ═════════════════════════════════════════════════════
 //  РАЗДЕЛ: ОТЧЁТ ПО СНЯТИЮ ДС (наличные к инкассации)
 // ═════════════════════════════════════════════════════
+let cashLastReport = null;
+// бейдж платёжной системы (Alif / DC) рядом с названием типа оплаты
+function payBadge(key) {
+  if (key === 'alifqr' || key === 'alifwlt') return ' <span class="pay-badge pb-alif">alif</span>';
+  if (key === 'dcqr' || key === 'dcwlt') return ' <span class="pay-badge pb-dc">dc</span>';
+  return '';
+}
+// галочка/крестик сверки
+function crCheck(ok) {
+  return ok
+    ? '<span class="cr-ok" title="Совпадает">✓</span>'
+    : '<span class="cr-bad" title="Расхождение">✗</span>';
+}
 async function renderCashReport(force) {
   const box = $('cashBody');
-  box.innerHTML = `<div class="loading">⏳ Считаю наличные…</div>`;
+  box.innerHTML = `<div class="loading">⏳ Формирую отчёт по продажам…</div>`;
   try {
-    const d = await cachedApi(`cash:${state.from}:${state.to}:${state.kassa}`, `?action=cashreport&from=${state.from}&to=${state.to}${kassaQS()}`);
-    const k = d.kpi || {};
+    const d = await cachedApi(`salesrep:${state.from}:${state.to}`, `?action=sales-report&from=${state.from}&to=${state.to}`);
+    const rep = d.report || {};
+    cashLastReport = rep;
+    const g = rep.grand || {};
+    const shops = rep.shops || [];
+    // Динамические колонки типов оплат из backend (устойчиво к изменению набора)
+    const buckets = (rep.buckets && rep.buckets.length)
+      ? rep.buckets
+      : [{ key:'cash',label:'Наличные' },{ key:'alifqr',label:'Alif QR' },{ key:'alifwlt',label:'Alif кошелёк' },{ key:'dcwlt',label:'DC кошелёк' },{ key:'dcqr',label:'DC QR' }];
     const per = state.from === state.to ? state.from : state.from + ' — ' + state.to;
-    const rows = d.rows || [];
-    const typeItems = (d.byType || []).map(t => ({ label: t.label + (t.cash ? ' 💵' : ''), value: t.amount }));
+
+    // ── Иерархическая таблица как в образце:
+    //  № | Тип оплаты | Продажа | Возврат | Итого с учётом возврата | Сумма по кассе | Сверка
+    //  Группа = магазин (жирная строка), под-строки = типы оплаты.
+    const PB = payBadge; // бейдж Alif/DC рядом с лейблом
+    let rowsHtml = '';
+    shops.forEach((s, si) => {
+      const num = si + 1;
+      // строка-заголовок магазина
+      rowsHtml += `<tr class="cr-shop">
+        <td class="cr-num">${num}</td>
+        <td><b>${esc(s.shop || '—')}</b></td>
+        <td class="r strong">${money(s.saleTotal || 0)}</td>
+        <td class="r ${(s.retTotal||0)>0?'cr-ret':'muted'}">${money(s.retTotal || 0)}</td>
+        <td class="r strong">${money(s.total || 0)}</td>
+        <td class="r strong">${money(s.total || 0)}</td>
+        <td class="c">${crCheck(true)}</td>
+      </tr>`;
+      // под-строки по типам оплаты (только ненулевые по продаже или возврату)
+      buckets.forEach((b, bi) => {
+        const sale = (s.sale && s.sale[b.key]) || 0;
+        const ret = (s.ret && s.ret[b.key]) || 0;
+        if (Math.abs(sale) < 0.005 && Math.abs(ret) < 0.005) return;
+        const net = sale - ret;
+        rowsHtml += `<tr class="cr-sub">
+          <td class="cr-num muted">${num}.${bi + 1}</td>
+          <td class="cr-type">${esc(b.label)}${PB(b.key)}</td>
+          <td class="r">${money(sale)}</td>
+          <td class="r ${ret>0?'cr-ret':'muted'}">${money(ret)}</td>
+          <td class="r strong">${money(net)}</td>
+          <td class="c"><input type="text" class="cr-cash" value="${fmtNum(net)}" data-net="${net}"></td>
+          <td class="c cr-vcell">${crCheck(true)}</td>
+        </tr>`;
+      });
+      // Прочее (если есть)
+      const oSale = (s.sale && s.sale.other) || 0, oRet = (s.ret && s.ret.other) || 0;
+      if (Math.abs(oSale) >= 0.005 || Math.abs(oRet) >= 0.005) {
+        const net = oSale - oRet;
+        rowsHtml += `<tr class="cr-sub">
+          <td class="cr-num muted">${num}.${buckets.length + 1}</td>
+          <td class="cr-type">Прочее</td>
+          <td class="r">${money(oSale)}</td>
+          <td class="r ${oRet>0?'cr-ret':'muted'}">${money(oRet)}</td>
+          <td class="r strong">${money(net)}</td>
+          <td class="c"><input type="text" class="cr-cash" value="${fmtNum(net)}" data-net="${net}"></td>
+          <td class="c cr-vcell">${crCheck(true)}</td>
+        </tr>`;
+      }
+    });
+    // итоговая строка
+    const grandRow = `<tr class="cr-grand">
+      <td></td>
+      <td><b>Итого по всем магазинам</b></td>
+      <td class="r strong">${money(g.saleTotal || 0)}</td>
+      <td class="r ${(g.retTotal||0)>0?'cr-ret':'muted'}">${money(g.retTotal || 0)}</td>
+      <td class="r strong">${money(g.total || 0)}</td>
+      <td class="r strong">${money(g.total || 0)}</td>
+      <td class="c">${crCheck(true)}</td>
+    </tr>`;
 
     box.innerHTML = `
-      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
-        ${kpi('💵','Наличные к снятию', money(k.totalCash||0),'g', 'за '+per)}
-        ${kpi('💳','Безналичные', money(k.totalNonCash||0),'blue','карты/QR/кошельки')}
-        ${kpi('∑','Всего оплат', money(k.totalAll||0),'gray','')}
-        ${kpi('🔒','Закрыто смен', fmtInt(k.shifts||0),'gray', fmtInt(k.receipts||0)+' чеков')}
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr))">
+        ${kpi('💰','Итого продаж', money(g.total || 0), 'g', fmtInt(g.receipts || 0) + ' чеков · ' + per)}
+        ${kpi('📈','Продажа', money(g.saleTotal || 0), 'gray', 'без учёта возвратов')}
+        ${kpi('↩️','Возврат', money(g.retTotal || 0), (g.retTotal?'r':'gray'), 'за период')}
+        ${kpi('💵','Наличные', money(g.cash || 0), 'g', 'с учётом возврата')}
       </div>
 
-      <div class="cards-2">
-        <div class="card card-pad">
-          <div class="card-h-row"><h3>Наличные по кассам</h3></div>
-          ${(d.byKassa||[]).length ? `<div class="tbl-wrap"><table class="tbl">
-            <thead><tr><th>Касса</th><th class="r">Наличные</th><th class="r">Безнал</th><th class="r">Смен</th></tr></thead>
-            <tbody>${d.byKassa.map(x=>`<tr>
-              <td><b>${esc(x.kassa)}</b></td>
-              <td class="r strong" style="color:var(--g2)">${money(x.cash)}</td>
-              <td class="r">${money(x.noncash)}</td>
-              <td class="r muted">${fmtInt(x.shifts)}</td>
-            </tr>`).join('')}</tbody>
-          </table></div>` : `<div class="tbl-empty">Нет закрытых смен за период</div>`}
+      <div class="card card-pad cr-doc">
+        <!-- шапка-документ как в печатном PDF -->
+        <div class="cr-head">
+          <div class="cr-brand">
+            <img src="icon-192.png" alt="OrtoSalon" class="cr-logo">
+            <div>
+              <div class="cr-brand-name">OrtoSalon</div>
+              <div class="cr-brand-sub">Ортопедический салон</div>
+            </div>
+          </div>
+          <div class="cr-meta">
+            <div class="cr-doc-title">Отчёт о снятии денежных средств</div>
+            <div class="cr-doc-meta">Дата формирования: ${esc(nowDushLabel())}</div>
+            <div class="cr-doc-meta">Отчётный период: ${esc(per)}</div>
+          </div>
         </div>
-        <div class="card card-pad">
-          <div class="card-h-row"><h3>По типам оплат</h3></div>
-          ${typeItems.length ? hbars(typeItems, { money: true }) : `<div class="tbl-empty">Нет данных</div>`}
-        </div>
-      </div>
+        <div class="cr-hr"></div>
 
-      <div class="card card-pad">
-        <div class="card-h-row"><h3>Закрытые смены</h3><span class="muted">${fmtInt(rows.length)}</span></div>
-        ${rows.length ? `<div class="tbl-wrap"><table class="tbl">
-          <thead><tr><th>Касса / Магазин</th><th>Кассир</th><th>Закрыта</th><th class="r">Чеков</th><th class="r">Наличные</th><th class="r">Безнал</th><th class="r">Итого</th></tr></thead>
-          <tbody>${rows.map(r=>`<tr>
-            <td><b>${esc(r.kassa||'—')}</b><div class="muted" style="font-size:12px">${esc(r.shop||'')}</div></td>
-            <td>${esc(r.seller||'—')}</td>
-            <td>${r.closedAt?dushTime(r.closedAt,true):'—'}</td>
-            <td class="r">${fmtInt(r.receipts||0)}</td>
-            <td class="r strong" style="color:var(--g2)">${money(r.cash||0)}</td>
-            <td class="r">${money(r.noncash||0)}</td>
-            <td class="r">${money(r.total||0)}</td>
-          </tr>`).join('')}</tbody>
-        </table></div>` : `<div class="tbl-empty">Нет закрытых смен</div>`}
+        <div class="card-h-row">
+          <h3 style="color:#108589">Движения денежных средств по типам оплаты</h3>
+          <div style="display:flex;align-items:center;gap:10px">
+            ${shops.length ? `<button class="btn btn-sm btn-ghost" id="cashExportPdf">📄 PDF</button>
+            <button class="btn btn-sm btn-primary" id="cashExportXlsx">📗 Excel</button>` : ''}
+          </div>
+        </div>
+        ${shops.length ? `<div class="tbl-wrap"><table class="tbl cr-tbl">
+          <thead><tr>
+            <th class="cr-num">№</th><th>Тип оплаты</th>
+            <th class="r">Продажа, сом.</th><th class="r">Возврат, сом.</th>
+            <th class="r">Итого с учётом возврата, сом.</th>
+            <th class="c">Сумма по кассе / выписке, сом.</th>
+            <th class="c">Сверка</th>
+          </tr></thead>
+          <tbody>${rowsHtml}${grandRow}</tbody>
+        </table></div>
+        <!-- подписи как в печатном варианте -->
+        <div class="cr-sign">
+          <div class="cr-sign-item"><span>Ответственный:</span><i></i></div>
+          <div class="cr-sign-item"><span>Подпись:</span><i></i></div>
+          <div class="cr-sign-item"><span>Дата:</span><i></i></div>
+        </div>
+        <div class="cr-foot">Спасибо за работу! · OrtoSalon — забота о ваших ногах каждый день</div>` : `<div class="tbl-empty">Нет продаж за период</div>`}
       </div>
     `;
+    // живая сверка: при редактировании «Суммы по кассе» — пересчёт галочки
+    box.querySelectorAll('.cr-cash').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const net = Number(inp.dataset.net) || 0;
+        const val = parseFloat(String(inp.value).replace(/\s/g, '').replace(',', '.')) || 0;
+        const ok = Math.abs(val - net) < 0.5;
+        const cell = inp.closest('tr').querySelector('.cr-vcell');
+        if (cell) cell.innerHTML = crCheck(ok);
+        inp.style.borderColor = ok ? '' : 'var(--r,#c0392b)';
+      });
+    });
+    // бинды экспорта (кнопки появляются только при наличии данных)
+    const bp = $('cashExportPdf'); if (bp) bp.addEventListener('click', () => cashExportPdf(rep, buckets, per));
+    const bx = $('cashExportXlsx'); if (bx) bx.addEventListener('click', () => cashExportXlsx(rep, buckets, per));
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить отчёт: ' + (e.message || e));
   }
+}
+
+// числовой формат без HTML (для PDF/Excel)
+function cashNumTxt(n) { return fmtNum(n); }
+
+// ── Экспорт Отчёта по снятию ДС → PDF (книжный, по образцу) ──
+// Структура как в окне: иерархия магазин→типы оплаты, колонки
+// № / Тип оплаты / Продажа / Возврат / Итого / Сумма по кассе / Сверка.
+function cashExportPdf(rep, buckets, per) {
+  try {
+    if (!rep || !(rep.shops || []).length) { alert('Сначала сформируйте отчёт'); return; }
+    const g = rep.grand || {};
+    const shops = rep.shops || [];
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const FONT = (doc.getFontList && doc.getFontList().DejaVuSans) ? 'DejaVuSans' : 'helvetica';
+    const W = 210, M = 12, PH = 297;
+    const N = (v) => cashNumTxt(v || 0);          // число без HTML
+    const badge = (k) => (k === 'alifqr' || k === 'alifwlt') ? ' (alif)' : ((k === 'dcqr' || k === 'dcwlt') ? ' (dc)' : '');
+
+    // ── Шапка: логотип-стопа (вектор) + название слева, реквизиты справа ──
+    let y = 16;
+    // простой знак стопы из кругов (без внешних картинок)
+    doc.setFillColor(16, 133, 137);
+    doc.circle(M + 3, y - 1, 2.6, 'F');
+    [[7.5, -4.5, 1.0], [9.2, -2.6, 1.1], [9.2, -0.4, 1.1], [8.0, 1.5, 1.0]].forEach(([dx, dy, r]) =>
+      doc.circle(M + dx, y + dy, r, 'F'));
+    doc.setFont(FONT, 'bold'); doc.setFontSize(16); doc.setTextColor(16, 133, 137);
+    doc.text('OrtoSalon', M + 13, y);
+    doc.setFont(FONT, 'normal'); doc.setFontSize(8); doc.setTextColor(120, 120, 120);
+    doc.text('Ортопедический салон', M + 13, y + 4.5);
+    // справа
+    doc.setFont(FONT, 'bold'); doc.setFontSize(14); doc.setTextColor(40, 40, 40);
+    doc.text('Отчёт о снятии денежных средств', W - M, y - 1, { align: 'right' });
+    doc.setFont(FONT, 'normal'); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+    doc.text('Дата формирования: ' + nowDushLabel(), W - M, y + 4, { align: 'right' });
+    doc.text('Отчётный период: ' + per, W - M, y + 8, { align: 'right' });
+    y += 15;
+    doc.setDrawColor(16, 133, 137); doc.setLineWidth(0.5);
+    doc.line(M, y, W - M, y);
+    y += 8;
+
+    doc.setFont(FONT, 'bold'); doc.setFontSize(12); doc.setTextColor(16, 133, 137);
+    doc.text('Движения денежных средств по типам оплаты', M, y);
+    y += 3;
+
+    // ── Строим body с флагами типа строки (для стилей) ──
+    const head = [['№', 'Тип оплаты', 'Продажа,\nсом.', 'Возврат,\nсом.', 'Итого с учётом\nвозврата, сом.', 'Сумма по кассе /\nвыписке, сом.', 'Сверка']];
+    const body = [];
+    const shopRowIdx = [];              // индексы строк-магазинов
+    // в печатном варианте колонка «Сумма по кассе» ПУСТАЯ (вписывают вручную), и галочка не ставится
+    shops.forEach((s, si) => {
+      const num = si + 1;
+      shopRowIdx.push(body.length);
+      body.push([String(num), s.shop || '—', N(s.saleTotal), N(s.retTotal), N(s.total), '', '']);
+      buckets.forEach((b, bi) => {
+        const sale = (s.sale && s.sale[b.key]) || 0;
+        const ret = (s.ret && s.ret[b.key]) || 0;
+        if (Math.abs(sale) < 0.005 && Math.abs(ret) < 0.005) return;
+        body.push([num + '.' + (bi + 1), b.label + badge(b.key), N(sale), N(ret), N(sale - ret), '', '']);
+      });
+      const oSale = (s.sale && s.sale.other) || 0, oRet = (s.ret && s.ret.other) || 0;
+      if (Math.abs(oSale) >= 0.005 || Math.abs(oRet) >= 0.005)
+        body.push([num + '.' + (buckets.length + 1), 'Прочее', N(oSale), N(oRet), N(oSale - oRet), '', '']);
+    });
+    const foot = [['', 'Итого по всем магазинам', N(g.saleTotal), N(g.retTotal), N(g.total), '', '']];
+
+    doc.autoTable({
+      startY: y + 3,
+      head, body, foot,
+      styles: { font: FONT, fontSize: 8, cellPadding: 2, halign: 'right', valign: 'middle', lineColor: [232, 236, 236], lineWidth: 0.1 },
+      headStyles: { font: FONT, fontStyle: 'bold', fillColor: [16, 133, 137], textColor: 255, halign: 'center', fontSize: 7.5, valign: 'middle' },
+      footStyles: { font: FONT, fontStyle: 'bold', fillColor: [209, 250, 229], textColor: [4, 120, 87], halign: 'right', fontSize: 8.5 },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 12 },
+        1: { halign: 'left', cellWidth: 46 },
+        2: { cellWidth: 24 }, 3: { cellWidth: 22 }, 4: { cellWidth: 28 }, 5: { cellWidth: 28 },
+        6: { halign: 'center' },
+      },
+      margin: { left: M, right: M },
+      didParseCell: (data) => {
+        // строки-магазины — зелёный фон + жирный
+        if (data.section === 'body' && shopRowIdx.includes(data.row.index)) {
+          data.cell.styles.fillColor = [236, 253, 245];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.textColor = [4, 120, 87];
+        }
+        // колонка «Сумма по кассе» — пустая рамка (вписывают вручную)
+        if (data.column.index === 5 && data.section !== 'head') {
+          data.cell.styles.lineWidth = 0.3; data.cell.styles.lineColor = [180, 190, 190];
+        }
+      },
+      // в печатном варианте галочку НЕ ставим: колонка «Сверка» заполняется вручную
+    });
+    y = (doc.lastAutoTable ? doc.lastAutoTable.finalY : y) + 16;
+
+    // ── Подписи ──
+    if (y > PH - 34) { doc.addPage(); y = 24; }
+    doc.setFont(FONT, 'normal'); doc.setFontSize(9.5); doc.setTextColor(60, 60, 60);
+    doc.setDrawColor(150, 150, 150); doc.setLineWidth(0.3);
+    const segW = (W - 2 * M - 20) / 3;
+    doc.text('Ответственный:', M, y);
+    doc.line(M + 26, y, M + segW, y);
+    doc.text('Подпись:', M + segW + 10, y);
+    doc.line(M + segW + 27, y, M + 2 * segW + 10, y);
+    doc.text('Дата:', M + 2 * segW + 20, y);
+    doc.line(M + 2 * segW + 32, y, W - M, y);
+    y += 12;
+
+    // ── Футер ──
+    doc.setFont(FONT, 'bold'); doc.setFontSize(9); doc.setTextColor(16, 133, 137);
+    doc.text('Спасибо за работу!', W / 2, PH - 14, { align: 'center' });
+    doc.setFont(FONT, 'normal'); doc.setFontSize(7.5); doc.setTextColor(150, 160, 160);
+    doc.text('OrtoSalon — забота о ваших ногах каждый день · данные из 1С (Чеки ККМ)', W / 2, PH - 9, { align: 'center' });
+
+    const fn = per.replace(/[^0-9]+/g, '_').replace(/^_|_$/g, '') || 'period';
+    doc.save('otchet_snyatie_DS_' + fn + '.pdf');
+  } catch (e) {
+    alert('Не удалось сформировать PDF: ' + (e.message || e));
+  }
+}
+
+// ── Экспорт Отчёта по снятию ДС → Excel (SheetJS) ──
+function cashExportXlsx(rep, buckets, per) {
+  try {
+    if (!rep || !(rep.shops || []).length) { alert('Сначала сформируйте отчёт'); return; }
+    if (!window.XLSX) { alert('Библиотека Excel не загрузилась — обновите страницу (Ctrl+F5)'); return; }
+    const g = rep.grand || {};
+    const shops = rep.shops || [];
+    const num = v => Number(v) || 0;
+    const badge = (k) => (k === 'alifqr' || k === 'alifwlt') ? ' (alif)' : ((k === 'dcqr' || k === 'dcwlt') ? ' (dc)' : '');
+    // иерархическая структура по образцу
+    const head = ['№', 'Тип оплаты', 'Продажа, сом.', 'Возврат, сом.', 'Итого с учётом возврата, сом.', 'Сумма по кассе / выписке, сом.', 'Сверка'];
+    const aoa = [
+      ['Отчёт о снятии денежных средств · OrtoSalon'],
+      ['Отчётный период: ' + per + '   ·   Дата формирования: ' + nowDushLabel()],
+      [],
+      head,
+    ];
+    shops.forEach((s, si) => {
+      const n = si + 1;
+      aoa.push([n, s.shop || '—', num(s.saleTotal), num(s.retTotal), num(s.total), num(s.total), '✓']);
+      buckets.forEach((b, bi) => {
+        const sale = num(s.sale && s.sale[b.key]), ret = num(s.ret && s.ret[b.key]);
+        if (Math.abs(sale) < 0.005 && Math.abs(ret) < 0.005) return;
+        aoa.push([n + '.' + (bi + 1), b.label + badge(b.key), sale, ret, sale - ret, sale - ret, '✓']);
+      });
+      const oS = num(s.sale && s.sale.other), oR = num(s.ret && s.ret.other);
+      if (Math.abs(oS) >= 0.005 || Math.abs(oR) >= 0.005)
+        aoa.push([n + '.' + (buckets.length + 1), 'Прочее', oS, oR, oS - oR, oS - oR, '✓']);
+    });
+    aoa.push(['', 'Итого по всем магазинам', num(g.saleTotal), num(g.retTotal), num(g.total), num(g.total), '✓']);
+
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 6 }, { wch: 26 }, { wch: 15 }, { wch: 14 }, { wch: 20 }, { wch: 20 }, { wch: 9 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Снятие ДС');
+    const fn = per.replace(/[^0-9]+/g, '_').replace(/^_|_$/g, '') || 'period';
+    XLSX.writeFile(wb, 'Отчёт_снятие_ДС_' + fn + '.xlsx');
+  } catch (e) {
+    alert('Не удалось сформировать Excel: ' + (e.message || e));
+  }
+}
+
+// ═════════════════════════════════════════════════
+//  РАЗДЕЛ: ОТЧЁТЫ ПО ПРОДАЖАМ ЗА ДЕНЬ (независимый от 1С)
+//  Список суточных отчётов закрытых смен; клик — все чеки дня + способы оплаты.
+// ══════════════════════════════════════════════════
+const srReportCache = {};  // id -> детали отчёта (чеки)
+
+async function renderShiftReports(force) {
+  const box = $('srBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю отчёты…</div>`;
+  try {
+    const d = await posApi(`?action=shift-reports&from=${state.from}&to=${state.to}${kassaQS()}`, { method: 'GET' });
+    const reports = d.reports || [];
+    const t = d.totals || {};
+    const per = state.from === state.to ? state.from : state.from + ' — ' + state.to;
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+        ${kpi('💵','Наличные', money(t.cash||0),'g','за '+per)}
+        ${kpi('💳','Безналичные', money(t.noncash||0),'blue','карты/QR/кошельки')}
+        ${kpi('∑','Выручка', money(t.sales||0),'gray', (t.returns? 'возвраты '+money(t.returns) : ''))}
+        ${kpi('📊','Отчётов смен', fmtInt(reports.length),'gray', fmtInt(t.receipts||0)+' чеков')}
+      </div>
+
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Отчёты по закрытым сменам</h3><span class="muted">${fmtInt(reports.length)}</span></div>
+        ${reports.length ? `<div class="tbl-wrap"><table class="tbl sr-tbl">
+          <thead><tr><th style="width:26px"></th><th>Дата</th><th>Касса / Магазин</th><th>Кассир</th><th>Закрыта</th><th class="r">Чеков</th><th class="r">Наличные</th><th class="r">Безнал</th><th class="r">Итого</th></tr></thead>
+          <tbody>${reports.map((r,i)=>srRowHTML(r,i)).join('')}</tbody>
+        </table></div>` : `<div class="tbl-empty">Нет отчётов за период (отчёт создаётся при закрытии смены)</div>`}
+      </div>
+    `;
+    // клик по строке — раскрытие деталей
+    box.querySelectorAll('tr.sr-row').forEach(tr => {
+      tr.addEventListener('click', () => toggleShiftReport(tr));
+    });
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить отчёты: ' + (e.message || e));
+  }
+}
+
+function srRowHTML(r, i) {
+  return `<tr class="sr-row" data-idx="${i}" data-id="${esc(r.id)}">
+      <td class="c"><span class="caret">›</span></td>
+      <td><b>${esc(r.date||'')}</b></td>
+      <td><b>${esc(r.kassa||'—')}</b><div class="muted" style="font-size:12px">${esc(r.shop||'')}</div></td>
+      <td>${esc(r.seller||'—')}</td>
+      <td>${r.closedAt?dushTime(r.closedAt,true):'—'}</td>
+      <td class="r">${fmtInt(r.receiptsCount||0)}</td>
+      <td class="r strong" style="color:var(--g2)">${money(r.cashTotal||0)}</td>
+      <td class="r">${money(r.noncashTotal||0)}</td>
+      <td class="r strong">${money(r.totalSales||0)}</td>
+    </tr>
+    <tr class="sr-det" id="srDet-${i}" style="display:none"><td colspan="9"><div id="srDetBody-${i}"></div></td></tr>`;
+}
+
+async function toggleShiftReport(tr) {
+  const idx = tr.dataset.idx;
+  const id = tr.dataset.id;
+  const detRow = $('srDet-' + idx);
+  const body = $('srDetBody-' + idx);
+  const caret = tr.querySelector('.caret');
+  if (!detRow || !body) return;
+  if (detRow.style.display !== 'none') {
+    detRow.style.display = 'none';
+    tr.classList.remove('open');
+    if (caret) caret.textContent = '›';
+    return;
+  }
+  detRow.style.display = '';
+  tr.classList.add('open');
+  if (caret) caret.textContent = '‹';
+  if (srReportCache[id]) { body.innerHTML = renderShiftReportDetail(srReportCache[id]); return; }
+  body.innerHTML = `<div class="rc-det-loading">⏳ Загружаю чеки смены…</div>`;
+  try {
+    const d = await posApi(`?action=shift-report&id=${encodeURIComponent(id)}`, { method: 'GET' });
+    srReportCache[id] = d.report || {};
+    if (detRow.style.display !== 'none') body.innerHTML = renderShiftReportDetail(srReportCache[id]);
+  } catch (e) {
+    body.innerHTML = `<div class="rc-det-err">⚠ Не удалось загрузить: ${esc(e.message || e)}</div>`;
+  }
+}
+
+function srPayLabel(rc) {
+  const cash = Number(rc.cash_total)||0, nc = Number(rc.noncash_total)||0;
+  if (cash>0 && nc>0) return payModeBadge('mixed');
+  if (cash>0) return payModeBadge('cash');
+  if (nc>0) return payModeBadge('card');
+  return payModeBadge(null);
+}
+
+function renderShiftReportDetail(rep) {
+  if (!rep || !rep.id) return `<div class="rc-det-empty">Отчёт не найден</div>`;
+  const recs = Array.isArray(rep.receipts) ? rep.receipts : [];
+  const bd = rep.paymentsBreakdown || {};
+  const bdKeys = Object.keys(bd);
+  const rows = recs.map((rc, i) => {
+    const paysTxt = (Array.isArray(rc.payments) && rc.payments.length)
+      ? rc.payments.map(p => `${esc(p.label||'Прочее')}: ${fmtNum(Number(p.amount)||0)}`).join(', ')
+      : '—';
+    return `<tr>
+      <td class="c muted">${i+1}</td>
+      <td class="strong">№${esc(rc.number||'')}</td>
+      <td>${rc.sold_at?dushTime(rc.sold_at,true):'—'}</td>
+      <td>${esc(rc.seller||'—')}</td>
+      <td class="c">${fmtInt(rc.items_count||0)}</td>
+      <td>${srPayLabel(rc)}</td>
+      <td class="muted" style="font-size:12px">${esc(paysTxt)}</td>
+      <td class="r strong tnum">${fmtNum(Number(rc.total)||0)} ${CUR}</td>
+    </tr>`;
+  }).join('');
+  const bdHTML = bdKeys.length
+    ? bdKeys.map(k => `<span class="sr-bd-chip">${esc(k)}: <b>${fmtNum(Number(bd[k])||0)} ${CUR}</b></span>`).join('')
+    : '<span class="muted">—</span>';
+  return `
+    <div class="sr-det-summary">
+      <div class="sr-sum-item"><span class="muted">💵 Наличные</span><b style="color:var(--g2)">${money(rep.cashTotal||0)}</b></div>
+      <div class="sr-sum-item"><span class="muted">💳 Безналичные</span><b>${money(rep.noncashTotal||0)}</b></div>
+      <div class="sr-sum-item"><span class="muted">∑ Выручка</span><b>${money(rep.totalSales||0)}</b></div>
+      ${rep.totalReturns? `<div class="sr-sum-item"><span class="muted">↩ Возвраты</span><b style="color:var(--r,#c0392b)">${money(rep.totalReturns)}</b></div>`:''}
+    </div>
+    <div class="sr-bd-row">${bdHTML}</div>
+    <div class="rc-det-head">🧾 Чеки дня — ${fmtInt(recs.length)}</div>
+    ${recs.length ? `<div class="tbl-wrap"><table class="tbl rc-items">
+      <thead><tr><th style="width:30px">#</th><th>№ чека</th><th>Время</th><th>Кассир</th><th class="c">Позиций</th><th>Вид оплаты</th><th>Детали оплаты</th><th class="r">Сумма</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr class="tbl-total"><td colspan="7" class="r">Итого</td><td class="r tnum">${money(rep.totalSales||0)}</td></tr></tfoot>
+    </table></div>` : `<div class="tbl-empty">В этой смене нет чеков</div>`}
+  `;
 }
 
 // кеш состава чеков по ref (чтобы не дёргать 1С при повторном раскрытии)
@@ -1843,48 +3513,382 @@ async function toggleReceipt(tr) {
 
   if (!ref) { body.innerHTML = `<div class="rc-det-empty">⚠ У чека нет идентификатора — состав недоступен</div>`; return; }
 
+  // контекст строки (продавец/магазин/время) — фолбэк для «Информации о чеке»
+  const rowCtx = { seller: tr.dataset.seller || '', shop: tr.dataset.shop || '', date: tr.dataset.date || '' };
+
   // из кеша
-  if (rcItemsCache[ref]) { body.innerHTML = renderReceiptItems(rcItemsCache[ref], num); return; }
+  if (rcItemsCache[ref]) { body.innerHTML = renderReceiptItems(rcItemsCache[ref], num, rowCtx); wireReceiptDetail(body); return; }
 
   body.innerHTML = `<div class="rc-det-loading">⏳ Загружаю состав чека…</div>`;
   try {
     const d = await posApi(`?action=receipt-items&ref=${encodeURIComponent(ref)}`, { method: 'GET' });
     rcItemsCache[ref] = d;
     // если за время загрузки строку не закрыли
-    if (detRow.style.display !== 'none') body.innerHTML = renderReceiptItems(d, num);
+    if (detRow.style.display !== 'none') { body.innerHTML = renderReceiptItems(d, num, rowCtx); wireReceiptDetail(body); }
   } catch (e) {
     body.innerHTML = `<div class="rc-det-err">⚠ Не удалось загрузить состав: ${esc(e.message || e)}</div>`;
   }
 }
 
-function renderReceiptItems(d, num) {
+// Навешивает обработчики внутри раскрытого чека: копирование uid, печать. Гасит
+// всплытие клика, чтобы не свернуть строку при нажатии на кнопки/поля.
+function wireReceiptDetail(body) {
+  if (!body) return;
+  body.addEventListener('click', (ev) => ev.stopPropagation());
+  body.querySelectorAll('.rc-copy').forEach(btn => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const val = btn.dataset.copy || '';
+      if (!val) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(val);
+        else { const ta = document.createElement('textarea'); ta.value = val; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+        btn.classList.add('rc-copied');
+        setTimeout(() => btn.classList.remove('rc-copied'), 1200);
+      } catch (_) {}
+    });
+  });
+  const printBtn = body.querySelector('.rc-btn-print');
+  if (printBtn) printBtn.addEventListener('click', (ev) => { ev.stopPropagation(); window.print(); });
+  const dotsBtn = body.querySelector('.rc-btn-dots');
+  if (dotsBtn) dotsBtn.addEventListener('click', (ev) => ev.stopPropagation());
+  const editBtn = body.querySelector('.rc-btn-edit');
+  if (editBtn) editBtn.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const ref = editBtn.dataset.editRef || '';
+    const num = editBtn.dataset.editNum || '';
+    openReceiptEditModal(ref, num, body);
+  });
+}
+
+// ═════════════════════════════════════════════════
+//  МОДАЛКА РЕДАКТИРОВАНИЯ ЧЕКА (только админ, только Supabase)
+//  Меняем: способы оплаты, позиции (кол-во/цена/скидка), сумма пересчитывается.
+//  Можно аннулировать чек (void). 1С НЕ трогаем.
+// ═════════════════════════════════════════════════
+const PAY_KEYS_UI = [
+  { key: 'cash',    label: 'Наличные' },
+  { key: 'alifqr',  label: 'Alif QR' },
+  { key: 'alifwlt', label: 'Alif кошелёк' },
+  { key: 'dcqr',    label: 'DC QR' },
+  { key: 'dcwlt',   label: 'DC кошелёк' },
+];
+
+function openReceiptEditModal(ref, num, cardBody) {
+  const d = rcItemsCache[ref];
+  if (!d) { alert('Данные чека не загружены'); return; }
+  const items = (d.items || []).map((it, i) => ({
+    lineNo: (it.lineNo != null ? it.lineNo : i),
+    name: it.name || 'Товар',
+    barcode: it.barcode || '',
+    sizeLabel: it.sizeLabel || '',
+    nomC1Ref: it.nomC1Ref || it.nom_c1_ref || '',
+    charC1Ref: it.charC1Ref || it.char_c1_ref || '',
+    qty: Number(it.qty) || 1,
+    price: Number(it.priceUnit != null ? it.priceUnit : it.price) || 0,
+    discountPct: Number(it.discountPct) || 0,
+    discountSum: Number(it.discountSum) || 0,
+  }));
+  // текущая раскладка оплаты
+  const cash0 = Number(d.cashTotal) || 0;
+  const noncash0 = Number(d.noncashTotal) || 0;
+  const payInit = {};
+  PAY_KEYS_UI.forEach(p => payInit[p.key] = 0);
+  // если есть детализация payments[] — берём её, иначе cash/noncash
+  if (Array.isArray(d.payments) && d.payments.length) {
+    d.payments.forEach(p => { if (payInit[p.key] != null) payInit[p.key] += Number(p.amount) || 0; });
+  } else {
+    payInit.cash = cash0;
+    if (noncash0 > 0) payInit.dcqr = noncash0; // безнал без деталей → DC QR по умолчанию
+  }
+
+  const st = { ref, num, items, pay: payInit, voided: !!d.voided, busy: false };
+
+  let ov = document.getElementById('rcEditOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'rcEditOverlay';
+  ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+
+  function itemsTotal() { return st.items.reduce((s, it) => s + Math.max(0, it.qty * it.price - it.discountSum), 0); }
+  function payTotal() { return PAY_KEYS_UI.reduce((s, p) => s + (Number(st.pay[p.key]) || 0), 0); }
+
+  function paint() {
+    const itTotal = itemsTotal();
+    const pTotal = payTotal();
+    const diff = Math.round((pTotal - itTotal) * 100) / 100;
+    const itemRows = st.items.map((it, i) => `
+      <tr data-i="${i}">
+        <td class="c">${i + 1}</td>
+        <td class="rce-name">${esc(it.name)}${it.sizeLabel ? ` <span class="muted">(${esc(normSizeShort(it.sizeLabel))})</span>` : ''}</td>
+        <td><input type="number" class="rce-in rce-qty" data-i="${i}" value="${it.qty}" min="0" step="1"></td>
+        <td><input type="number" class="rce-in rce-price" data-i="${i}" value="${it.price}" min="0" step="0.01"></td>
+        <td><input type="number" class="rce-in rce-disc" data-i="${i}" value="${it.discountSum}" min="0" step="0.01"></td>
+        <td class="r tnum rce-line">${fmtNum(Math.max(0, it.qty * it.price - it.discountSum))}</td>
+        <td class="c"><button class="rce-del" data-i="${i}" title="Удалить">✕</button></td>
+      </tr>`).join('');
+    const payRows = PAY_KEYS_UI.map(p => `
+      <div class="rce-payrow">
+        <label>${esc(p.label)}</label>
+        <input type="number" class="rce-in rce-pay" data-key="${p.key}" value="${Number(st.pay[p.key]) || 0}" min="0" step="0.01">
+      </div>`).join('');
+    ov.innerHTML = `
+      <div class="rcedit-modal" role="dialog">
+        <div class="rcedit-head">
+          <h3>Редактирование чека № ${esc(st.num)}</h3>
+          <button class="rcedit-x" title="Закрыть">✕</button>
+        </div>
+        <div class="rcedit-warn">⚠ Правка влияет только на отчёты РМК (Supabase). В 1С чек НЕ изменяется.</div>
+        <div class="rcedit-body">
+          <div class="rce-sec">
+            <div class="rce-sec-h"><span>Позиции</span></div>
+            <table class="rce-tbl">
+              <thead><tr><th class="c">#</th><th>Товар</th><th>Кол-во</th><th>Цена</th><th>Скидка</th><th class="r">Сумма</th><th></th></tr></thead>
+              <tbody>${itemRows || '<tr><td colspan="7" class="c muted" style="padding:12px">Нет позиций</td></tr>'}</tbody>
+              <tfoot><tr><td colspan="5" class="r">Итого по позициям</td><td class="r strong tnum">${fmtNum(itTotal)} с.</td><td></td></tr></tfoot>
+            </table>
+          </div>
+          <div class="rce-sec">
+            <div class="rce-sec-h"><span>Оплата</span></div>
+            <div class="rce-pays">${payRows}</div>
+            <div class="rce-paysum ${diff === 0 ? 'ok' : 'bad'}">
+              Оплачено: <b class="tnum">${fmtNum(pTotal)} с.</b>
+              ${diff === 0 ? '<span class="rce-ok">✓ сходится</span>' : `<span class="rce-diff">расхождение с позициями: ${fmtNum(diff)} с.</span>`}
+            </div>
+          </div>
+          <label class="rce-void"><input type="checkbox" class="rce-void-cb" ${st.voided ? 'checked' : ''}> Аннулировать чек (исключить из отчётов)</label>
+          <div class="rce-note-wrap"><label>Комментарий (причина правки)</label><input type="text" class="rce-note" placeholder="напр.: ошибка кассира"></div>
+        </div>
+        <div class="rcedit-foot">
+          <button class="rce-delete" ${st.busy ? 'disabled' : ''} title="Удалить чек полностью">🗑 Удалить чек</button>
+          <button class="rce-cancel">Отмена</button>
+          <button class="rce-save" ${st.busy ? 'disabled' : ''}>${st.busy ? 'Сохраняю…' : 'Сохранить'}</button>
+        </div>
+      </div>`;
+    wireModal();
+  }
+
+  function wireModal() {
+    ov.querySelector('.rcedit-x').onclick = () => ov.remove();
+    ov.querySelector('.rce-cancel').onclick = () => ov.remove();
+    ov.querySelectorAll('.rce-qty').forEach(el => el.onchange = () => { const i = +el.dataset.i; st.items[i].qty = Math.max(0, Number(el.value) || 0); paint(); });
+    ov.querySelectorAll('.rce-price').forEach(el => el.onchange = () => { const i = +el.dataset.i; st.items[i].price = Math.max(0, Number(el.value) || 0); paint(); });
+    ov.querySelectorAll('.rce-disc').forEach(el => el.onchange = () => { const i = +el.dataset.i; st.items[i].discountSum = Math.max(0, Number(el.value) || 0); paint(); });
+    ov.querySelectorAll('.rce-del').forEach(el => el.onclick = () => { const i = +el.dataset.i; st.items.splice(i, 1); paint(); });
+    ov.querySelectorAll('.rce-pay').forEach(el => el.onchange = () => { st.pay[el.dataset.key] = Math.max(0, Number(el.value) || 0); paint(); });
+    ov.querySelector('.rce-void-cb').onchange = (e) => { st.voided = e.target.checked; };
+    ov.querySelector('.rce-save').onclick = () => doSave();
+    const delBtn = ov.querySelector('.rce-delete');
+    if (delBtn) delBtn.onclick = () => doDelete();
+  }
+
+  async function doDelete() {
+    if (st.busy) return;
+    const okConfirm = confirm(
+      'Удалить чек № ' + (st.num || '—') + '?\n\n' +
+      'Если чек был проведён в 1С — он будет аннулирован (исчезнет из истории и отчётов).\n' +
+      'Если чек битый/не попал в 1С (дубль) — он будет удалён полностью.\n\n' +
+      'Действие нельзя отменить через интерфейс.'
+    );
+    if (!okConfirm) return;
+    const note = (ov.querySelector('.rce-note') || {}).value || '';
+    st.busy = true; paint();
+    try {
+      const r = await posApi('?action=delete-receipt', {
+        method: 'POST',
+        body: JSON.stringify({ ref: st.ref, deletedBy: state.user || 'admin', note }),
+      });
+      if (!r || r.ok === false) throw new Error((r && r.error) || 'ошибка удаления');
+      delete rcItemsCache[st.ref];
+      if (state.cache) state.cache = {};
+      ov.remove();
+      alert(r.mode === 'hard' ? 'Чек удалён полностью' : 'Чек аннулирован');
+      // обновить список истории, если есть функция перезагрузки
+      if (typeof renderHistory === 'function') { try { renderHistory(true); } catch (_) {} }
+    } catch (e) {
+      st.busy = false; paint();
+      alert('Ошибка: ' + (e.message || e));
+    }
+  }
+
+  async function doSave() {
+    if (st.busy) return;
+    const note = (ov.querySelector('.rce-note') || {}).value || '';
+    // payments — только ненулевые
+    const payments = PAY_KEYS_UI
+      .map(p => ({ key: p.key, amount: Math.round((Number(st.pay[p.key]) || 0) * 100) / 100 }))
+      .filter(p => p.amount > 0);
+    const itemsPayload = st.items.map((it, i) => ({
+      lineNo: i,
+      name: it.name, barcode: it.barcode, sizeLabel: it.sizeLabel,
+      nomC1Ref: it.nomC1Ref, charC1Ref: it.charC1Ref,
+      qty: it.qty, price: it.price, discountSum: it.discountSum, discountPct: it.discountPct,
+    }));
+    st.busy = true; paint();
+    try {
+      const r = await posApi('?action=edit-receipt', {
+        method: 'POST',
+        body: JSON.stringify({
+          ref: st.ref,
+          editedBy: state.user || 'admin',
+          note,
+          payments,
+          items: itemsPayload,
+          voided: st.voided,
+        }),
+      });
+      if (!r || r.ok === false) throw new Error((r && r.error) || 'ошибка сохранения');
+      // инвалидируем кеш и обновляем карточку
+      delete rcItemsCache[st.ref];
+      if (state.cache) state.cache = {};
+      ov.remove();
+      alert('Чек обновлён');
+      // перезагрузить состав чека в карточке
+      if (cardBody) {
+        cardBody.innerHTML = `<div class="rc-det-loading">⏳ Обновляю…</div>`;
+        try {
+          const dd = await posApi(`?action=receipt-items&ref=${encodeURIComponent(st.ref)}`, { method: 'GET' });
+          rcItemsCache[st.ref] = dd;
+          cardBody.innerHTML = renderReceiptItems(dd, st.num, {});
+          wireReceiptDetail(cardBody);
+        } catch (_) {}
+      }
+    } catch (e) {
+      st.busy = false; paint();
+      alert('Ошибка: ' + (e.message || e));
+    }
+  }
+
+  paint();
+}
+
+// badge способа оплаты для блока «Оплата»
+function payModeBadge(mode) {
+  if (mode === 'cash') return '<span class="pay-badge pay-cash">Наличные</span>';
+  if (mode === 'card') return '<span class="pay-badge pay-card">Безналичные</span>';
+  if (mode === 'mixed') return '<span class="pay-badge pay-mixed">Смешанная</span>';
+  return '<span class="pay-badge pay-unknown muted">нет данных</span>';
+}
+
+function renderReceiptItems(d, num, ctx) {
+  ctx = ctx || {};
   const items = (d && d.items) || [];
-  if (!items.length) return `<div class="rc-det-empty">В чеке нет позиций</div>`;
-  const rows = items.map((it, i) => {
+  const number = num || d.number || '';
+  const seller = d.seller || ctx.seller || '—';
+  const shop = d.shop || ctx.shop || '—';
+  const dateIso = d.date || ctx.date || '';
+  const dtLabel = dateIso ? dushTime(dateIso, true) : '—';
+  const cashier = d.cashier || seller || '—';
+  const opLabel = d.opType === 'return' ? 'Возврат' : 'Продажа';
+  const uid = d.ref || '';
+  const uidShort = uid ? (uid.replace(/-/g, '').slice(0, 12)) : '—';
+  const source = d.source || 'РМК';
+
+  // ── состав чека ──
+  const rowsHtml = items.length ? items.map((it, i) => {
     const hasDisc = (it.discountSum && it.discountSum > 0) || (it.discountPct && it.discountPct > 0);
     const discTxt = hasDisc
       ? `<span class="rc-disc">−${fmtNum(it.discountSum || 0)}${it.discountPct ? ` (${it.discountPct}%)` : ''}</span>`
-      : '<span class="muted">—</span>';
+      : '<span class="rc-dash">—</span>';
+    const size = it.sizeLabel ? esc(normSizeShort(it.sizeLabel)) : '<span class="rc-dash">—</span>';
     return `<tr>
-      <td class="c muted">${i + 1}</td>
-      <td class="strong">${esc(it.name)}${it.sizeLabel ? ` <span class="rc-size">${esc(it.sizeLabel)}</span>` : ''}</td>
-      <td class="muted rc-bc">${it.barcode ? esc(it.barcode) : '—'}</td>
+      <td class="c rc-idx">${i + 1}</td>
+      <td class="rc-name">${esc(it.name)}</td>
+      <td class="c">${size}</td>
       <td class="c tnum">${fmtInt(it.qty)} шт</td>
-      <td class="r tnum">${fmtNum(it.priceUnit)}</td>
+      <td class="r tnum">${fmtNum(it.priceUnit)} с.</td>
       <td class="r">${discTxt}</td>
-      <td class="r strong tnum">${fmtNum(it.sum)}</td>
+      <td class="r strong tnum">${fmtNum(it.sum)} с.</td>
     </tr>`;
-  }).join('');
+  }).join('') : `<tr><td colspan="7" class="rc-dash c" style="padding:16px">В чеке нет позиций</td></tr>`;
   const total = (d.itemsTotal != null ? d.itemsTotal : d.docTotal) || 0;
+
+  // ── оплата ──
+  const cash = Number(d && d.cashTotal) || 0;
+  const noncash = Number(d && d.noncashTotal) || 0;
+  const paid = cash + noncash || total;
+  const change = Math.max(0, paid - total);
+  const payRows = [];
+  if (cash > 0) payRows.push(`<div class="rc-pay-line"><span>Наличные</span><span class="tnum">${fmtNum(cash)} с.</span></div>`);
+  if (noncash > 0) payRows.push(`<div class="rc-pay-line"><span>Безналичные</span><span class="tnum">${fmtNum(noncash)} с.</span></div>`);
+  if (!payRows.length) payRows.push(`<div class="rc-pay-line"><span>Наличные</span><span class="tnum">${fmtNum(total)} с.</span></div>`);
+
+  const icoPrint = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>`;
+  const icoDots = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>`;
+  const icoPrinter = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>`;
+  const icoUser = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="8" r="3.4"/><path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5"/></svg>`;
+  const icoHash = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 3 7 21M17 3l-2 18M4 8h16M3 16h16"/></svg>`;
+  const icoSrc = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 2h9l5 5v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z"/><path d="M14 2v6h6"/></svg>`;
+  const icoCopy = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+  const icoEdit = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>`;
+
   return `
-    <div class="rc-det-head">🧾 Состав чека №${esc(num || d.number || '')} — ${fmtInt(items.length)} позиций</div>
-    <div class="tbl-wrap">
-      <table class="tbl rc-items">
-        <thead><tr><th style="width:30px">#</th><th>Товар</th><th>Штрихкод</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Скидка</th><th class="r">Сумма</th></tr></thead>
-        <tbody>${rows}</tbody>
-        <tfoot><tr class="tbl-total"><td colspan="6" class="r">Итого</td><td class="r tnum">${fmtNum(total)} ${CUR}</td></tr></tfoot>
-      </table>
+    <div class="rc-det">
+      <div class="rc-det-grid">
+        <div class="rc-col-items">
+          <div class="rc-sec-head"><h4>Состав чека</h4></div>
+          <div class="rc-poscount">${fmtInt(items.length)} ${plural(items.length,'позиция','позиции','позиций')}</div>
+          <div class="rc-items-wrap">
+            <table class="rc-items-tbl">
+              <thead><tr><th class="c">#</th><th>Товар</th><th class="c">Размер</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Скидка</th><th class="r">Сумма</th></tr></thead>
+              <tbody>${rowsHtml}</tbody>
+              <tfoot><tr class="rc-items-total"><td colspan="6" class="r">Итого</td><td class="r tnum">${fmtNum(total)} с.</td></tr></tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div class="rc-col-info">
+          <div class="rc-sec-head rc-info-head"><h4>Информация о чеке</h4>
+            <div class="rc-info-actions">
+              <button class="rc-btn-print" data-print="${esc(uid)}">${icoPrint}<span>Печать чека</span></button>
+              ${state.allowedTabs === '*' ? `<button class="rc-btn-edit" data-edit-ref="${esc(uid)}" data-edit-num="${esc(number)}">${icoEdit}<span>Редактировать</span></button>` : ''}
+              <button class="rc-btn-dots" title="Ещё">${icoDots}</button>
+            </div>
+          </div>
+          <div class="rc-info-cols">
+            <div class="rc-info-block">
+              <div class="rc-meta-pair"><div class="rc-meta-k">№ чека</div><div class="rc-meta-v strong">${esc(number)}</div></div>
+              <div class="rc-meta-pair"><div class="rc-meta-k">Продавец</div><div class="rc-meta-v">${esc(seller)}</div></div>
+              <div class="rc-meta-pair"><div class="rc-meta-k">Тип чека</div><div class="rc-meta-v">${esc(opLabel)}</div></div>
+            </div>
+            <div class="rc-info-block">
+              <div class="rc-meta-pair"><div class="rc-meta-k">Дата и время</div><div class="rc-meta-v">${esc(dtLabel)}</div></div>
+              <div class="rc-meta-pair"><div class="rc-meta-k">Магазин</div><div class="rc-meta-v">${esc(shop)}</div></div>
+            </div>
+            <div class="rc-info-block rc-pay-block">
+              <div class="rc-pay-title"><span>Оплата</span><span class="badge ok rc-pay-status">Оплачен</span></div>
+              <div class="rc-pay-method">${payModeBadge(d.payMode)}</div>
+              ${payRows.join('')}
+              <div class="rc-pay-line"><span>Сдача</span><span class="tnum">${fmtNum(change)} с.</span></div>
+              <div class="rc-pay-line rc-pay-grand"><span>Итого оплачено</span><span class="tnum">${fmtNum(paid)} с.</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rc-metabar">
+        <div class="rc-metabar-item">${icoPrinter}<div><div class="rc-mb-k">Распечатан</div><div class="rc-mb-v">${esc(dtLabel)}</div></div></div>
+        <div class="rc-metabar-item">${icoUser}<div><div class="rc-mb-k">Кассир</div><div class="rc-mb-v">${esc(cashier)}</div></div></div>
+        <div class="rc-metabar-item">${icoHash}<div><div class="rc-mb-k">Уникальный код чека</div><div class="rc-mb-v rc-uid">${esc(uidShort)}<button class="rc-copy" data-copy="${esc(uid)}" title="Копировать">${icoCopy}</button></div></div></div>
+        <div class="rc-metabar-item">${icoSrc}<div><div class="rc-mb-k">Источник</div><div class="rc-mb-v">${esc(source)}</div></div></div>
+      </div>
     </div>`;
+}
+
+// краткая метка размера: «размер:21» → «21», «размеры:42» → «42»
+function normSizeShort(s) {
+  const m = String(s || '').replace(/^\s*размер[ыа]?\s*:?\s*/i, '').trim();
+  return m || String(s || '');
+}
+// простое склонение
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
 }
 
 
@@ -1894,6 +3898,7 @@ function renderReceiptItems(d, num) {
 //  4) список → 5) сверка → 6) подтверждение → 7) успех (+PDF)
 // ══════════════════════════════════════════════════════════
 const TR = {
+  mode: 'new',         // new (мастер создания) | journal (журнал документов)
   step: 'setup',       // setup | scan | added | list | check | confirm | done
   fromRef: '', fromName: '',
   toRef: '',   toName: '',
@@ -1906,6 +3911,11 @@ const TR = {
   scanning: false,
   busy: false,
   result: null,        // ответ transfer-create {number, ref, date, ...}
+  // ── журнал документов ──
+  jList: null,         // массив документов журнала
+  jFilter: '',         // '' | 'draft' | 'posted'
+  jDoc: null,          // открытая карточка документа
+  jBusy: false,
 };
 
 async function renderTransfer(force) {
@@ -1922,21 +3932,345 @@ async function renderTransfer(force) {
   trPaint();
 }
 
+// переключатель режимов раздела (Новое / Журнал)
+function trTabsHTML() {
+  return `
+  <div class="tr-tabs">
+    <button class="tr-tab ${TR.mode==='new'?'active':''}" id="trTabNew">➕ Новое перемещение</button>
+    <button class="tr-tab ${TR.mode==='journal'?'active':''}" id="trTabJournal">📒 Журнал документов</button>
+  </div>`;
+}
+
 // единый рендер по текущему шагу
 function trPaint() {
   const box = $('trBody');
   if (!box) return;
   // если уходим со сканера — гасим камеру
-  if (TR.step !== 'scan') trStopScanner();
-  if (TR.step === 'setup')   box.innerHTML = trSetupHTML();
+  if (!(TR.mode === 'new' && TR.step === 'scan')) trStopScanner();
+
+  if (TR.mode === 'journal') {
+    box.innerHTML = trTabsHTML() + (TR.jDoc ? trDocCardHTML() : trJournalHTML());
+    trBindTabs();
+    if (TR.jDoc) trBindDocCard(); else trBindJournal();
+    return;
+  }
+
+  // режим «Новое»: мастер. Вкладки показываем только на первом шаге (не мешать сканеру)
+  const tabs = (TR.step === 'setup') ? trTabsHTML() : '';
+  if (TR.step === 'setup')   box.innerHTML = tabs + trSetupHTML();
   else if (TR.step === 'scan')    box.innerHTML = trScanHTML();
   else if (TR.step === 'added')   box.innerHTML = trAddedHTML();
   else if (TR.step === 'list')    box.innerHTML = trListHTML();
   else if (TR.step === 'check')   box.innerHTML = trCheckHTML();
   else if (TR.step === 'confirm') box.innerHTML = trConfirmHTML();
   else if (TR.step === 'done')    box.innerHTML = trDoneHTML();
+  if (TR.step === 'setup') trBindTabs();
   trBind();
   if (TR.step === 'scan') trStartScanner();
+}
+
+function trBindTabs() {
+  const n = $('trTabNew'), j = $('trTabJournal');
+  if (n) n.addEventListener('click', () => { TR.mode='new'; TR.step='setup'; trPaint(); });
+  if (j) j.addEventListener('click', () => { TR.mode='journal'; TR.jDoc=null; trLoadJournal(); });
+}
+
+// ──────────────────── ЖУРНАЛ ДОКУМЕНТОВ ────────────────────
+async function trLoadJournal() {
+  TR.jBusy = true; trPaint();
+  try {
+    const qs = TR.jFilter ? ('&status=' + TR.jFilter) : '';
+    const d = await posApi('?action=transfer-doc-list&limit=200' + qs, { method: 'GET' });
+    TR.jList = d.docs || [];
+  } catch (e) { TR.jList = []; }
+  TR.jBusy = false; trPaint();
+}
+
+function trStatusBadge(st) {
+  return st === 'posted'
+    ? '<span class="tr-badge tr-badge-ok">Проведён</span>'
+    : '<span class="tr-badge tr-badge-draft">Черновик</span>';
+}
+
+function trJournalHTML() {
+  if (TR.jBusy && TR.jList === null) return `<div class="loading">⏳ Загрузка журнала…</div>`;
+  const docs = TR.jList || [];
+  const rows = docs.map(d => `
+    <tr class="tr-jrow" data-open="${esc(d.id)}">
+      <td><b>${esc(d.doc_number)}</b></td>
+      <td>${esc((d.doc_date||'').slice(0,10).split('-').reverse().join('.'))}</td>
+      <td>${esc(d.from_name||'—')} → ${esc(d.to_name||'—')}</td>
+      <td class="c">${fmtInt(d.items_count||0)}</td>
+      <td class="c">${trStatusBadge(d.status)}</td>
+      <td class="c"><button class="tr-print-btn" data-print="${esc(d.id)}" title="Распечатать документ">🖨</button></td>
+    </tr>`).join('');
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card">
+      <div class="tr-card-head sm"><span class="tr-ic">📒</span><div><h2>Журнал перемещений</h2><p>Локальные документы (без 1С)</p></div></div>
+      <div class="tr-jfilters">
+        <button class="tr-chip ${TR.jFilter===''?'active':''}" data-flt="">Все</button>
+        <button class="tr-chip ${TR.jFilter==='posted'?'active':''}" data-flt="posted">Проведённые</button>
+        <button class="tr-chip ${TR.jFilter==='draft'?'active':''}" data-flt="draft">Черновики</button>
+        <button class="tr-btn tr-btn-ghost tr-jrefresh" id="trJRefresh">↻ Обновить</button>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl tr-tbl">
+          <thead><tr><th>№ док.</th><th>Дата</th><th>Маршрут</th><th class="c">Строк</th><th class="c">Статус</th><th class="c">Печать</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="6" class="tr-empty">Документов нет</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+
+function trBindJournal() {
+  const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  on('trJRefresh', trLoadJournal);
+  document.querySelectorAll('[data-flt]').forEach(b => b.addEventListener('click', () => {
+    TR.jFilter = b.dataset.flt; trLoadJournal();
+  }));
+  document.querySelectorAll('[data-open]').forEach(r => r.addEventListener('click', () => {
+    trOpenDoc(r.dataset.open);
+  }));
+  // Кнопка печати в строке журнала — не открываем карточку (stopPropagation)
+  document.querySelectorAll('[data-print]').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    trPrintDoc(b.dataset.print);
+  }));
+}
+
+async function trOpenDoc(id) {
+  TR.jBusy = true;
+  try {
+    const d = await posApi('?action=transfer-doc-get&id=' + encodeURIComponent(id), { method: 'GET' });
+    TR.jDoc = d.doc || null;
+  } catch (e) { TR.jDoc = null; }
+  TR.jBusy = false; trPaint();
+}
+
+// ── карточка документа ──
+function trDocCardHTML() {
+  const d = TR.jDoc || {};
+  const posted = d.status === 'posted';
+  const items = d.items || [];
+  const rows = items.map(it => `
+    <tr>
+      <td>${esc(it.product_name || '—')}</td>
+      <td class="c"><span class="tr-code">${esc(String(it.unique_barcode||'').slice(-4))}</span></td>
+      <td class="c">${esc(it.size_label || '—')}</td>
+      <td class="c">${it.moved ? '<span class="tr-badge tr-badge-ok">✓</span>' : '<span class="tr-badge tr-badge-draft">—</span>'}</td>
+      <td class="c"><button class="tr-del" data-rm="${esc(it.id)}" title="Убрать из документа">✕</button></td>
+    </tr>`).join('');
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card">
+      <div class="tr-doc-head">
+        <button class="tr-btn tr-btn-ghost" id="trDocBack">← К журналу</button>
+        <div class="tr-doc-title">${esc(d.doc_number)} ${trStatusBadge(d.status)}</div>
+      </div>
+      <div class="tr-conf-grid">
+        <div class="tr-conf-row"><span>Откуда</span><b>${esc(d.from_name||'—')}</b></div>
+        <div class="tr-conf-row"><span>Куда</span><b>${esc(d.to_name||'—')}</b></div>
+        <div class="tr-conf-row"><span>Дата</span><b>${esc((d.doc_date||'').slice(0,10).split('-').reverse().join('.'))}</b></div>
+        <div class="tr-conf-row"><span>Строк</span><b>${fmtInt(items.length)}</b></div>
+        ${d.sender_name ? `<div class="tr-conf-row"><span>Отправил</span><b>${esc(d.sender_name)}</b></div>`:''}
+        ${d.comment ? `<div class="tr-conf-row"><span>Комментарий</span><b>${esc(d.comment)}</b></div>`:''}
+      </div>
+
+      <div class="tr-info"><span class="tr-info-ic">ℹ️</span><div>${posted
+        ? 'Документ <b>проведён</b>. Добавление строки сразу перемещает товар на получателя, удаление — возвращает на отправителя.'
+        : 'Документ — <b>черновик</b>. Товар не перемещён, пока вы не нажмёте «Провести».'}</div></div>
+
+      <div class="tr-additem">
+        <input type="text" id="trAddBc" class="tr-input" inputmode="numeric" placeholder="Штрихкод для добавления…">
+        <button class="tr-btn tr-btn-outline" id="trAddItemBtn">➕ Добавить</button>
+      </div>
+      <div id="trDocErr"></div>
+
+      <div class="tbl-wrap">
+        <table class="tbl tr-tbl">
+          <thead><tr><th>Товар</th><th class="c">Код</th><th class="c">Размер</th><th class="c">Перем.</th><th class="c"></th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="tr-empty">Строк нет</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div class="tr-actions tr-doc-actions">
+        ${posted
+          ? '<button class="tr-btn tr-btn-outline" id="trUnpost">↩ Отменить проведение</button>'
+          : '<button class="tr-btn tr-btn-primary" id="trPost">✓ Провести</button>'}
+        <button class="tr-btn tr-btn-outline" id="trDocPrint">🖨 Печать</button>
+        <button class="tr-btn tr-btn-danger" id="trDocDelete">🗑 Удалить документ</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function trBindDocCard() {
+  const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
+  const d = TR.jDoc || {};
+  on('trDocBack', () => { TR.jDoc = null; trPaint(); });
+  on('trPost', () => trDocAction('transfer-doc-post', { id: d.id }));
+  on('trUnpost', () => trDocAction('transfer-doc-unpost', { id: d.id }));
+  on('trDocPrint', () => trPrintDocData(d)); // данные уже загружены — печатаем напрямую
+  on('trAddItemBtn', trDocAddItem);
+  const bcInp = $('trAddBc');
+  if (bcInp) bcInp.addEventListener('keydown', e => { if (e.key === 'Enter') trDocAddItem(); });
+  document.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => {
+    trDocAction('transfer-doc-remove-item', { id: d.id, itemId: b.dataset.rm });
+  }));
+  on('trDocDelete', async () => {
+    if (!confirm('Удалить документ ' + (d.doc_number||'') + '? Если он проведён — товары вернутся на склад-отправитель.')) return;
+    if (TR.jBusy) return; TR.jBusy = true;
+    try {
+      const r = await posApi('?action=transfer-doc-delete', { method: 'POST', body: JSON.stringify({ id: d.id }) });
+      TR.jBusy = false;
+      if (r.ok) { TR.jDoc = null; trLoadJournal(); }
+      else { const e=$('trDocErr'); if(e) e.innerHTML = errBar(r.error || 'Ошибка удаления'); }
+    } catch (ex) { TR.jBusy = false; const e=$('trDocErr'); if(e) e.innerHTML = errBar(ex.message); }
+  });
+}
+
+async function trDocAction(action, payload) {
+  if (TR.jBusy) return; TR.jBusy = true;
+  const errBox = $('trDocErr');
+  try {
+    const r = await posApi('?action=' + action, { method: 'POST', body: JSON.stringify(payload) });
+    TR.jBusy = false;
+    if (r.ok) {
+      TR.jDoc = r.doc || TR.jDoc;
+      // предупреждение о неперемещённых
+      if (r.notMoved && r.notMoved.length) {
+        setTimeout(() => { const e=$('trDocErr'); if(e) e.innerHTML = errBar('Не перемещено: ' + r.notMoved.map(x=>x.barcode+' ('+x.reason+')').join('; ')); }, 50);
+      }
+      trPaint();
+    } else {
+      if (errBox) errBox.innerHTML = errBar(r.error || 'Ошибка');
+    }
+  } catch (ex) { TR.jBusy = false; if (errBox) errBox.innerHTML = errBar(ex.message); }
+}
+
+async function trDocAddItem() {
+  const inp = $('trAddBc');
+  const bc = (inp && inp.value || '').trim();
+  const errBox = $('trDocErr');
+  if (!bc) { if (errBox) errBox.innerHTML = errBar('Введите штрихкод'); return; }
+  if (TR.jBusy) return; TR.jBusy = true;
+  try {
+    const r = await posApi('?action=transfer-doc-add-item', { method: 'POST', body: JSON.stringify({ id: TR.jDoc.id, barcode: bc }) });
+    TR.jBusy = false;
+    if (r.ok) { TR.jDoc = r.doc || TR.jDoc; trPaint(); }
+    else { if (errBox) errBox.innerHTML = errBar(r.error || 'Ошибка добавления'); }
+  } catch (ex) { TR.jBusy = false; if (errBox) errBox.innerHTML = errBar(ex.message); }
+}
+
+// ──────────────────── ПЕЧАТЬ ДОКУМЕНТА ПЕРЕМЕЩЕНИЯ ────────────────────
+// Из журнала: сначала догружаем полный документ (со строками) по id, затем печатаем.
+async function trPrintDoc(id) {
+  if (!id) return;
+  try {
+    const r = await posApi('?action=transfer-doc-get&id=' + encodeURIComponent(id), { method: 'GET' });
+    const doc = r.doc || null;
+    if (!doc) { alert('Не удалось загрузить документ для печати'); return; }
+    trPrintDocData(doc);
+  } catch (ex) {
+    alert('Ошибка загрузки документа: ' + (ex && ex.message || ex));
+  }
+}
+
+// Формирует печатную HTML-форму документа и открывает системный диалог печати.
+function trPrintDocData(d) {
+  d = d || {};
+  const items = Array.isArray(d.items) ? d.items : [];
+  const dateStr = (d.doc_date || '').slice(0, 10).split('-').reverse().join('.') || '—';
+  const timeStr = (function(){ try { return new Date(d.doc_date || Date.now()).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); } catch(_) { return ''; } })();
+  const statusTxt = d.status === 'posted' ? 'Проведён' : 'Черновик';
+  const P = (s) => String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  const rowsHtml = items.length
+    ? items.map((it, i) => `
+      <tr>
+        <td class="n">${i + 1}</td>
+        <td>${P(it.product_name || '—')}</td>
+        <td class="c">${P(it.size_label || '—')}</td>
+        <td class="c mono">${P(it.unique_barcode || '—')}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="4" class="empty">Строк нет</td></tr>`;
+
+  const html = `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<title>Перемещение ${P(d.doc_number || '')}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; color:#111; margin:0; padding:24px 28px; font-size:13px; }
+  .doc-head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #111; padding-bottom:12px; margin-bottom:16px; }
+  .doc-org { font-size:16px; font-weight:700; }
+  .doc-org small { display:block; font-weight:400; font-size:11px; color:#555; margin-top:2px; }
+  .doc-meta { text-align:right; font-size:12px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .doc-num { font-size:15px; font-weight:700; }
+  .route { display:flex; gap:32px; margin:14px 0 6px; }
+  .route div { font-size:13px; }
+  .route span { display:block; font-size:11px; color:#666; margin-bottom:2px; text-transform:uppercase; letter-spacing:.4px; }
+  .route b { font-size:14px; }
+  .extra { font-size:12px; color:#333; margin:2px 0 14px; }
+  .extra span { color:#666; }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th, td { border:1px solid #999; padding:6px 8px; text-align:left; font-size:12px; }
+  th { background:#f0f0f0; font-weight:700; }
+  td.n { width:36px; text-align:center; color:#555; }
+  td.c, th.c { text-align:center; }
+  td.mono { font-family:'Consolas','Courier New',monospace; font-size:11px; letter-spacing:.3px; }
+  td.empty { text-align:center; color:#888; padding:18px; }
+  .total { margin-top:10px; font-size:13px; font-weight:700; text-align:right; }
+  .signs { display:flex; justify-content:space-between; margin-top:42px; gap:40px; }
+  .signs div { flex:1; }
+  .signs .line { border-top:1px solid #111; margin-top:34px; padding-top:4px; font-size:11px; color:#555; text-align:center; }
+  .signs .who { font-size:12px; font-weight:600; }
+  .foot { margin-top:28px; font-size:10px; color:#999; text-align:center; border-top:1px solid #ddd; padding-top:8px; }
+  @media print { body { padding:0; } @page { margin:16mm 14mm; } }
+</style></head>
+<body>
+  <div class="doc-head">
+    <div class="doc-org">Ортосалон<small>Документ перемещения товаров между складами</small></div>
+    <div class="doc-meta">
+      <div class="doc-num">${P(d.doc_number || '—')}</div>
+      <div>от ${P(dateStr)}${timeStr ? ' ' + P(timeStr) : ''}</div>
+      <div>Статус: ${P(statusTxt)}</div>
+    </div>
+  </div>
+
+  <div class="route">
+    <div><span>Откуда (отправитель)</span><b>${P(d.from_name || '—')}</b></div>
+    <div><span>Куда (получатель)</span><b>${P(d.to_name || '—')}</b></div>
+  </div>
+  ${d.sender_name ? `<div class="extra"><span>Отправил:</span> ${P(d.sender_name)}</div>` : ''}
+  ${d.receiver_name ? `<div class="extra"><span>Принял:</span> ${P(d.receiver_name)}</div>` : ''}
+  ${d.comment ? `<div class="extra"><span>Комментарий:</span> ${P(d.comment)}</div>` : ''}
+
+  <table>
+    <thead><tr><th class="c">№</th><th>Наименование товара</th><th class="c">Размер</th><th class="c">Штрихкод</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="total">Итого позиций: ${items.length}</div>
+
+  <div class="signs">
+    <div><div class="who">Сдал (отправитель)</div><div class="line">подпись / Ф.И.О.</div></div>
+    <div><div class="who">Принял (получатель)</div><div class="line">подпись / Ф.И.О.</div></div>
+  </div>
+
+  <div class="foot">Напечатано ${P(new Date().toLocaleString('ru-RU'))} · РМК Ортосалон</div>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { alert('Разрешите всплывающие окна для печати документа'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // Ждём отрисовку, затем печать
+  w.onload = function () { try { w.focus(); w.print(); } catch (_) {} };
+  setTimeout(() => { try { w.focus(); w.print(); } catch (_) {} }, 400);
 }
 
 const trUnits = () => TR.items.reduce((s, it) => s + (Number(it.qty) || 1), 0);
@@ -2215,14 +4549,16 @@ async function trHandleScan(barcode) {
       if (hint) { hint.textContent = 'Товар не найден: ' + barcode; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),2000); }
       TR.busy = false; return;
     }
-    // БЛОКИРОВКА: нельзя перемещать экземпляр, который не числится
-    // (in_stock) на складе-отправителе. Сервер всё равно проверит при проведении,
-    // но отсекаем сразу на скане, чтобы кассир не добавлял лишнее.
-    if (d.inSourceWh !== true) {
-      const msg = d.warning || (d.status && d.status !== 'in_stock'
-        ? 'Экземпляр не в наличии' : 'Экземпляр не числится на складе «' + TR.fromName + '»');
-      if (hint) { hint.textContent = '⛔ ' + msg + ' — перемещение невозможно'; hint.classList.add('warn'); setTimeout(()=>hint&&hint.classList.remove('warn'),3200); }
-      TR.busy = false; return;
+    // ПРЕДОХРАНИТЕЛЬ СНЯТ (по требованию 2026-08-08):
+    // разрешаем добавлять ЛЮБОЙ найденный экземпляр независимо от склада/статуса.
+    // При проведении сервер (moveUnitLocal) восстановит его в in_stock
+    // и переместит на склад-получатель. Показываем только инфо-подсказку,
+    // если товар числится не там/не in_stock — но НЕ блокируем.
+    // Откат: вернуть блок `if (d.inSourceWh !== true) { … return; }`.
+    if (d.inSourceWh !== true && hint) {
+      const st = d.status && d.status !== 'in_stock' ? ' (' + d.status + ')' : '';
+      hint.textContent = 'ℹ️ Товар числится на другом складе' + st + ' — будет восстановлен и перемещён';
+      setTimeout(()=>hint&&(hint.textContent=''),3200);
     }
     const it = {
       barcode: d.uniqueBarcode || barcode,
@@ -3554,6 +5890,954 @@ function finEmpSalaries(id) {
     } catch (e) { msg.innerHTML = errBar(e.message||e); }
   });
 }
+
+
+// ══════════════════════════════════════════════════════════
+//  ПОСТУПЛЕНИЕ ТОВАРА — независимый раздел (без 1С)
+//  Данные: suppliers / receiving_docs / receiving_items → products/variants/stock_units
+// ══════════════════════════════════════════════════════════
+
+// Локальное состояние документа поступления (черновик в памяти + localStorage).
+const recv = {
+  loaded: false,
+  tab: 'new',             // 'новый документ' | 'docs' | 'suppliers'
+  suppliers: [],
+  warehouses: [],
+  docId: null,           // id сохранённого черновика (если есть)
+  status: 'draft',
+  supplierId: '',
+  warehouseId: '',
+  docNumber: '',
+  docDate: new Date().toISOString().slice(0, 10),
+  items: [],             // [{uid, product_id, product_name, sku, category, sizeGrid:[], sizes:{}, cost_price, transport_cost, fixed_cost_pct, variable_cost_pct, doctor_pct, seller_pct, profit_pct}]
+  activeCalcUid: null,   // какая позиция открыта в калькуляторе справа
+  searchResults: [],
+  docsList: null,        // кэш списка документов
+  suppliersAll: null,    // кэш всех поставщиков (вкладка управления)
+  docMode: 'new',        // 'new' | 'view' — открыт ли существующий документ
+};
+
+const RECV_LS_KEY = 'rmk.recv.draft.v1';
+
+function recvNewUid() { return 'r' + Math.random().toString(36).slice(2, 9); }
+
+// дефолтные параметры калькулятора (как на макете)
+function recvDefaultCalc() {
+  return { cost_price: 0, transport_cost: 0, fixed_cost_pct: 10, variable_cost_pct: 5, doctor_pct: 5, seller_pct: 5, profit_pct: 30 };
+}
+
+// продажная цена за пару (та же формула, что и на бэкенде)
+function recvSalePrice(it) {
+  const cost = Number(it.cost_price) || 0;
+  const transport = Number(it.transport_cost) || 0;
+  const base = cost + transport;
+  const add = (p) => base * ((Number(p) || 0) / 100);
+  return Math.round((base + add(it.fixed_cost_pct) + add(it.variable_cost_pct) + add(it.doctor_pct) + add(it.seller_pct) + add(it.profit_pct)) * 100) / 100;
+}
+
+// v1.2.30 — эффективная продажная цена: ручная (override) имеет приоритет над калькулятором
+function recvEffPrice(it) {
+  const ov = it && it.sale_price_override;
+  if (ov != null && ov !== '' && Number(ov) > 0) return Math.round(Number(ov) * 100) / 100;
+  return recvSalePrice(it);
+}
+
+// цена товара из базы отличается от текущей эффективной? (для флага «цена изменена»)
+function recvPriceChanged(it) {
+  if (!it || it.base_price == null || it.base_price === '') return false;
+  return Math.round(recvEffPrice(it) * 100) / 100 !== Math.round(Number(it.base_price) * 100) / 100;
+}
+
+function recvItemQty(it) {
+  let n = 0; const s = it.sizes || {};
+  for (const k of Object.keys(s)) n += Math.max(0, Math.round(Number(s[k]) || 0));
+  return n;
+}
+function recvItemCost(it) { return Math.round((Number(it.cost_price) || 0) * recvItemQty(it) * 100) / 100; }
+
+function recvTotals() {
+  let positions = 0, qty = 0, cost = 0;
+  for (const it of recv.items) { const q = recvItemQty(it); if (q > 0 || (it.sizeGrid || []).length === 0) positions++; qty += q; cost += recvItemCost(it); }
+  return { positions: recv.items.length, qty, cost: Math.round(cost * 100) / 100 };
+}
+
+// ── сохранение/восстановление черновика в localStorage ──
+function recvPersist() {
+  try {
+    localStorage.setItem(RECV_LS_KEY, JSON.stringify({
+      docId: recv.docId, supplierId: recv.supplierId, warehouseId: recv.warehouseId,
+      docNumber: recv.docNumber, docDate: recv.docDate, items: recv.items,
+    }));
+  } catch (_) {}
+}
+function recvRestore() {
+  try {
+    const raw = localStorage.getItem(RECV_LS_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    recv.docId = d.docId || null;
+    recv.supplierId = d.supplierId || '';
+    recv.warehouseId = d.warehouseId || '';
+    recv.docNumber = d.docNumber || '';
+    recv.docDate = d.docDate || recv.docDate;
+    recv.items = Array.isArray(d.items) ? d.items : [];
+  } catch (_) {}
+}
+
+async function renderReceiving(force) {
+  const root = $('recvBody');
+  if (!root) return;
+  if (!recv.loaded || force) {
+    root.innerHTML = `<div class="loading">⏳ Загрузка…</div>`;
+    try {
+      const [sup, wh] = await Promise.all([
+        posApi('?action=recv-suppliers', { method: 'GET' }),
+        posApi('?action=recv-warehouses', { method: 'GET' }),
+      ]);
+      recv.suppliers = sup.suppliers || [];
+      recv.warehouses = wh.warehouses || [];
+      recv.loaded = true;
+      recvRestore();
+      // дефолты
+      if (!recv.warehouseId && recv.warehouses[0]) recv.warehouseId = recv.warehouses[0].id;
+      if (!recv.supplierId && recv.suppliers[0]) recv.supplierId = recv.suppliers[0].id;
+    } catch (e) {
+      root.innerHTML = errBar('Не удалось загрузить справочники: ' + (e.message || e));
+      return;
+    }
+  }
+  recvPaint();
+}
+
+// ── Обёртка с под-вкладками ──
+function recvPaint() {
+  const root = $('recvBody');
+  if (!root) return;
+  const tab = recv.tab || 'new';
+  const tabBtn = (id, label) => `<button class="recv-tab ${tab === id ? 'active' : ''}" data-rtab="${id}">${label}</button>`;
+  root.innerHTML = `
+    <div class="recv-tabs">
+      ${tabBtn('new', '📝 Новый документ')}
+      ${tabBtn('docs', '📄 Документы поступления')}
+      ${tabBtn('suppliers', '🏢 Поставщики')}
+    </div>
+    <div id="recvTabBody"></div>
+  `;
+  root.querySelectorAll('.recv-tab').forEach(b => {
+    b.onclick = () => { recv.tab = b.getAttribute('data-rtab'); recvPaint(); };
+  });
+  if (tab === 'docs') return recvPaintDocs();
+  if (tab === 'suppliers') return recvPaintSuppliers();
+  recvPaintNew();
+}
+
+// ── Вкладка «Новый документ» (бывший recvPaint) ──
+function recvPaintNew() {
+  const root = $('recvTabBody');
+  if (!root) return;
+  const t = recvTotals();
+  const isPosted = recv.status === 'posted';
+  const docNoTxt = recv.docNumber ? ` <span class="recv-docno">№ ${esc(recv.docNumber)}</span>` : '';
+  const badge = isPosted
+    ? `<span class="recv-badge recv-badge-ok">Проведён</span>`
+    : `<span class="recv-badge">Черновик</span>`;
+  const title = isPosted ? 'Редактирование документа' : 'Поступление товара';
+  // Кнопки: для проведённого документа — сохранить изменения (без пересоздания ШК) + новый документ
+  const actions = isPosted
+    ? `<button class="btn btn-ghost" id="recvNewDoc">+ Новый документ</button>
+       <button class="btn btn-outline" id="recvPrintLabelsTop">🖨 Напечатать ценники</button>
+       <button class="btn btn-primary" id="recvPost">Сохранить изменения</button>`
+    : `<button class="btn btn-ghost" id="recvCancel">Отменить</button>
+       <button class="btn btn-outline" id="recvSaveDraft">Сохранить черновик</button>
+       <button class="btn btn-primary" id="recvPost">Провести поступление</button>`;
+
+  root.innerHTML = `
+    ${isPosted ? `<div class="recv-note-bar">Документ уже проведён. Штрихкоды не будут созданы повторно. Изменённые цены обновятся в РМК и на кассе.</div>` : ''}
+    <div class="recv-head">
+      <div class="recv-title">${title} ${badge}${docNoTxt}</div>
+      <div class="recv-head-actions">
+        ${actions}
+      </div>
+    </div>
+
+    <!-- Шапка документа -->
+    <div class="recv-form-card">
+      <div class="recv-form-grid">
+        <label class="recv-field">
+          <span class="recv-lbl">Поставщик <b class="req">*</b></span>
+          <div class="recv-inline">
+            <select class="finput" id="recvSupplier">
+              ${recv.suppliers.map(s => `<option value="${s.id}" ${s.id === recv.supplierId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+            </select>
+            <button class="recv-plus" id="recvAddSupplier" title="Создать поставщика">+</button>
+          </div>
+        </label>
+        <label class="recv-field">
+          <span class="recv-lbl">Склад <b class="req">*</b></span>
+          <select class="finput" id="recvWarehouse">
+            ${recv.warehouses.map(w => `<option value="${w.id}" ${w.id === recv.warehouseId ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="recv-field">
+          <span class="recv-lbl">Номер документа</span>
+          <input class="finput" id="recvDocNum" value="${esc(recv.docNumber)}" placeholder="ПТ-000124">
+        </label>
+        <label class="recv-field">
+          <span class="recv-lbl">Дата поступления <b class="req">*</b></span>
+          <input class="finput" id="recvDocDate" type="date" value="${esc(recv.docDate)}">
+        </label>
+      </div>
+    </div>
+
+    <!-- Тело: позиции + калькулятор -->
+    <div class="recv-body-grid">
+      <div class="recv-items-col">
+        <div class="recv-items-card">
+          <div class="recv-sec-title">Товары в документе</div>
+          <div class="recv-search-row">
+            <div class="recv-search-wrap">
+              <input class="finput" id="recvSearch" placeholder="🔍 Поиск товара по названию или артикулу" autocomplete="off">
+              <div class="recv-search-drop" id="recvSearchDrop" style="display:none"></div>
+            </div>
+            <button class="btn btn-outline" id="recvCreateNom">+ Создать номенклатуру</button>
+          </div>
+          <div id="recvItemsList">${recvItemsHTML()}</div>
+          <button class="recv-add-btn" id="recvAddRow">+ Добавить товар</button>
+        </div>
+
+        <!-- Итоги -->
+        <div class="recv-totals">
+          <div class="recv-tot-card"><div class="recv-tot-lbl">Всего позиций</div><div class="recv-tot-val" id="recvTotPos">${fmtInt(t.positions)}</div></div>
+          <div class="recv-tot-card"><div class="recv-tot-lbl">Общее количество</div><div class="recv-tot-val" id="recvTotQty">${fmtInt(t.qty)} пар</div></div>
+          <div class="recv-tot-card"><div class="recv-tot-lbl">Общая себестоимость</div><div class="recv-tot-val" id="recvTotCost">${fmtNum(t.cost)} ${CUR}</div></div>
+        </div>
+      </div>
+
+      <!-- Калькулятор цены -->
+      <div class="recv-calc-col" id="recvCalcCol">${recvCalcHTML()}</div>
+    </div>
+  `;
+
+  recvBindHead();
+  recvBindSearch();
+  recvBindItems();
+  recvBindCalc();
+}
+
+// ── Позиции документа ──
+function recvItemsHTML() {
+  if (!recv.items.length) return `<div class="recv-empty">Пока нет позиций. Найдите товар выше или нажмите «Добавить товар».</div>`;
+  return `<div class="recv-items-table">
+    <div class="recv-it-head">
+      <div>Номенклатура</div><div>Размеры и количество</div><div>Себестоимость</div><div class="c">Действия</div>
+    </div>
+    ${recv.items.map(recvRowHTML).join('')}
+  </div>`;
+}
+
+function recvRowHTML(it) {
+  const grid = it.sizeGrid || [];
+  const sizesHTML = grid.length
+    ? `<div class="recv-sizes">${grid.map(sz => `
+        <div class="recv-size-cell">
+          <div class="recv-size-lbl">${esc(sz)}</div>
+          <input class="recv-size-inp" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" inputmode="numeric"
+                 value="${it.sizes && it.sizes[sz] ? esc(String(it.sizes[sz])) : ''}" placeholder="–">
+        </div>`).join('')}</div>`
+    : `<div class="recv-nosize"><label class="recv-lbl">Количество (шт.)</label>
+        <input class="recv-size-inp recv-qty-solo" data-uid="${it.uid}" data-size="_" type="number" min="0" inputmode="numeric"
+               value="${it.sizes && it.sizes['_'] ? esc(String(it.sizes['_'])) : ''}" placeholder="0"></div>`;
+  const active = it.uid === recv.activeCalcUid ? 'recv-row-active' : '';
+  return `
+    <div class="recv-row ${active}" data-uid="${it.uid}">
+      <div class="recv-nom">
+        <div class="recv-nom-ph">📦</div>
+        <div><div class="recv-nom-name">${esc(it.product_name)}</div>${it.sku ? `<div class="recv-nom-sku">Артикул: ${esc(it.sku)}</div>` : ''}</div>
+      </div>
+      <div>${sizesHTML}</div>
+      <div class="recv-cost">
+        <div class="recv-cost-lbl">за пару (${CUR})</div>
+        <input class="recv-cost-inp" data-uid="${it.uid}" type="number" min="0" value="${esc(String(it.cost_price || ''))}" placeholder="0">
+        <div class="recv-cost-total">Итого: <b>${fmtNum(recvItemCost(it))} ${CUR}</b></div>
+      </div>
+      <div class="c recv-actions">
+        <button class="recv-icon-btn recv-calc-open" data-uid="${it.uid}" title="Калькулятор цены">🧮</button>
+        <button class="recv-icon-btn recv-del" data-uid="${it.uid}" title="Удалить">🗑</button>
+      </div>
+    </div>`;
+}
+
+// ── Калькулятор цены (правая колонка) ──
+function recvActiveItem() { return recv.items.find(x => x.uid === recv.activeCalcUid) || null; }
+
+function recvCalcHTML() {
+  const it = recvActiveItem();
+  if (!it) return `<div class="recv-calc-card recv-calc-empty">
+      <div class="recv-sec-title">Калькулятор цены</div>
+      <div class="recv-empty">Выберите позицию (кнопка 🧮), чтобы рассчитать продажную цену.</div>
+    </div>`;
+  const sale = recvSalePrice(it);
+  const eff = recvEffPrice(it);
+  const hasBase = it.base_price != null && it.base_price !== '';
+  const changed = recvPriceChanged(it);
+  const pctRow = (id, label, val) => `
+    <label class="recv-field">
+      <span class="recv-lbl">${label}</span>
+      <div class="recv-inline">
+        <input class="finput recv-calc-inp" data-fld="${id}" type="number" min="0" value="${esc(String(val))}">
+        <span class="recv-suffix">%</span>
+      </div>
+    </label>`;
+  return `<div class="recv-calc-card">
+    <div class="recv-sec-title">Калькулятор цены</div>
+    <div class="recv-calc-for">Для: <b>${esc(it.product_name)}</b></div>
+    <label class="recv-field">
+      <span class="recv-lbl">Себестоимость товара</span>
+      <div class="recv-inline"><input class="finput recv-calc-inp" data-fld="cost_price" type="number" min="0" value="${esc(String(it.cost_price || 0))}"><span class="recv-suffix">${CUR}</span></div>
+    </label>
+    <label class="recv-field">
+      <span class="recv-lbl">Стоимость транспортировки</span>
+      <div class="recv-inline"><input class="finput recv-calc-inp" data-fld="transport_cost" type="number" min="0" value="${esc(String(it.transport_cost || 0))}"><span class="recv-suffix">${CUR}</span></div>
+    </label>
+    ${pctRow('fixed_cost_pct', 'Постоянные затраты', it.fixed_cost_pct)}
+    ${pctRow('variable_cost_pct', 'Переменные затраты', it.variable_cost_pct)}
+    ${pctRow('doctor_pct', 'Процент врачам', it.doctor_pct)}
+    ${pctRow('seller_pct', 'Процент продавцам', it.seller_pct)}
+    ${pctRow('profit_pct', 'Желаемая чистая прибыль', it.profit_pct)}
+    <div class="recv-saleprice">
+      <div class="recv-sale-lbl">Продажная цена</div>
+      <div class="recv-inline recv-sale-edit">
+        <input class="finput recv-sale-inp" id="recvSaleInp" type="number" min="0" step="0.01" value="${esc(String(eff))}">
+        <span class="recv-suffix">${CUR}</span>
+      </div>
+      <div class="recv-sale-calc">Расчёт калькулятора: <b id="recvSaleCalc">${fmtNum(sale)} ${CUR}</b> <button type="button" class="recv-sale-usecalc" id="recvUseCalc">использовать</button></div>
+      ${hasBase ? `<div class="recv-sale-base ${changed ? 'recv-sale-changed' : ''}" id="recvSaleBase">${changed ? '⚠ Цена изменена (в базе: ' + fmtNum(it.base_price) + ' ' + CUR + '). При проведении обновится у всех вариантов товара.' : 'Цена из базы: ' + fmtNum(it.base_price) + ' ' + CUR}</div>` : `<div class="recv-sale-sub">за пару · новая цена товара</div>`}
+    </div>
+    <button class="btn btn-outline recv-apply-all" id="recvApplyAll">Применить ко всем товарам</button>
+    <button class="btn btn-primary recv-gen-bc" id="recvGenBarcodes">▐╫ Сгенерировать штрихкоды</button>
+    <button class="btn btn-outline recv-print" id="recvPrintLabels">🖨 Распечатать ценники</button>
+  </div>`;
+}
+
+// ── Привязка обработчиков шапки ──
+function recvBindHead() {
+  const sup = $('recvSupplier'); if (sup) sup.onchange = () => { recv.supplierId = sup.value; recvPersist(); };
+  const wh = $('recvWarehouse'); if (wh) wh.onchange = () => { recv.warehouseId = wh.value; recvPersist(); };
+  const dn = $('recvDocNum'); if (dn) dn.oninput = () => { recv.docNumber = dn.value; recvPersist(); };
+  const dd = $('recvDocDate'); if (dd) dd.onchange = () => { recv.docDate = dd.value; recvPersist(); };
+
+  const addSup = $('recvAddSupplier'); if (addSup) addSup.onclick = recvCreateSupplier;
+  const cancel = $('recvCancel'); if (cancel) cancel.onclick = recvCancelDoc;
+  const saveDraft = $('recvSaveDraft'); if (saveDraft) saveDraft.onclick = () => recvSubmit(false);
+  const post = $('recvPost'); if (post) post.onclick = () => recvSubmit(true);
+  const newDoc = $('recvNewDoc'); if (newDoc) newDoc.onclick = () => { recvResetForm(); recvPaint(); };
+  const printTop = $('recvPrintLabelsTop'); if (printTop) printTop.onclick = recvPrintLabels;
+  const createNom = $('recvCreateNom'); if (createNom) createNom.onclick = () => alert('Создание номенклатуры — отдельный раздел (в разработке). Пока добавляйте существующие товары через поиск.');
+  const addRow = $('recvAddRow'); if (addRow) addRow.onclick = () => { const s = $('recvSearch'); if (s) s.focus(); };
+}
+
+// ── Поиск товара с автодополнением ──
+let recvSearchTimer = null;
+function recvBindSearch() {
+  const inp = $('recvSearch'); const drop = $('recvSearchDrop');
+  if (!inp || !drop) return;
+  inp.oninput = () => {
+    const term = inp.value.trim();
+    clearTimeout(recvSearchTimer);
+    if (term.length < 2) { drop.style.display = 'none'; drop.innerHTML = ''; return; }
+    recvSearchTimer = setTimeout(async () => {
+      try {
+        const d = await posApi('?action=recv-products&q=' + encodeURIComponent(term), { method: 'GET' });
+        recv.searchResults = d.products || [];
+        if (!recv.searchResults.length) { drop.innerHTML = `<div class="recv-drop-empty">Ничего не найдено</div>`; drop.style.display = 'block'; return; }
+        drop.innerHTML = recv.searchResults.map((p, i) => `
+          <div class="recv-drop-item" data-idx="${i}">
+            <div class="recv-drop-name">${esc(p.name)}</div>
+            <div class="recv-drop-meta">${p.sku ? 'Арт: ' + esc(p.sku) + ' · ' : ''}${esc(p.category || '')}${(p.sizeGrid || []).length ? ' · размеры ' + p.sizeGrid[0] + '–' + p.sizeGrid[p.sizeGrid.length - 1] : ' · без размеров'}</div>
+          </div>`).join('');
+        drop.style.display = 'block';
+        drop.querySelectorAll('.recv-drop-item').forEach(el => {
+          el.onclick = () => { recvAddProduct(recv.searchResults[Number(el.dataset.idx)]); inp.value = ''; drop.style.display = 'none'; };
+        });
+      } catch (e) { drop.innerHTML = `<div class="recv-drop-empty">Ошибка: ${esc(e.message || e)}</div>`; drop.style.display = 'block'; }
+    }, 250);
+  };
+  document.addEventListener('click', (e) => { if (drop && !drop.contains(e.target) && e.target !== inp) drop.style.display = 'none'; });
+}
+
+function recvAddProduct(p) {
+  if (!p) return;
+  // не дублируем: если товар уже в документе — просто подсветим
+  const exist = recv.items.find(x => x.product_id === p.id);
+  if (exist) { recv.activeCalcUid = exist.uid; recvPaint(); return; }
+  const it = { uid: recvNewUid(), product_id: p.id, product_name: p.name, sku: p.sku || '', category: p.category || '', sizeGrid: p.sizeGrid || [], sizes: {}, ...recvDefaultCalc() };
+  // v1.2.30 — если у товара уже есть цена в базе — подставляем её как редактируемую
+  if (p.basePrice != null && Number(p.basePrice) > 0) {
+    it.base_price = Math.round(Number(p.basePrice) * 100) / 100;
+    it.sale_price_override = it.base_price; // подставлена цена из базы (можно редактировать)
+  }
+  recv.items.push(it);
+  recv.activeCalcUid = it.uid;
+  recvPersist();
+  recvPaint();
+}
+
+// ── Привязка обработчиков позиций (размеры, себестоимость, удаление, открыть калькулятор) ──
+function recvBindItems() {
+  document.querySelectorAll('.recv-size-inp').forEach(inp => {
+    inp.oninput = () => {
+      const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
+      it.sizes = it.sizes || {};
+      const v = Math.max(0, Math.round(Number(inp.value) || 0));
+      if (v > 0) it.sizes[inp.dataset.size] = v; else delete it.sizes[inp.dataset.size];
+      recvPersist();
+      recvUpdateTotalsLive(it);
+    };
+  });
+  document.querySelectorAll('.recv-cost-inp').forEach(inp => {
+    inp.oninput = () => {
+      const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
+      it.cost_price = Number(inp.value) || 0;
+      recvPersist();
+      recvUpdateTotalsLive(it);
+      // если позиция открыта в калькуляторе — синхронизируем поле себестоимости
+      if (it.uid === recv.activeCalcUid) { const cf = document.querySelector('.recv-calc-inp[data-fld="cost_price"]'); if (cf) cf.value = it.cost_price; recvRecalcSale(); }
+    };
+  });
+  document.querySelectorAll('.recv-del').forEach(b => {
+    b.onclick = () => {
+      recv.items = recv.items.filter(x => x.uid !== b.dataset.uid);
+      if (recv.activeCalcUid === b.dataset.uid) recv.activeCalcUid = null;
+      recvPersist(); recvPaint();
+    };
+  });
+  document.querySelectorAll('.recv-calc-open').forEach(b => {
+    b.onclick = () => { recv.activeCalcUid = b.dataset.uid; recvPaint(); };
+  });
+}
+
+// живое обновление итогов без полной перерисовки
+function recvUpdateTotalsLive(it) {
+  const t = recvTotals();
+  const p = $('recvTotPos'), q = $('recvTotQty'), c = $('recvTotCost');
+  if (p) p.textContent = fmtInt(t.positions);
+  if (q) q.textContent = fmtInt(t.qty) + ' пар';
+  if (c) c.innerHTML = fmtNum(t.cost) + ' ' + CUR;
+  // обновляем «Итого» строки позиции
+  const row = document.querySelector(`.recv-row[data-uid="${it.uid}"] .recv-cost-total b`);
+  if (row) row.textContent = fmtNum(recvItemCost(it)) + ' ' + CUR;
+}
+
+// ── Калькулятор: инпуты и пересчёт ──
+function recvBindCalc() {
+  document.querySelectorAll('.recv-calc-inp').forEach(inp => {
+    inp.oninput = () => {
+      const it = recvActiveItem(); if (!it) return;
+      it[inp.dataset.fld] = Number(inp.value) || 0;
+      // если меняли себестоимость — синхронизируем в строке позиции
+      if (inp.dataset.fld === 'cost_price') { const ci = document.querySelector(`.recv-cost-inp[data-uid="${it.uid}"]`); if (ci) ci.value = it.cost_price; recvUpdateTotalsLive(it); }
+      recvPersist();
+      recvRecalcSale();
+    };
+  });
+  const applyAll = $('recvApplyAll'); if (applyAll) applyAll.onclick = recvApplyToAll;
+  const genBc = $('recvGenBarcodes'); if (genBc) genBc.onclick = () => recvSubmit(true);
+  const printL = $('recvPrintLabels'); if (printL) printL.onclick = recvPrintLabels;
+
+  // v1.2.30 — ручной ввод продажной цены (override)
+  const saleInp = $('recvSaleInp');
+  if (saleInp) saleInp.oninput = () => {
+    const it = recvActiveItem(); if (!it) return;
+    const v = saleInp.value;
+    if (v === '' || Number(v) <= 0) delete it.sale_price_override;
+    else it.sale_price_override = Math.round(Number(v) * 100) / 100;
+    recvPersist();
+    recvUpdateSaleFlags();
+  };
+  // кнопка «использовать расчёт калькулятора» — сбрасывает ручную цену
+  const useCalc = $('recvUseCalc');
+  if (useCalc) useCalc.onclick = () => {
+    const it = recvActiveItem(); if (!it) return;
+    delete it.sale_price_override;
+    recvPersist();
+    recvPaint();
+  };
+}
+
+function recvRecalcSale() {
+  const it = recvActiveItem(); if (!it) return;
+  // обновляем «Расчёт калькулятора»; если ручной цены нет — синхронизируем поле цены
+  const calcVal = recvSalePrice(it);
+  const calcEl = $('recvSaleCalc'); if (calcEl) calcEl.innerHTML = fmtNum(calcVal) + ' ' + CUR;
+  const hasOverride = it.sale_price_override != null && it.sale_price_override !== '' && Number(it.sale_price_override) > 0;
+  if (!hasOverride) { const inp = $('recvSaleInp'); if (inp && document.activeElement !== inp) inp.value = String(calcVal); }
+  recvUpdateSaleFlags();
+}
+
+// обновить индикатор «цена изменена / из базы» без полного перерисовывания
+function recvUpdateSaleFlags() {
+  const it = recvActiveItem(); if (!it) return;
+  const baseEl = $('recvSaleBase'); if (!baseEl) return;
+  const hasBase = it.base_price != null && it.base_price !== '';
+  if (!hasBase) return;
+  const changed = recvPriceChanged(it);
+  baseEl.className = 'recv-sale-base' + (changed ? ' recv-sale-changed' : '');
+  baseEl.innerHTML = changed
+    ? '⚠ Цена изменена (в базе: ' + fmtNum(it.base_price) + ' ' + CUR + '). При проведении обновится у всех вариантов товара.'
+    : 'Цена из базы: ' + fmtNum(it.base_price) + ' ' + CUR;
+}
+
+function recvApplyToAll() {
+  const src = recvActiveItem(); if (!src) return;
+  const keys = ['transport_cost', 'fixed_cost_pct', 'variable_cost_pct', 'doctor_pct', 'seller_pct', 'profit_pct'];
+  recv.items.forEach(it => { keys.forEach(k => { it[k] = src[k]; }); });
+  recvPersist();
+  recvPaint();
+  alert('Параметры калькулятора применены ко всем позициям (кроме себестоимости — она у каждого товара своя).');
+}
+
+// ── Создать поставщика ──
+async function recvCreateSupplier() {
+  const name = prompt('Название поставщика:');
+  if (!name || !name.trim()) return;
+  try {
+    const d = await posApi('?action=recv-supplier-create', { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+    recv.suppliers.push(d.supplier);
+    recv.suppliers.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    recv.supplierId = d.supplier.id;
+    recvPersist(); recvPaint();
+  } catch (e) { alert('Не удалось создать поставщика: ' + (e.message || e)); }
+}
+
+// ── Отмена документа ──
+function recvCancelDoc() {
+  if (!confirm('Очистить текущий документ поступления? Несохранённые данные будут потеряны.')) return;
+  recv.docId = null; recv.status = 'draft'; recv.items = []; recv.docNumber = ''; recv.activeCalcUid = null;
+  recv.docDate = new Date().toISOString().slice(0, 10);
+  try { localStorage.removeItem(RECV_LS_KEY); } catch (_) {}
+  recvPaint();
+}
+
+// ── Сохранить черновик / Провести ──
+async function recvSubmit(isPost) {
+  if (isPost) {
+    if (!recv.items.length) { alert('Добавьте хотя бы одну позицию.'); return; }
+    const anyQty = recv.items.some(it => recvItemQty(it) > 0);
+    if (!anyQty) { alert('Укажите количество хотя бы у одной позиции.'); return; }
+    if (!recv.supplierId) { alert('Выберите поставщика.'); return; }
+    if (!recv.warehouseId) { alert('Выберите склад.'); return; }
+    // Перепроведение уже проведённого документа: ШК НЕ пересоздаются, обновляются только цены
+    if (recv.docId && recv.status === 'posted') {
+      if (!confirm('Сохранить изменения документа?\n\nНовые штрихкоды НЕ будут созданы (защита от дублей). Если вы изменили цены — они обновятся в РМК и на кассе.')) return;
+    } else {
+      if (!confirm('Провести поступление? Будут созданы экземпляры товара со штрихкодами и обновлён остаток.')) return;
+    }
+  }
+  const supName = (recv.suppliers.find(s => s.id === recv.supplierId) || {}).name || null;
+  const whName = (recv.warehouses.find(w => w.id === recv.warehouseId) || {}).name || null;
+  const payload = {
+    docId: recv.docId, docNumber: recv.docNumber || null, docDate: recv.docDate,
+    supplierId: recv.supplierId || null, supplierName: supName,
+    warehouseId: recv.warehouseId || null, warehouseName: whName,
+    items: recv.items.map(it => ({
+      product_id: it.product_id, product_name: it.product_name, sku: it.sku,
+      sizes: it.sizeGrid && it.sizeGrid.length ? it.sizes : {}, // товары без сетки — количество в поле '_' пойдёт как есть? нет: для без-сетки используем sizes['_']
+      cost_price: it.cost_price, transport_cost: it.transport_cost,
+      fixed_cost_pct: it.fixed_cost_pct, variable_cost_pct: it.variable_cost_pct,
+      doctor_pct: it.doctor_pct, seller_pct: it.seller_pct, profit_pct: it.profit_pct,
+      // v1.2.30 — ручная цена (если задана) + базовая цена (для каскада)
+      sale_price_override: (it.sale_price_override != null && it.sale_price_override !== '') ? it.sale_price_override : null,
+      base_price: (it.base_price != null && it.base_price !== '') ? it.base_price : null,
+    })),
+  };
+  // товары без размерной сетки: переносим количество '_' в sizes как ключ 'без размера'
+  payload.items.forEach((pi, idx) => {
+    const it = recv.items[idx];
+    if (!(it.sizeGrid && it.sizeGrid.length) && it.sizes && it.sizes['_']) pi.sizes = { 'без размера': it.sizes['_'] };
+  });
+
+  const action = isPost ? 'recv-post' : 'recv-save-draft';
+  try {
+    const btn = isPost ? $('recvPost') : $('recvSaveDraft');
+    if (btn) { btn.disabled = true; btn.textContent = isPost ? 'Проведение…' : 'Сохранение…'; }
+    const d = await posApi('?action=' + action, { method: 'POST', body: JSON.stringify(payload) });
+    recv.docId = d.doc.id;
+    if (isPost) {
+      const docNo = (d.doc && d.doc.doc_number) || recv.docNumber || '';
+      const bcs = d.barcodes || [];
+      recv.docsList = null; // сброс кэша списка
+      if (d.reposted) {
+        // Перепроведение: штрихкоды сохранены, цены обновлены каскадом
+        const casc = d.cascadeVariants || 0;
+        alert(`Документ${docNo ? ' № ' + docNo : ''} обновлён.\nОбновлено цен вариантов: ${d.updatedVariants || 0}.${casc ? '\nКаскад цены (все варианты товара): ' + casc : ''} (отразятся в РМК/кассе). Новые штрихкоды не создавались.`);
+        recv.lastBarcodes = bcs;
+        recvResetForm();
+        recv.tab = 'docs';
+        recvPaint();
+      } else {
+        const created = d.createdUnits || 0;
+        const casc = d.cascadeVariants || 0;
+        // Предлагаем печать ценников СРАЗУ (до очистки экрана)
+        const msg = `Поступление проведено${docNo ? ' № ' + docNo : ''}.\nСоздано экземпляров: ${created}.${casc ? '\nКаскад цены (все варианты товара): ' + casc : ''}\n\nНапечатать ценники сейчас?`;
+        const wantPrint = bcs.length && confirm(msg);
+        if (wantPrint) {
+          recv.lastBarcodes = bcs;
+          try { await recvPrintLabels(); } catch (_) {}
+        } else if (!bcs.length) {
+          alert(`Поступление проведено${docNo ? ' № ' + docNo : ''}.`);
+        }
+        // ОЧИСТКА ЭКРАНА — документ ушёл в «Документы поступления»
+        recvResetForm();
+        recvPaint();
+      }
+    } else {
+      recvPersist();
+      alert('Черновик сохранён.');
+      recvPaint();
+    }
+  } catch (e) {
+    alert('Не удалось ' + (isPost ? 'провести' : 'сохранить') + ': ' + (e.message || e));
+    recvPaint();
+  }
+}
+
+// Сброс формы нового документа (без подтверждения) — после проведения/нового документа
+function recvResetForm() {
+  recv.docId = null; recv.status = 'draft'; recv.items = []; recv.docNumber = '';
+  recv.activeCalcUid = null; recv.lastBarcodes = []; recv.docMode = 'new';
+  recv.docDate = new Date().toISOString().slice(0, 10);
+  if (recv.warehouses && recv.warehouses[0]) recv.warehouseId = recv.warehouses[0].id;
+  if (recv.suppliers && recv.suppliers[0]) recv.supplierId = recv.suppliers[0].id;
+  try { localStorage.removeItem(RECV_LS_KEY); } catch (_) {}
+}
+
+// ══════════════════════════════════════════════════════
+//  ВКЛАДКА «ДОКУМЕНТЫ ПОСТУПЛЕНИЯ»
+// ══════════════════════════════════════════════════════
+async function recvPaintDocs() {
+  const root = $('recvTabBody');
+  if (!root) return;
+  root.innerHTML = `<div class="loading">⏳ Загрузка документов…</div>`;
+  if (!recv.docsList) {
+    try {
+      const d = await posApi('?action=recv-docs', { method: 'GET' });
+      recv.docsList = d.docs || [];
+    } catch (e) { root.innerHTML = errBar('Не удалось загрузить документы: ' + (e.message || e)); return; }
+  }
+  const docs = recv.docsList || [];
+  const rows = docs.map(dc => {
+    const st = dc.status === 'posted'
+      ? `<span class="recv-badge recv-badge-ok">Проведён</span>`
+      : (dc.status === 'cancelled' ? `<span class="recv-badge recv-badge-off">Отменён</span>` : `<span class="recv-badge">Черновик</span>`);
+    return `<tr data-docid="${dc.id}">
+      <td class="recv-dl-num">${esc(dc.doc_number || '—')}</td>
+      <td>${esc((dc.doc_date || '').slice(0, 10))}</td>
+      <td>${esc(dc.supplier_name || '—')}</td>
+      <td>${esc(dc.warehouse_name || '—')}</td>
+      <td class="c">${fmtInt(dc.positions_count || 0)}</td>
+      <td class="c">${fmtInt(dc.total_qty || 0)}</td>
+      <td class="r">${fmtNum(dc.total_cost || 0)} ${CUR}</td>
+      <td class="c">${st}</td>
+      <td class="c"><button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">Открыть</button></td>
+    </tr>`;
+  }).join('');
+  root.innerHTML = `
+    <div class="recv-head">
+      <div class="recv-title">Документы поступления</div>
+      <div class="recv-head-actions">
+        <button class="btn btn-ghost" id="recvDocsRefresh">↻ Обновить</button>
+        <button class="btn btn-primary" id="recvDocsNew">+ Новый документ</button>
+      </div>
+    </div>
+    ${docs.length ? `<div class="recv-docs-tablewrap"><table class="recv-docs-table">
+      <thead><tr>
+        <th>№ документа</th><th>Дата</th><th>Поставщик</th><th>Склад</th>
+        <th class="c">Позиций</th><th class="c">Кол-во</th><th class="r">Себестоимость</th><th class="c">Статус</th><th class="c"></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : `<div class="recv-empty">Пока нет документов поступления. Создайте новый во вкладке «Новый документ».</div>`}
+  `;
+  const rf = $('recvDocsRefresh'); if (rf) rf.onclick = () => { recv.docsList = null; recvPaintDocs(); };
+  const nw = $('recvDocsNew'); if (nw) nw.onclick = () => { recvResetForm(); recv.tab = 'new'; recvPaint(); };
+  root.querySelectorAll('.recv-doc-open').forEach(b => {
+    b.onclick = () => recvOpenDoc(b.getAttribute('data-docid'));
+  });
+}
+
+// Открыть существующий документ для просмотра/редактирования
+async function recvOpenDoc(id) {
+  if (!id) return;
+  try {
+    const d = await posApi('?action=recv-doc&id=' + encodeURIComponent(id), { method: 'GET' });
+    if (!d.doc) { alert('Документ не найден.'); return; }
+    const doc = d.doc;
+    recv.docId = doc.id;
+    recv.status = doc.status || 'draft';
+    recv.docNumber = doc.doc_number || '';
+    recv.docDate = (doc.doc_date || '').slice(0, 10) || recv.docDate;
+    recv.supplierId = doc.supplier_id || '';
+    recv.warehouseId = doc.warehouse_id || '';
+    recv.docMode = 'view';
+    recv.lastBarcodes = [];
+    recv.activeCalcUid = null;
+    // восстанавливаем позиции из receiving_items
+    recv.items = (d.items || []).map(it => {
+      const sizesRaw = (it.sizes && typeof it.sizes === 'object') ? it.sizes : {};
+      // определяем сетку: если единственный ключ «без размера» — товар без сетки
+      const keys = Object.keys(sizesRaw);
+      const noGrid = keys.length === 1 && keys[0] === 'без размера';
+      let sizes = sizesRaw, sizeGrid = keys.filter(k => k !== 'без размера');
+      if (noGrid) { sizes = { '_': sizesRaw['без размера'] }; sizeGrid = []; }
+      return {
+        uid: recvNewUid(), product_id: it.product_id, product_name: it.product_name || '',
+        sku: it.sku || '', category: '', sizeGrid, sizes,
+        cost_price: Number(it.cost_price) || 0, transport_cost: Number(it.transport_cost) || 0,
+        fixed_cost_pct: Number(it.fixed_cost_pct) || 0, variable_cost_pct: Number(it.variable_cost_pct) || 0,
+        doctor_pct: Number(it.doctor_pct) || 0, seller_pct: Number(it.seller_pct) || 0,
+        profit_pct: Number(it.profit_pct) || 0,
+      };
+    });
+    recv.tab = 'new';
+    recvPaint();
+  } catch (e) { alert('Не удалось открыть документ: ' + (e.message || e)); }
+}
+
+// ══════════════════════════════════════════════════════
+//  ВКЛАДКА «ПОСТАВЩИКИ»
+// ══════════════════════════════════════════════════════
+async function recvPaintSuppliers() {
+  const root = $('recvTabBody');
+  if (!root) return;
+  root.innerHTML = `<div class="loading">⏳ Загрузка поставщиков…</div>`;
+  if (!recv.suppliersAll) {
+    try {
+      const d = await posApi('?action=recv-suppliers&all=1', { method: 'GET' });
+      recv.suppliersAll = d.suppliers || [];
+    } catch (e) { root.innerHTML = errBar('Не удалось загрузить поставщиков: ' + (e.message || e)); return; }
+  }
+  const sups = recv.suppliersAll || [];
+  const rows = sups.map(s => `<tr data-supid="${s.id}">
+    <td>${esc(s.name)}</td>
+    <td>${esc(s.note || '—')}</td>
+    <td>${esc(s.phone || '—')}</td>
+    <td class="c">${s.is_active ? '<span class="recv-badge recv-badge-ok">Активен</span>' : '<span class="recv-badge recv-badge-off">Скрыт</span>'}</td>
+    <td class="c">
+      <button class="btn btn-outline btn-sm recv-sup-edit" data-supid="${s.id}">Изменить</button>
+      <button class="btn btn-ghost btn-sm recv-sup-toggle" data-supid="${s.id}">${s.is_active ? 'Скрыть' : 'Активировать'}</button>
+    </td>
+  </tr>`).join('');
+  root.innerHTML = `
+    <div class="recv-head">
+      <div class="recv-title">Поставщики <span class="recv-badge">${sups.length}</span></div>
+      <div class="recv-head-actions">
+        <button class="btn btn-outline" id="recvSupImport">⬇ Импорт из 1С</button>
+        <button class="btn btn-primary" id="recvSupAdd">+ Добавить</button>
+      </div>
+    </div>
+    ${sups.length ? `<div class="recv-docs-tablewrap"><table class="recv-docs-table">
+      <thead><tr><th>Название</th><th>Примечание</th><th>Телефон</th><th class="c">Статус</th><th class="c">Действия</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : `<div class="recv-empty">Нет поставщиков. Нажмите «Импорт из 1С», чтобы подтянуть список.</div>`}
+  `;
+  const imp = $('recvSupImport'); if (imp) imp.onclick = recvImportSuppliers;
+  const add = $('recvSupAdd'); if (add) add.onclick = () => recvSupplierDialog(null);
+  root.querySelectorAll('.recv-sup-edit').forEach(b => {
+    b.onclick = () => recvSupplierDialog(sups.find(x => x.id === b.getAttribute('data-supid')));
+  });
+  root.querySelectorAll('.recv-sup-toggle').forEach(b => {
+    b.onclick = async () => {
+      const s = sups.find(x => x.id === b.getAttribute('data-supid'));
+      if (!s) return;
+      try {
+        await posApi('?action=recv-supplier-update', { method: 'POST', body: JSON.stringify({ id: s.id, is_active: !s.is_active }) });
+        recv.suppliersAll = null; recv.loaded = false; recvPaintSuppliers();
+      } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+    };
+  });
+}
+
+// Импорт поставщиков из 1С
+async function recvImportSuppliers() {
+  if (!confirm('Импортировать поставщиков из 1С? Уже существующие не дублируются.')) return;
+  try {
+    const d = await posApi('?action=recv-suppliers-import', { method: 'POST', body: JSON.stringify({}) });
+    alert(`Импорт из 1С завершён.\nДобавлено: ${d.inserted}. Пропущено (уже есть): ${d.skipped}. Всего в 1С: ${d.total1c}.`);
+    recv.suppliersAll = null; recv.loaded = false; recvPaintSuppliers();
+  } catch (e) { alert('Не удалось импортировать: ' + (e.message || e)); }
+}
+
+// Диалог добавления/редактирования поставщика (простой через prompt)
+async function recvSupplierDialog(sup) {
+  const isEdit = !!sup;
+  const name = prompt(isEdit ? 'Название поставщика:' : 'Название нового поставщика:', isEdit ? (sup.name || '') : '');
+  if (name === null) return;
+  if (!name.trim()) { alert('Название обязательно.'); return; }
+  const phone = prompt('Телефон (можно пусто):', isEdit ? (sup.phone || '') : '');
+  if (phone === null) return;
+  const note = prompt('Примечание (можно пусто):', isEdit ? (sup.note || '') : '');
+  if (note === null) return;
+  try {
+    if (isEdit) {
+      await posApi('?action=recv-supplier-update', { method: 'POST', body: JSON.stringify({ id: sup.id, name: name.trim(), phone, note }) });
+    } else {
+      await posApi('?action=recv-supplier-create', { method: 'POST', body: JSON.stringify({ name: name.trim(), phone, note }) });
+    }
+    recv.suppliersAll = null; recv.loaded = false; recvPaintSuppliers();
+  } catch (e) { alert('Ошибка: ' + (e.message || e)); }
+}
+
+// ── Печать ценников (сгенерированные ШК) ──
+// Цена для этикетки: округление до десятых, без хвостового нуля (387,50→387,5; 300→300; 294,50→294,5)
+function recvFmtPrice(n) {
+  const v = Math.round((Number(n) || 0) * 10) / 10;
+  return v.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+}
+
+// SVG-иконка стопы (белая на чёрном квадрате) — как на макете
+function recvFootSVG() {
+  return `<svg viewBox="0 0 100 130" xmlns="http://www.w3.org/2000/svg"><g fill="#fff">`
+    + `<path d="M30 62 C22 62 16 72 16 88 C16 104 26 116 40 116 C54 116 62 106 62 92 C62 78 54 62 42 62 Z"/>`
+    + `<ellipse cx="72" cy="52" rx="11" ry="14"/>`
+    + `<ellipse cx="60" cy="34" rx="8.5" ry="11"/>`
+    + `<ellipse cx="46" cy="24" rx="7.5" ry="9.5"/>`
+    + `<ellipse cx="33" cy="22" rx="6.5" ry="8"/>`
+    + `<ellipse cx="22" cy="28" rx="5.5" ry="7"/>`
+    + `</g></svg>`;
+}
+
+// Печать этикеток 58×40мм с настоящим EAN-13 (JsBarcode)
+// items: [{barcode, size, productName, salePrice}]  — по одной этикетке на экземпляр
+function recvBuildLabelsHTML(items) {
+  const cards = items.map((b, i) => `
+    <div class="lbl">
+      <div class="lbl-name">${esc(String(b.productName || ''))}</div>
+      <div class="lbl-hr"></div>
+      <div class="lbl-mid">
+        <div class="lbl-col">
+          <div class="lbl-tag">РАЗМЕР</div>
+          <div class="lbl-size">${esc(String(b.size || ''))}</div>
+        </div>
+        <div class="lbl-vsep"></div>
+        <div class="lbl-col">
+          <div class="lbl-tag">ЦЕНА</div>
+          <div class="lbl-price"><span class="lbl-price-num">${recvFmtPrice(b.salePrice)}</span> <span class="lbl-cur">TJS</span></div>
+        </div>
+      </div>
+      <div class="lbl-bc"><svg class="bc" data-code="${esc(String(b.barcode || ''))}" id="bc${i}"></svg></div>
+    </div>`).join('');
+
+  return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ценники</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
+    <style>
+      @page{size:58mm 40mm;margin:0}
+      *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      html,body{width:58mm;background:#fff}
+      body{font-family:Arial,'Helvetica Neue',sans-serif}
+      @media screen{body{background:#e9edef;padding:6mm}}
+      /* Каждая этикетка = отдельная страница 58×40мм. Grid с фиксированными строками — блоки не наложатся. */
+      .lbl{width:58mm;height:40mm;background:#fff;padding:2mm 2.5mm;
+           display:grid;grid-template-rows:8mm 0.5mm 11mm 1fr;row-gap:0.8mm;
+           overflow:hidden;page-break-after:always;break-after:page;
+           page-break-inside:avoid;break-inside:avoid}
+      .lbl:last-child{page-break-after:auto;break-after:auto}
+      @media screen{.lbl{margin-bottom:6mm;box-shadow:0 1px 5px rgba(0,0,0,.15)}}
+      /* Название — до 2 строк, обрезка по высоте ячейки. Шрифт авто-подгоняется в fitLabels(). */
+      .lbl-name{font-size:3.1mm;font-weight:800;line-height:1.05;color:#000;text-transform:uppercase;
+                height:8mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+      .lbl-hr{background:#000;width:100%;height:0.4mm}
+      /* Размер и цена — две равные колонки с разделителем; крупный отступ между ними */
+      .lbl-mid{display:grid;grid-template-columns:1fr 0.4mm 1.15fr;align-items:center;column-gap:3mm;overflow:hidden}
+      .lbl-col{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1mm;overflow:hidden;min-width:0;width:100%}
+      .lbl-vsep{width:0.4mm;height:8mm;background:#000;align-self:center}
+      .lbl-tag{font-size:2mm;font-weight:800;letter-spacing:0.2mm;color:#fff;background:#000;
+               border-radius:0.8mm;padding:0.4mm 2mm;text-transform:uppercase;white-space:nowrap}
+      /* Размер — не переносится, шрифт авто-подгоняется в fitLabels() под ширину колонки. */
+      .lbl-size{font-size:6mm;font-weight:900;color:#000;line-height:1;white-space:nowrap;max-width:100%}
+      .lbl-price{color:#000;line-height:1;white-space:nowrap}
+      .lbl-price-num{font-size:5mm;font-weight:900}
+      .lbl-cur{font-size:2.4mm;font-weight:800;margin-left:0.3mm}
+      /* Штрихкод — своя ячейка, строго вписан по высоте */
+      .lbl-bc{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+      .lbl-bc svg{max-width:100%;max-height:100%;display:block}
+    </style></head><body>
+    ${cards}
+    <script>
+      // Авто-подгонка шрифта: длинные названия и длинные размеры («стандарт») уменьшаются, пока не влезут.
+      function fitOne(el, opts){
+        if(!el) return;
+        var min=opts.min, cur=opts.max, byW=opts.byWidth, byH=opts.byHeight;
+        // Для замера высоты снимаем line-clamp и фиксированную высоту, иначе scrollHeight = обрезанной.
+        var clampProp=null, hProp=null;
+        if(byH){ clampProp=el.style.webkitLineClamp; hProp=el.style.height;
+                 el.style.webkitLineClamp='unset'; el.style.display='block'; el.style.height='auto'; }
+        el.style.fontSize=cur+'mm';
+        // Максимум высоты: 8мм ячейки названия (в px через временный замер).
+        var probe=document.createElement('div'); probe.style.height='8mm'; probe.style.position='absolute'; probe.style.visibility='hidden';
+        document.body.appendChild(probe); var maxH=probe.clientHeight; document.body.removeChild(probe);
+        var guard=0;
+        while(guard++<60){
+          var okW = byW ? (el.scrollWidth <= el.clientWidth+1) : true;
+          var okH = byH ? (el.scrollHeight <= maxH+1) : true;
+          if(okW && okH) break;
+          cur -= 0.15;
+          if(cur < min){ cur=min; el.style.fontSize=cur+'mm'; break; }
+          el.style.fontSize=cur+'mm';
+        }
+        // Возвращаем clamp и высоту — на случай если на min всё равно не влезло (обрежет «…»).
+        if(byH){ el.style.display='-webkit-box'; el.style.webkitLineClamp = clampProp || '2'; el.style.height = hProp || '8mm'; }
+      }
+      function fitLabels(){
+        document.querySelectorAll('.lbl').forEach(function(lbl){
+          // Размер — в одну строку по ширине колонки (6мм → до 2.6мм)
+          fitOne(lbl.querySelector('.lbl-size'), {max:6, min:2.6, byWidth:true, byHeight:false});
+          // Название — до 2 строк по высоте ячейки (3.1мм → до 2.2мм)
+          fitOne(lbl.querySelector('.lbl-name'), {max:3.1, min:2.2, byWidth:false, byHeight:true});
+        });
+      }
+      function draw(){
+        if(!window.JsBarcode){setTimeout(draw,120);return;}
+        document.querySelectorAll('svg.bc').forEach(function(el){
+          var code=el.getAttribute('data-code')||'';
+          try{
+            if(/^[0-9]{13}$/.test(code)){
+              JsBarcode(el,code,{format:'EAN13',width:1.6,height:34,fontSize:11,margin:0,textMargin:1,displayValue:true});
+            }else{
+              JsBarcode(el,code,{format:'CODE128',width:1.3,height:34,fontSize:11,margin:0,displayValue:true});
+            }
+          }catch(e){
+            JsBarcode(el,code,{format:'CODE128',width:1.3,height:34,fontSize:11,margin:0,displayValue:true});
+          }
+        });
+        fitLabels();
+        setTimeout(function(){fitLabels();window.focus();window.print();},400);
+      }
+      window.onload=draw;
+    <\/script></body></html>`;
+}
+
+async function recvPrintLabels() {
+  let bc = recv.lastBarcodes || [];
+  // если штрихкодов нет в памяти, но документ проведён — подтянем из БД (перепечать)
+  if (!bc.length && recv.docId) {
+    try {
+      const d = await posApi('?action=recv-doc-barcodes&id=' + encodeURIComponent(recv.docId), { method: 'GET' });
+      bc = d.barcodes || [];
+      recv.lastBarcodes = bc;
+    } catch (e) { alert('Не удалось загрузить штрихкоды документа: ' + (e.message || e)); return; }
+  }
+  if (!bc.length) { alert('Сначала проведите поступление — тогда появятся штрихкоды для печати.'); return; }
+  const html = recvBuildLabelsHTML(bc);
+  // открываем в новом окне (надёжнее для загрузки JsBarcode и диалога печати)
+  const w = window.open('', '_blank');
+  if (w) { w.document.open(); w.document.write(html); w.document.close(); }
+  else {
+    // fallback — во встроенный iframe
+    const frame = $('recvPrintFrame');
+    if (frame) { const doc = frame.contentWindow.document; doc.open(); doc.write(html); doc.close(); }
+    else alert('Разрешите всплывающие окна для печати этикеток.');
+  }
+}
+
 
 // ══════════════════════════════════════════════════════════
 //  СТАРТ

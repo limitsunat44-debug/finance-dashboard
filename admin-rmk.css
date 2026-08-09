@@ -105,6 +105,12 @@ input,select{font-family:inherit;font-size:14px;color:var(--tx)}
   font-size:14px;font-weight:500;color:#6b7280;
 }
 .sb-logout:hover{color:var(--red)}
+.sb-version{
+  display:flex;align-items:center;gap:9px;padding:10px 22px;border-top:1px solid var(--line2);
+  font-size:12px;font-weight:600;color:var(--tx2);cursor:pointer;background:none;border-left:none;border-right:none;border-bottom:none;width:100%;text-align:left;
+}
+.sb-version:hover{color:var(--g,#10b981)}
+.sb-version .sb-ic{font-size:13px}
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column}
 
@@ -253,19 +259,80 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .tbl-receipts .rc-row.open td{border-bottom-color:transparent}
 .rc-caret .caret{display:inline-block;font-size:16px;font-weight:700;color:var(--tx3);transition:transform .15s,color .15s}
 .tbl-receipts .rc-row.open .caret{color:var(--g2)}
-.rc-detail-cell{padding:0!important;background:#fafcfb}
-.rc-detail-inner{padding:6px 14px 16px 46px}
-.rc-det-head{font-size:13px;font-weight:700;color:var(--g3);margin:10px 0 8px}
-.rc-det-loading,.rc-det-empty,.rc-det-err{padding:16px;color:var(--tx2);font-size:13px}
+.rc-detail-cell{padding:0!important;background:#fbfcfc}
+.rc-detail-inner{padding:0}
+.rc-det-loading,.rc-det-empty,.rc-det-err{padding:18px 24px;color:var(--tx2);font-size:13px}
 .rc-det-err{color:var(--red)}
-table.tbl.rc-items{background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden}
-table.tbl.rc-items th{background:#f4f7f6;font-size:11px;padding:8px 10px}
-table.tbl.rc-items td{padding:9px 10px;font-size:13px}
-table.tbl.rc-items tbody tr:hover{background:#fafcfb}
-.rc-size{display:inline-block;font-size:11px;font-weight:600;color:var(--g3);background:var(--g-soft);padding:1px 7px;border-radius:6px;margin-left:6px}
-.rc-bc{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px}
-.rc-disc{color:var(--amber);font-weight:600}
-table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
+
+/* ── Раскрытый чек: две колонки + мета-полоса ── */
+.rc-det{padding:0}
+.rc-det-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:0}
+.rc-col-items{padding:18px 22px 18px 40px;border-right:1px solid var(--line2)}
+.rc-col-info{padding:18px 24px}
+.rc-sec-head{display:flex;align-items:center;justify-content:space-between;margin:0 0 2px}
+.rc-sec-head h4{margin:0;font-size:15px;font-weight:700;color:var(--tx)}
+.rc-poscount{font-size:12px;color:var(--tx3);margin:0 0 12px}
+
+.rc-items-wrap{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#fff}
+table.rc-items-tbl{width:100%;border-collapse:collapse}
+table.rc-items-tbl th{background:#f5f8f7;font-size:11px;font-weight:600;color:var(--tx2);text-transform:uppercase;letter-spacing:.3px;padding:9px 12px;text-align:left;border-bottom:1px solid var(--line)}
+table.rc-items-tbl th.c{text-align:center}table.rc-items-tbl th.r{text-align:right}
+table.rc-items-tbl td{padding:11px 12px;font-size:13px;color:var(--tx);border-bottom:1px solid var(--line2)}
+table.rc-items-tbl td.c{text-align:center}table.rc-items-tbl td.r{text-align:right}
+table.rc-items-tbl tbody tr:last-child td{border-bottom:1px solid var(--line)}
+table.rc-items-tbl .rc-idx{color:var(--tx3)}
+table.rc-items-tbl .rc-name{font-weight:600}
+.rc-dash{color:var(--tx3)}
+.rc-disc{color:var(--red);font-weight:600}
+table.rc-items-tbl tfoot .rc-items-total td{background:#f5f8f7;font-size:14px;font-weight:700;color:var(--tx);padding:12px}
+table.rc-items-tbl tfoot .rc-items-total td.r:last-child{color:var(--g3)}
+
+.rc-info-head{margin-bottom:16px}
+.rc-info-actions{display:flex;align-items:center;gap:8px}
+.rc-btn-print{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--tx);background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 12px;cursor:pointer;transition:background .15s,border-color .15s}
+.rc-btn-print:hover{background:var(--g-soft);border-color:var(--g-soft2);color:var(--g3)}
+.rc-btn-print svg{color:var(--tx2)}
+.rc-btn-print:hover svg{color:var(--g2)}
+.rc-btn-dots{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;color:var(--tx2);background:#fff;border:1px solid var(--line);border-radius:9px;cursor:pointer;transition:background .15s}
+.rc-btn-dots:hover{background:#f5f8f7}
+
+.rc-info-cols{display:grid;grid-template-columns:1fr 1fr 1.2fr;gap:18px 24px}
+.rc-info-block{min-width:0}
+.rc-meta-pair{margin-bottom:14px}
+.rc-meta-pair:last-child{margin-bottom:0}
+.rc-meta-k{font-size:12px;color:var(--tx3);margin-bottom:3px}
+.rc-meta-v{font-size:14px;color:var(--tx);word-break:break-word}
+.rc-meta-v.strong{font-weight:700}
+
+.rc-pay-block{border-left:1px solid var(--line2);padding-left:22px}
+.rc-pay-title{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.rc-pay-title>span:first-child{font-size:14px;font-weight:700;color:var(--tx)}
+.rc-pay-status{font-size:11px}
+.rc-pay-method{margin-bottom:12px}
+.rc-pay-line{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px;color:var(--tx2);padding:5px 0}
+.rc-pay-line .tnum{color:var(--tx);font-weight:600}
+.rc-pay-grand{margin-top:6px;padding-top:10px;border-top:1px solid var(--line);font-weight:700}
+.rc-pay-grand span{color:var(--tx)!important}
+.rc-pay-grand .tnum{color:var(--g3)!important;font-weight:700}
+
+.rc-metabar{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:#f5f8f7;border-top:1px solid var(--line);padding:16px 24px 16px 40px}
+.rc-metabar-item{display:flex;align-items:flex-start;gap:10px}
+.rc-metabar-item>svg{color:var(--tx3);flex:0 0 auto;margin-top:2px}
+.rc-mb-k{font-size:11px;color:var(--tx3);margin-bottom:3px}
+.rc-mb-v{font-size:13px;font-weight:600;color:var(--tx);word-break:break-word}
+.rc-uid{display:inline-flex;align-items:center;gap:6px;font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12.5px}
+.rc-copy{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:none;background:transparent;color:var(--tx3);cursor:pointer;border-radius:5px;transition:color .15s,background .15s}
+.rc-copy:hover{color:var(--g2);background:var(--g-soft)}
+.rc-copy.rc-copied{color:var(--g2)}
+.rc-copy.rc-copied::after{content:"✓";font-size:12px;font-family:inherit}
+
+@media(max-width:960px){
+  .rc-det-grid{grid-template-columns:1fr}
+  .rc-col-items{border-right:none;border-bottom:1px solid var(--line2);padding-left:22px}
+  .rc-info-cols{grid-template-columns:1fr}
+  .rc-pay-block{border-left:none;padding-left:0;border-top:1px solid var(--line2);padding-top:14px}
+  .rc-metabar{grid-template-columns:1fr 1fr;padding-left:22px}
+}
 
 .stub{max-width:520px;margin:60px auto;text-align:center;background:#fff;border:1px solid var(--line);border-radius:var(--radius);padding:50px 40px;box-shadow:var(--shadow)}
 .stub-ic{font-size:44px;margin-bottom:14px}
@@ -610,3 +677,493 @@ table.tbl.rc-items tfoot .tbl-total td{background:#f4f7f6;font-size:14px}
 .fin-modal .fld-check{flex-direction:row;align-items:center;gap:8px;font-size:14px;color:var(--tx)}
 .fin-modal .fld-check input{width:auto}
 .fin-modal .errbar{margin:0 22px 16px}
+
+/* ══ Вид оплаты в деталях чека (Фича 2) ══ */
+.pay-badge{display:inline-block;font-size:12px;font-weight:700;padding:2px 10px;border-radius:999px;line-height:1.6;white-space:nowrap}
+.pay-badge.pay-cash{color:#047857;background:var(--g-soft);border:1px solid var(--g-soft2)}
+.pay-badge.pay-card{color:#1d4ed8;background:#eff6ff;border:1px solid #dbeafe}
+.pay-badge.pay-mixed{color:#b45309;background:#fffbeb;border:1px solid #fde68a}
+.pay-badge.pay-unknown{color:var(--tx3);background:#f3f4f6;border:1px solid var(--line)}
+/* (старые стили rc-pay-box удалены — блок оплаты теперь внутри rc-info-cols) */
+
+/* ══ Раздел «Отчёты по продажам за день» (Фича 1) ══ */
+table.tbl.sr-tbl tbody tr.sr-row{cursor:pointer;transition:background .12s}
+table.tbl.sr-tbl tbody tr.sr-row:hover{background:#fafcfb}
+table.tbl.sr-tbl tbody tr.sr-row.open{background:var(--g-soft)}
+table.tbl.sr-tbl .caret{display:inline-block;font-size:16px;font-weight:700;color:var(--tx3);transition:color .15s}
+table.tbl.sr-tbl tr.sr-row.open .caret{color:var(--g2)}
+tr.sr-det>td{padding:0!important;background:#fafcfb;border-bottom:2px solid var(--line)}
+tr.sr-det>td>div{padding:10px 16px 18px 46px}
+.sr-det-summary{display:flex;gap:24px;flex-wrap:wrap;margin:6px 0 12px}
+.sr-sum-item{display:flex;flex-direction:column;gap:2px}
+.sr-sum-item span{font-size:12px}
+.sr-sum-item b{font-size:18px;color:var(--tx)}
+.sr-bd-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.sr-bd-chip{font-size:12px;color:var(--tx2);background:#fff;border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+.sr-bd-chip b{color:var(--g3)}
+
+/* ═══════════ ОТЧЁТ ПО СНЯТИЮ ДС (иерархия магазин→типы оплаты, вид как в PDF) ═══════════ */
+/* компактная таблица: ширина по содержимому, выровнена влево, пустота справа */
+/* селектор table.tbl.cr-tbl — сильнее базового table.tbl{width:100%} */
+table.tbl.cr-tbl{width:auto!important;min-width:0;table-layout:auto}
+.cr-tbl th,.cr-tbl td{padding:7px 14px;white-space:nowrap}
+/* шапка — бирюзовая с белым текстом (как в печатном варианте) */
+.cr-tbl thead th{background:#108589;color:#fff;font-weight:700;font-size:11.5px;
+  text-align:center;border-bottom:none;padding:9px 12px;vertical-align:middle;line-height:1.25}
+.cr-tbl thead th:first-child{border-top-left-radius:10px}
+.cr-tbl thead th:last-child{border-top-right-radius:10px}
+.cr-tbl th.cr-num,.cr-tbl td.cr-num{text-align:center}
+.cr-tbl td.cr-num{color:var(--tx3);font-size:12px}
+.cr-tbl .cr-shop td{background:var(--g-soft);border-top:1px solid var(--g-soft2);border-bottom:1px solid var(--g-soft2);font-weight:700}
+.cr-tbl .cr-shop td:first-child,.cr-tbl .cr-shop .cr-num{color:var(--g3)}
+.cr-tbl .cr-shop b{color:var(--g3)}
+.cr-tbl .cr-sub td{padding-top:8px;padding-bottom:8px}
+.cr-tbl .cr-sub .cr-type{padding-left:22px;color:var(--tx)}
+.cr-tbl .cr-ret{color:var(--red);font-weight:600}
+.cr-tbl .cr-grand td{border-top:2px solid var(--g2);background:var(--g-soft);font-weight:800;color:var(--g3)}
+.cr-tbl .cr-grand b{color:var(--g3)}
+/* поле «сумма по кассе» */
+.cr-cash{width:110px;text-align:right;font-size:13px;font-weight:600;color:var(--tx);
+  padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;font-family:inherit}
+.cr-cash:focus{outline:none;border-color:var(--g2);box-shadow:0 0 0 3px var(--g-soft2)}
+/* галочка/крестик сверки (насыщенная зелёная галочка, как в PDF) */
+.cr-ok{color:#04965a;font-weight:900;font-size:17px;line-height:1}
+.cr-bad{color:var(--red);font-weight:900;font-size:17px;line-height:1}
+/* бейджи платёжных систем */
+.pay-badge.pb-alif{display:inline-flex;align-items:center;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:.3px;vertical-align:middle;margin-left:2px;line-height:1.6;background:#e8f7ee;color:#1a9f4b}
+.pay-badge.pb-dc{display:inline-flex;align-items:center;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:.3px;vertical-align:middle;margin-left:2px;line-height:1.6;background:#fff3d6;color:#b8860b}
+
+/* ── шапка-документ отчёта ДС (как в печатном PDF) ── */
+.cr-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:4px}
+.cr-brand{display:flex;align-items:center;gap:10px}
+.cr-logo{width:38px;height:38px;border-radius:9px;object-fit:cover}
+.cr-brand-name{font-size:20px;font-weight:800;color:#108589;line-height:1.1}
+.cr-brand-sub{font-size:12px;color:var(--tx2)}
+.cr-meta{text-align:right}
+.cr-doc-title{font-size:16px;font-weight:800;color:var(--tx);margin-bottom:3px}
+.cr-doc-meta{font-size:12px;color:var(--tx2);line-height:1.5}
+.cr-hr{height:2px;background:#108589;border-radius:2px;margin:10px 0 16px}
+/* подписи */
+.cr-sign{display:flex;gap:26px;flex-wrap:wrap;margin:22px 2px 6px}
+.cr-sign-item{display:flex;align-items:flex-end;gap:8px;flex:1;min-width:180px}
+.cr-sign-item span{font-size:13px;color:var(--tx);white-space:nowrap}
+.cr-sign-item i{flex:1;border-bottom:1px solid #9aa;height:16px;display:block}
+/* футер */
+.cr-foot{text-align:center;font-size:12px;color:#108589;font-weight:700;margin-top:14px}
+
+/* ═══════════════ ПОСТУПЛЕНИЕ ТОВАРА ═══════════════ */
+/* Под-вкладки раздела поступления */
+.recv-tabs{display:flex;gap:4px;margin-bottom:18px;border-bottom:2px solid var(--line);flex-wrap:wrap}
+.recv-tab{background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;padding:10px 18px;font-size:15px;font-weight:700;color:var(--tx2);cursor:pointer;transition:color .15s,border-color .15s}
+.recv-tab:hover{color:var(--g2)}
+.recv-tab.active{color:var(--g2);border-bottom-color:var(--g)}
+/* Шапка номер документа / инфо-полоса */
+.recv-docno{font-size:14px;font-weight:700;color:var(--g2);background:var(--g-soft);padding:2px 10px;border-radius:20px}
+.recv-note-bar{background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:14px}
+.recv-badge-off{font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#f1f5f9;color:#64748b}
+/* Таблицы документов/поставщиков */
+.recv-docs-tablewrap{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.recv-docs-table{width:100%;border-collapse:collapse;font-size:14px}
+.recv-docs-table th{background:var(--g-soft);color:var(--g2);font-weight:700;text-align:left;padding:11px 14px;font-size:13px;white-space:nowrap}
+.recv-docs-table td{padding:11px 14px;border-top:1px solid var(--line);color:var(--tx)}
+.recv-docs-table tr:hover td{background:var(--g-soft)}
+.recv-docs-table .c{text-align:center}
+.recv-docs-table .r{text-align:right;font-variant-numeric:tabular-nums}
+.recv-dl-num{font-weight:700;color:var(--g2)}
+.recv-toolbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;align-items:center}
+.recv-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.recv-title{font-size:22px;font-weight:800;color:var(--tx);display:flex;align-items:center;gap:10px}
+.recv-badge{font-size:12px;font-weight:700;padding:3px 10px;border-radius:20px;background:#fef3c7;color:#b45309}
+.recv-badge-ok{background:var(--g-soft2);color:var(--g3)}
+.recv-head-actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn-outline{background:#fff;border:1.5px solid var(--g);color:var(--g2);border-radius:9px;padding:9px 14px;font-weight:600;cursor:pointer}
+.btn-outline:hover{background:var(--g-soft)}
+
+.recv-form-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:16px;box-shadow:var(--shadow)}
+.recv-form-grid{display:grid;grid-template-columns:1.4fr 1.4fr 1fr 1fr;gap:14px}
+.recv-field{display:flex;flex-direction:column;gap:5px}
+.recv-lbl{font-size:12px;font-weight:600;color:var(--tx2)}
+.recv-lbl .req{color:var(--red)}
+.recv-inline{display:flex;align-items:center;gap:6px}
+.recv-inline .finput{flex:1}
+.recv-suffix{font-size:13px;color:var(--tx2);min-width:26px}
+.recv-plus{width:38px;height:38px;flex:none;border:1.5px solid var(--line);background:#fff;border-radius:9px;font-size:20px;color:var(--g2);cursor:pointer;line-height:1}
+.recv-plus:hover{border-color:var(--g);background:var(--g-soft)}
+
+.recv-body-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}
+.recv-items-col{min-width:0}
+.recv-items-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow)}
+.recv-sec-title{font-size:17px;font-weight:800;color:var(--tx);margin-bottom:14px}
+.recv-search-row{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.recv-search-wrap{position:relative;flex:1;min-width:200px}
+.recv-search-drop{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow-lg);z-index:30;max-height:320px;overflow:auto}
+.recv-drop-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--line2)}
+.recv-drop-item:hover{background:var(--g-soft)}
+.recv-drop-name{font-size:14px;font-weight:600;color:var(--tx)}
+.recv-drop-meta{font-size:12px;color:var(--tx3)}
+.recv-drop-empty{padding:12px;color:var(--tx3);font-size:13px}
+
+.recv-empty{padding:18px;text-align:center;color:var(--tx3);font-size:14px;background:var(--bg);border-radius:10px}
+.recv-items-table{display:flex;flex-direction:column;gap:2px}
+.recv-it-head{display:grid;grid-template-columns:1.6fr 2.2fr 1fr 70px;gap:12px;padding:0 4px 8px;font-size:12px;font-weight:700;color:var(--tx2);border-bottom:1px solid var(--line)}
+.recv-it-head .c{text-align:center}
+.recv-row{display:grid;grid-template-columns:1.6fr 2.2fr 1fr 70px;gap:12px;padding:14px 4px;border-bottom:1px solid var(--line2);align-items:start}
+.recv-row-active{background:var(--g-soft);border-radius:10px}
+.recv-nom{display:flex;gap:10px;align-items:flex-start}
+.recv-nom-ph{width:44px;height:44px;flex:none;background:var(--bg);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:20px}
+.recv-nom-name{font-size:14px;font-weight:600;color:var(--tx);line-height:1.3}
+.recv-nom-sku{font-size:11px;color:var(--tx3);margin-top:2px}
+.recv-sizes{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.recv-size-cell{text-align:center}
+.recv-size-lbl{font-size:11px;color:var(--tx2);margin-bottom:3px}
+.recv-size-inp{width:100%;padding:6px 4px;border:1.5px solid var(--line);border-radius:8px;text-align:center;font-size:13px;background:#fff}
+.recv-size-inp:focus{outline:none;border-color:var(--g)}
+.recv-nosize .recv-lbl{display:block;margin-bottom:4px}
+.recv-qty-solo{max-width:120px}
+.recv-cost{display:flex;flex-direction:column;gap:4px}
+.recv-cost-lbl{font-size:11px;color:var(--tx2)}
+.recv-cost-inp{width:100%;padding:7px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:13px}
+.recv-cost-inp:focus{outline:none;border-color:var(--g)}
+.recv-cost-total{font-size:12px;color:var(--tx2);margin-top:2px}
+.recv-cost-total b{color:var(--tx)}
+.recv-actions{display:flex;gap:4px;justify-content:center}
+.recv-icon-btn{width:32px;height:32px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font-size:15px}
+.recv-icon-btn:hover{border-color:var(--g);background:var(--g-soft)}
+.recv-del:hover{border-color:var(--red);background:var(--red-soft)}
+.recv-add-btn{margin-top:14px;width:100%;padding:12px;border:1.5px dashed var(--line);background:#fff;border-radius:10px;color:var(--g2);font-weight:600;cursor:pointer}
+.recv-add-btn:hover{border-color:var(--g);background:var(--g-soft)}
+
+.recv-totals{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}
+.recv-tot-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;box-shadow:var(--shadow)}
+.recv-tot-lbl{font-size:12px;color:var(--tx2);margin-bottom:6px}
+.recv-tot-val{font-size:22px;font-weight:800;color:var(--tx)}
+
+.recv-calc-col{position:sticky;top:12px}
+.recv-calc-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+.recv-calc-empty{gap:8px}
+.recv-calc-for{font-size:13px;color:var(--tx2);margin-bottom:2px}
+.recv-calc-for b{color:var(--tx)}
+.recv-saleprice{background:var(--g-soft);border-radius:12px;padding:14px;text-align:center;margin-top:4px}
+.recv-sale-lbl{font-size:13px;font-weight:600;color:var(--g3)}
+.recv-sale-val{font-size:30px;font-weight:900;color:var(--g3);line-height:1.1;margin:2px 0}
+.recv-sale-sub{font-size:12px;color:var(--tx2)}
+/* v1.2.30 — редактируемая продажная цена */
+.recv-sale-edit{justify-content:center;margin:6px 0 4px}
+.recv-sale-inp{max-width:160px;text-align:center;font-size:24px;font-weight:800;color:var(--g3)}
+.recv-sale-calc{font-size:12px;color:var(--tx2);margin-top:4px}
+.recv-sale-calc b{color:var(--tx1)}
+.recv-sale-usecalc{border:none;background:transparent;color:var(--acc,#2563eb);cursor:pointer;font-size:12px;text-decoration:underline;padding:0 2px}
+.recv-sale-base{font-size:12px;color:var(--tx2);margin-top:6px;line-height:1.35}
+.recv-sale-changed{color:#b45309;font-weight:600;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 8px}
+.recv-apply-all{width:100%}
+.recv-gen-bc{width:100%;font-size:15px}
+.recv-print{width:100%}
+
+@media(max-width:1100px){
+  .recv-form-grid{grid-template-columns:1fr 1fr}
+  .recv-body-grid{grid-template-columns:1fr}
+  .recv-calc-col{position:static}
+}
+@media(max-width:680px){
+  .recv-form-grid{grid-template-columns:1fr}
+  .recv-it-head{display:none}
+  .recv-row{grid-template-columns:1fr;gap:10px}
+  .recv-totals{grid-template-columns:1fr}
+  .recv-sizes{grid-template-columns:repeat(4,1fr)}
+}
+
+/* ==== Поиск товара: дропдаун с матрицей размер×склад ==== */
+.ps-tbl tr.ps-row{cursor:pointer;transition:background .12s}
+.ps-tbl tr.ps-row:hover{background:var(--g-soft)}
+.ps-tbl tr.ps-row-open{background:var(--g-soft)}
+.ps-caret{display:inline-block;color:var(--g2);font-size:11px;transition:transform .15s;transform:rotate(0deg)}
+.ps-caret.open{transform:rotate(90deg)}
+
+/* строка-контейнер детализации */
+.ps-detail-cell{background:#fafcfb;padding:0!important;border-bottom:1px solid var(--line)}
+.ps-detail{padding:0 4px 18px}
+
+/* матрица размер × склад */
+.psm-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.psm-tbl{border-collapse:collapse;width:100%;min-width:520px;font-size:13px;background:#fff}
+.psm-tbl th,.psm-tbl td{border:1px solid var(--line);padding:9px 12px;white-space:nowrap;text-align:center;color:var(--tx)}
+.psm-tbl thead th{background:#f6f8f8;color:var(--tx2);font-weight:600;font-size:12.5px}
+.psm-tbl th.psm-wh,.psm-tbl td.psm-wh{text-align:left;font-weight:500;color:var(--tx);background:#fff;position:sticky;left:0;z-index:1;min-width:150px}
+.psm-tbl thead th.psm-wh{background:#f6f8f8;color:var(--tx2);font-weight:600}
+/* ячейка с количеством — зелёная пилюля */
+.psm-cell{cursor:pointer}
+.psm-pill{display:inline-block;min-width:38px;padding:3px 10px;border-radius:20px;background:var(--g-soft2);color:var(--g3);font-weight:700;font-size:12px;font-variant-numeric:tabular-nums;transition:transform .1s,box-shadow .12s}
+.psm-cell:hover .psm-pill{box-shadow:0 0 0 2px var(--g);transform:translateY(-1px)}
+.psm-cell.psm-sel .psm-pill{background:var(--g2);color:#fff;box-shadow:0 0 0 2px var(--g2)}
+.psm-zero{color:var(--tx3);cursor:default}
+/* строка Итого */
+.psm-total td{background:#f6faf9;font-weight:700}
+.psm-total td.psm-wh{color:var(--tx);font-weight:700}
+.psm-total td b{color:var(--g2);font-weight:800}
+
+/* панель кодов */
+.psm-panel:empty{display:none}
+.psm-panel{margin-top:16px;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:18px 20px;position:relative}
+.psm-panel-head{display:flex;align-items:center;justify-content:space-between;font-size:15px;font-weight:700;color:var(--tx);margin-bottom:16px}
+.psm-panel-head .psm-cnt{color:var(--tx2);font-weight:500}
+.psm-close{border:0;background:transparent;color:var(--tx3);font-size:20px;line-height:1;cursor:pointer;padding:2px 6px;border-radius:8px;transition:.12s}
+.psm-close:hover{background:#f1f5f4;color:var(--tx)}
+/* три колонки: коды | присвоение | цена */
+.psm-grid{display:grid;grid-template-columns:minmax(240px,1fr) minmax(240px,1fr) minmax(220px,.9fr);gap:24px 28px;align-items:start}
+.psm-sub{font-size:12.5px;color:var(--tx2);font-weight:500;margin-bottom:10px}
+/* сетка чипов 3 в ряд */
+.psm-chips{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.psm-chip{display:inline-flex;align-items:center;gap:7px;background:#fff;color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.psm-chip .psm-dot{width:8px;height:8px;border-radius:50%;background:var(--g);flex:none}
+.psm-chip .psm-alias{margin-left:auto;background:var(--g-soft2);color:var(--g3);border-radius:8px;padding:0 6px;font-size:11px;font-weight:700}
+.psm-nounits{color:var(--tx3);font-size:13px;padding:4px 0}
+/* блок присвоения */
+.psm-assign{display:flex;gap:10px;align-items:stretch}
+.psm-assign .finput{flex:1;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.psm-assign .btn{white-space:nowrap}
+.psm-info{display:flex;align-items:flex-start;gap:8px;margin-top:12px;background:var(--g-soft);border:1px solid var(--g-soft2);border-radius:12px;padding:12px 14px;font-size:12.5px;color:var(--g3);line-height:1.45}
+.psm-info svg{flex:none;margin-top:1px}
+.psm-msg{margin-top:10px;font-size:13px;min-height:18px}
+.psm-ok{color:var(--g3);font-weight:600}
+.psm-err{color:var(--red);font-weight:600}
+/* нижний hint */
+.psm-hint{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--tx2);margin-top:16px;padding-top:14px;border-top:1px solid var(--line2)}
+.psm-hint svg{flex:none;color:var(--tx3)}
+
+/* блок цены в РМК */
+.psm-price-col .psm-sub{display:flex;align-items:center;gap:8px}
+.psm-badge-rmk{background:var(--g-soft2);color:var(--g3);border-radius:8px;padding:1px 8px;font-size:10.5px;font-weight:700;letter-spacing:.03em}
+.psm-price-now{font-size:13px;color:var(--tx2);margin-bottom:10px}
+.psm-price-now b{color:var(--tx);font-size:15px;font-variant-numeric:tabular-nums}
+.psm-price-now .psm-old{color:var(--tx3);text-decoration:line-through;margin-left:6px;font-size:12.5px}
+.psm-price-all{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12.5px;color:var(--tx2);cursor:pointer}
+.psm-price-all input{width:16px;height:16px;accent-color:var(--g);cursor:pointer}
+.psm-price-clear{margin-top:12px;border:1px solid var(--line);background:#fff;color:var(--tx2);border-radius:10px;padding:7px 12px;font-size:12px;cursor:pointer;transition:.12s}
+.psm-price-clear:hover{background:#f1f5f4;color:var(--tx);border-color:var(--tx3)}
+
+@media (max-width:1024px){
+  .psm-grid{grid-template-columns:1fr 1fr;gap:20px 24px}
+}
+@media (max-width:820px){
+  .psm-grid{grid-template-columns:1fr;gap:18px}
+  .psm-chips{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:640px){
+  .ps-detail{padding:0 0 12px}
+  .psm-assign{flex-direction:column}
+}
+
+/* ─── Кнопка «Редактировать» в карточке чека (только админ) ─── */
+.rc-btn-edit{display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--tx);background:#fff;border:1px solid var(--line);border-radius:9px;padding:7px 12px;cursor:pointer;transition:background .15s,border-color .15s}
+.rc-btn-edit:hover{background:#fff7ed;border-color:#fed7aa;color:var(--amber)}
+.rc-btn-edit svg{color:var(--tx2)}
+.rc-btn-edit:hover svg{color:var(--amber)}
+
+/* ─── Модалка редактирования чека ─── */
+.rcedit-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:32px 16px;overflow-y:auto}
+.rcedit-modal{background:var(--card);border-radius:16px;box-shadow:0 20px 60px rgba(16,24,40,.25);width:100%;max-width:720px;overflow:hidden;animation:rceIn .16s ease-out}
+@keyframes rceIn{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}
+.rcedit-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
+.rcedit-head h3{margin:0;font-size:16px;font-weight:700;color:var(--tx)}
+.rcedit-x{background:none;border:none;font-size:18px;color:var(--tx3);cursor:pointer;line-height:1;padding:4px 8px;border-radius:8px}
+.rcedit-x:hover{background:var(--bg);color:var(--tx)}
+.rcedit-warn{margin:0;padding:10px 22px;background:#fff7ed;color:#9a3412;font-size:12.5px;border-bottom:1px solid #fed7aa}
+.rcedit-body{padding:18px 22px;max-height:64vh;overflow-y:auto}
+.rce-sec{margin-bottom:18px}
+.rce-sec-h{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--tx2);margin-bottom:8px}
+.rce-tbl{width:100%;border-collapse:collapse;font-size:13px}
+.rce-tbl th{text-align:left;font-size:11px;font-weight:600;color:var(--tx2);padding:6px 8px;border-bottom:1px solid var(--line)}
+.rce-tbl th.c,.rce-tbl td.c{text-align:center}
+.rce-tbl th.r,.rce-tbl td.r{text-align:right}
+.rce-tbl td{padding:6px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
+.rce-tbl tfoot td{border-bottom:none;border-top:2px solid var(--line);font-weight:600;padding-top:10px}
+.rce-name{max-width:200px}
+.rce-in{width:88px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;text-align:right}
+.rce-in:focus{outline:none;border-color:var(--g);box-shadow:0 0 0 3px rgba(16,185,129,.12)}
+.rce-del{background:none;border:none;color:var(--tx3);cursor:pointer;font-size:15px;padding:2px 6px;border-radius:6px}
+.rce-del:hover{background:#fef2f2;color:var(--red)}
+.rce-pays{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.rce-payrow{display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--bg);border-radius:9px;padding:8px 12px}
+.rce-payrow label{font-size:13px;color:var(--tx);font-weight:500}
+.rce-paysum{margin-top:12px;padding:10px 14px;border-radius:9px;font-size:13.5px;display:flex;align-items:center;gap:10px}
+.rce-paysum.ok{background:#ecfdf5;color:var(--g3)}
+.rce-paysum.bad{background:#fffbeb;color:#92400e}
+.rce-ok{font-weight:600}
+.rce-diff{font-weight:600}
+.rce-void{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--tx);margin:6px 0 14px;cursor:pointer}
+.rce-void input{width:16px;height:16px;accent-color:var(--red)}
+.rce-note-wrap{display:flex;flex-direction:column;gap:6px}
+.rce-note-wrap label{font-size:12px;font-weight:600;color:var(--tx2)}
+.rce-note{padding:9px 12px;border:1px solid var(--line);border-radius:9px;font-size:13.5px;font-family:inherit}
+.rce-note:focus{outline:none;border-color:var(--g);box-shadow:0 0 0 3px rgba(16,185,129,.12)}
+.rcedit-foot{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--line);background:var(--bg)}
+.rce-cancel{padding:9px 18px;border:1px solid var(--line);background:#fff;border-radius:9px;font-size:13.5px;font-weight:600;color:var(--tx);cursor:pointer}
+.rce-cancel:hover{background:var(--bg)}
+.rce-save{padding:9px 22px;border:none;background:var(--g);border-radius:9px;font-size:13.5px;font-weight:700;color:#fff;cursor:pointer;transition:background .15s}
+.rce-save:hover{background:var(--g2)}
+.rce-save:disabled{opacity:.6;cursor:not-allowed}
+.rce-delete{margin-right:auto;padding:9px 16px;border:1px solid #e2b4b4;background:#fff;border-radius:9px;font-size:13.5px;font-weight:600;color:#c0392b;cursor:pointer;transition:background .15s}
+.rce-delete:hover{background:#fdeaea}
+.rce-delete:disabled{opacity:.6;cursor:not-allowed}
+
+/* ═══════════ CHANGELOG (история обновлений) ═══════════ */
+.clog-cur{font-size:13px;color:var(--tx2);margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line2)}
+.clog-cur b{color:var(--g)}
+.clog-rel{padding:12px 0;border-bottom:1px solid var(--line2)}
+.clog-rel:last-child{border-bottom:none}
+.clog-rel-h{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+.clog-ver{font-size:14px;font-weight:800;color:var(--tx1)}
+.clog-latest .clog-ver{color:var(--g)}
+.clog-badge{font-size:10px;font-weight:700;color:#fff;background:var(--g);padding:2px 8px;border-radius:20px}
+.clog-date{font-size:11.5px;color:var(--tx3);margin-left:auto}
+.clog-title{font-size:13px;font-weight:600;color:var(--tx1);margin-bottom:6px}
+.clog-items{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:5px}
+.clog-items li{font-size:12.5px;color:var(--tx2);line-height:1.45}
+
+/* ═══ РАЗДЕЛ: ПРОДАЖИ ПО ВРАЧАМ ═══ */
+.doc-filters{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;margin-bottom:16px}
+.doc-fld{display:flex;flex-direction:column;gap:6px}
+.doc-fld > label{font-size:12px;font-weight:600;color:var(--tx2)}
+.doc-daterange{display:flex;align-items:center;gap:8px}
+.doc-daterange .finput{width:auto}
+.doc-dash{color:var(--tx3)}
+.doc-fld-btns{margin-left:auto}
+.doc-tbl th{white-space:nowrap}
+.doc-wallet{display:flex;align-items:center;gap:6px}
+.doc-wallet .doc-wallet-inp{flex:1;min-width:130px;padding:7px 10px;font-size:13px}
+.doc-copy-btn{flex:0 0 auto;padding:7px 10px}
+.doc-total td{border-top:2px solid var(--line);background:var(--line2);font-size:14px}
+/* Выплаченный врач — зелёная строка */
+.doc-row-paid > td{background:var(--g-soft)!important}
+.doc-row-paid:hover > td{background:var(--g-soft2)!important}
+.doc-paid-btn{background:var(--g-soft2);border:1.5px solid var(--g);color:var(--g3);font-weight:700}
+.doc-paid-btn:hover{background:var(--g-soft);border-color:var(--g2)}
+/* Тост */
+.doc-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);
+  background:#1f2937;color:#fff;padding:11px 20px;border-radius:12px;font-size:14px;font-weight:600;
+  box-shadow:0 8px 28px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:9999;max-width:80vw}
+.doc-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ═══════════ Журнал перемещений (локальные документы) ═══════════ */
+.tr-tabs{display:flex;gap:8px;margin-bottom:16px;}
+.tr-tab{flex:1;padding:12px 16px;border:1.5px solid var(--line);background:#fff;color:var(--tx2);border-radius:var(--radius-sm);font-size:14px;font-weight:600;cursor:pointer;transition:all .15s;}
+.tr-tab:hover{border-color:var(--g);color:var(--g2);}
+.tr-tab.active{background:var(--g-soft);border-color:var(--g);color:var(--g3);}
+.tr-card-head.sm{display:flex;align-items:center;gap:12px;margin-bottom:16px;}
+.tr-card-head.sm .tr-ic{font-size:26px;}
+.tr-card-head.sm h2{font-size:17px;font-weight:700;color:var(--tx);}
+.tr-card-head.sm p{font-size:13px;color:var(--tx2);margin-top:2px;}
+.tr-jfilters{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+.tr-chip{padding:7px 14px;border:1.5px solid var(--line);background:#fff;color:var(--tx2);border-radius:20px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;}
+.tr-chip:hover{border-color:var(--g);color:var(--g2);}
+.tr-chip.active{background:var(--g);border-color:var(--g);color:#fff;}
+.tr-btn-ghost{background:none;border:1.5px solid var(--line);color:var(--tx2);padding:7px 14px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;}
+.tr-btn-ghost:hover{border-color:var(--g);color:var(--g2);}
+.tr-jrefresh{margin-left:auto;}
+.tr-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:700;}
+.tr-badge-ok{background:var(--g-soft2);color:var(--g3);}
+.tr-badge-draft{background:#fef3c7;color:var(--amber);}
+table.tbl.tr-tbl tbody tr.tr-jrow{cursor:pointer;transition:background .12s;}
+table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
+.tr-empty{padding:36px!important;text-align:center;color:var(--tx3);}
+.tr-doc-head{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
+.tr-doc-title{font-size:18px;font-weight:800;color:var(--tx);display:flex;align-items:center;gap:10px;}
+.tr-additem{display:flex;gap:8px;margin:14px 0 6px;}
+.tr-additem .tr-input{flex:1;}
+.tr-additem .tr-btn{padding:12px 18px;font-size:14px;white-space:nowrap;}
+.tr-code{font-family:ui-monospace,monospace;font-size:13px;background:#f1f5f4;padding:2px 8px;border-radius:6px;color:var(--tx);}
+.tr-del{width:28px;height:28px;border:none;background:var(--red-soft);color:var(--red);border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:filter .15s;}
+.tr-del:hover{filter:brightness(.95);}
+.tr-print-btn{width:30px;height:30px;border:1.5px solid var(--bd,#e2e8f0);background:#fff;border-radius:8px;font-size:15px;line-height:1;cursor:pointer;transition:background .15s,border-color .15s;}
+.tr-print-btn:hover{background:var(--g-soft);border-color:var(--g3);}
+.tr-btn-danger{background:var(--red-soft);border:1.5px solid #fecaca;color:var(--red);}
+.tr-btn-danger:hover{filter:brightness(.97);}
+.tr-doc-actions{margin-top:18px;}
+
+/* ═══════════════════════════════════════════════════════════
+   ПРОДАЖИ ПО ТОВАРАМ (view-productsales)
+   ═══════════════════════════════════════════════════════════ */
+.psa-wrap{display:flex;flex-direction:column;gap:16px}
+.psa-h{font-size:15px;font-weight:700;margin-bottom:14px;color:var(--tx)}
+.psa-h-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.psa-h-row .psa-h{margin-bottom:0}
+.psa-card{margin:0}
+
+/* Строка поиска */
+.psa-search{padding:18px 22px}
+.psa-search-grid{display:grid;grid-template-columns:1fr auto 1fr auto;gap:16px;align-items:end}
+.psa-search-col{display:flex;flex-direction:column;gap:7px;min-width:0}
+.psa-lbl{font-size:12.5px;font-weight:600;color:var(--tx2)}
+.psa-or{color:var(--tx3);font-size:13px;font-weight:600;padding-bottom:11px}
+.psa-input-ic{position:relative;display:flex;align-items:center}
+.psa-input-ic .psa-ic{position:absolute;left:12px;font-size:14px;opacity:.5;pointer-events:none}
+.psa-input-ic .finput{padding-left:34px}
+.psa-find{padding:10px 30px;white-space:nowrap;align-self:end;height:40px}
+
+/* Автоподсказка результатов поиска */
+.psa-suggest{margin-top:12px;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;max-height:340px;overflow-y:auto}
+.psa-sug-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--line2);font-size:13.5px;transition:background .12s}
+.psa-sug-item:last-child{border-bottom:none}
+.psa-sug-item:hover{background:var(--g-soft)}
+.psa-sug-meta{color:var(--tx2);font-size:12.5px;white-space:nowrap;font-weight:600}
+.psa-sug-empty{padding:18px;text-align:center;color:var(--tx3);font-size:13.5px}
+
+/* Двухколоночная сетка */
+.psa-grid{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:16px;align-items:start}
+.psa-main,.psa-side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.psa-empty,.psa-side-empty{color:var(--tx2);font-size:14px;text-align:center;padding:32px}
+.psa-side-empty{padding:20px}
+
+/* Информация о товаре */
+.psa-prod{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.psa-photo{width:60px;height:60px;flex:0 0 60px;border-radius:12px;background:var(--g-soft);display:flex;align-items:center;justify-content:center;font-size:28px}
+.psa-prod-info{flex:1;min-width:180px}
+.psa-prod-name{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.psa-prod-sub{font-size:13px;color:var(--tx2);margin-top:4px}
+.psa-prod-stats{display:flex;gap:26px;flex-wrap:wrap;margin-left:auto}
+.psa-ps-l{font-size:11.5px;color:var(--tx3);font-weight:600;margin-bottom:3px}
+.psa-ps-v{font-size:15px;font-weight:700;white-space:nowrap}
+.psa-ps-v .cur{font-size:12px;color:var(--tx2)}
+
+/* Таблицы вкладки */
+.psa-tbl{width:100%}
+.psa-tbl .cur{font-size:11px;color:var(--tx2);font-weight:600}
+.psa-tbl tfoot .psa-total td{border-top:2px solid var(--line);background:#fafcfb;font-weight:800}
+.psa-tbl-sm{font-size:12.5px}
+.psa-tbl-sm th,.psa-tbl-sm td{padding:9px 10px}
+
+/* Правая колонка — топ-товары */
+.psa-mini-sel{width:auto;min-width:150px;padding:7px 10px;font-size:13px}
+.psa-top-tbl th,.psa-top-tbl td{padding:9px 8px;font-size:12.5px}
+.psa-top-row{cursor:pointer;transition:background .12s}
+.psa-top-row:hover{background:var(--g-soft)}
+.psa-top-name{font-weight:600;line-height:1.3}
+.psa-full-btn{width:100%;margin-top:12px;justify-content:center;color:var(--g3);font-weight:600}
+.psa-full-btn:hover{border-color:var(--g);background:var(--g-soft)}
+
+/* Быстрая статистика */
+.psa-qstat{display:flex;flex-direction:column;gap:2px}
+.psa-qs{display:flex;align-items:center;gap:10px;padding:11px 4px;border-bottom:1px solid var(--line2)}
+.psa-qs:last-child{border-bottom:none}
+.psa-qs-ic{width:26px;flex:0 0 26px;text-align:center;font-size:15px;opacity:.85}
+.psa-qs-l{flex:1;font-size:13px;color:var(--tx2)}
+.psa-qs-v{font-weight:700;font-size:13.5px;white-space:nowrap}
+.psa-qs-v .cur{font-size:11px;color:var(--tx2);font-weight:600}
+
+/* Легенда графика по магазинам */
+.psa-legend{flex-direction:row;flex-wrap:wrap;gap:12px;margin-bottom:8px}
+.psa-legend .legend-item{font-size:12px;color:var(--tx2)}
+
+/* ─── Продажи по товарам: адаптация ─── */
+@media(max-width:1100px){
+  .psa-grid{grid-template-columns:1fr}
+}
+@media(max-width:760px){
+  .psa-search{padding:14px 16px}
+  .psa-search-grid{grid-template-columns:1fr;gap:12px}
+  .psa-or{display:none}
+  .psa-find{width:100%}
+  .psa-prod{flex-direction:column;align-items:flex-start;gap:12px}
+  .psa-prod-stats{margin-left:0;gap:18px 24px}
+  .psa-legend{gap:8px 12px}
+}

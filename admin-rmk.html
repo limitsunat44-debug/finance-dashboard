@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260801-081807">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260809-180254">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -17,7 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20260801-081807"></script>
+  <script src="fonts-dejavu.js?v=20260809-180254"></script>
 </head>
 <body>
 
@@ -69,8 +69,10 @@
         <button class="sb-item soon" data-view="cashbox"><span class="sb-ic">🗄</span> Денежный ящик</button>
         <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
         <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
+        <button class="sb-item" data-view="doctors"><span class="sb-ic">🩺</span> Продажи по врачам</button>
         <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
         <button class="sb-item" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
+        <button class="sb-item" data-view="productsales"><span class="sb-ic">💹</span> Продажи по товарам</button>
         <button class="sb-item" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
         <button class="sb-item" data-view="devices"><span class="sb-ic">📱</span> Устройства касс</button>
         <button class="sb-item" data-view="audit"><span class="sb-ic">📋</span> Журнал действий</button>
@@ -78,11 +80,13 @@
         <button class="sb-item" data-view="stats"><span class="sb-ic">📈</span> Статистика</button>
         <button class="sb-item" data-view="monitoring"><span class="sb-ic">🖥</span> Мониторинг магазинов</button>
         <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
+        <button class="sb-item" data-view="shiftreports"><span class="sb-ic">📊</span> Отчёты продаж за день</button>
         <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
         <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
         <button class="sb-item" data-view="finance"><span class="sb-ic">💸</span> Выручка-Расходы</button>
       </nav>
 
+      <button class="sb-version" id="btnVersion" title="История обновлений"><span class="sb-ic">✨</span> Версия <span id="sbVersionNum">—</span></button>
       <button class="sb-logout" id="btnLogout"><span class="sb-ic">⤶</span> Выйти</button>
     </aside>
 
@@ -152,6 +156,11 @@
           <div id="cdBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ПРОДАЖИ ПО ВРАЧАМ ═══ -->
+        <section class="view" id="view-doctors">
+          <div id="docBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ПОИСК ТОВАРА ═══ -->
         <section class="view" id="view-search">
           <div id="scBody"></div>
@@ -160,6 +169,11 @@
         <!-- ═══ ИСТОРИЯ ТОВАРА ═══ -->
         <section class="view" id="view-history">
           <div id="htBody"></div>
+        </section>
+
+        <!-- ═══ ПРОДАЖИ ПО ТОВАРАМ ═══ -->
+        <section class="view" id="view-productsales">
+          <div id="psaBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
         <!-- ═══ ПОЛЬЗОВАТЕЛИ ═══ -->
@@ -197,10 +211,18 @@
           <div id="cashBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ОТЧЁТЫ ПО ПРОДАЖАМ ЗА ДЕНЬ ═══ -->
+        <section class="view" id="view-shiftreports">
+          <div id="srBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ПОСТУПЛЕНИЕ ТОВАРОВ ═══ -->
         <section class="view" id="view-receiving">
           <div id="recvBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
+
+        <!-- окно печати ценников/ШК — скрытый iframe -->
+        <iframe id="recvPrintFrame" style="display:none"></iframe>
 
         <!-- ═══ ПЕРЕМЕЩЕНИЕ ТОВАРОВ ═══ -->
         <section class="view" id="view-transfer">
@@ -224,6 +246,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260801-081807"></script>
+  <script src="admin-rmk.js?v=20260809-180254"></script>
 </body>
 </html>

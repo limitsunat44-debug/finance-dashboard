@@ -8914,6 +8914,12 @@ const BC_PRONATION_C1_REF = '5ae9087f-9163-11ef-87a7-d8c0a681cbca';
 // Номенклатуры, для которых НИКОГДА не генерируем штрихкоды (диагностика/услуги)
 const BC_NO_GEN_REFS = new Set([BC_DIAGNOSTIC_C1_REF, BC_PRONATION_C1_REF]);
 
+// «Супинаторы 125» (OM-00000374): иногда продаётся как пронатор по фикс. цене 30 с.
+// Кнопка «Пронация» в корзине ККМ появляется только у этого товара.
+// В 1С проводится тот же товар, цена 30 (списывается остаток супинатора). Скидка НЕ действует.
+const POS_SUPINATOR_C1_REF = 'e12a0ef1-431d-11ed-878c-40a3ccea3566';
+const POS_PRONATION_PRICE = 30;
+
 // Применить фильтры — сбрасывает на первую страницу
 function bcUnitsApplyFilters() {
     bcUnitsPage = 0;
@@ -9723,6 +9729,7 @@ async function csFetchCodes(variantIds) {
     return (data || []).map(r => ({
         barcode: r.unique_barcode,
         characteristic_ref: r.c1_char_ref,
+        variant_id: r.variant_id,
         type: csCodeType(r.unique_barcode).label
     }));
 }
@@ -9735,12 +9742,13 @@ function csCollectLabels() {
     (cashierState.sizes || []).forEach(st => {
         if (!st.checked) return;
         if (st.mode === 'all') {
-            (st.codes || []).forEach(c => out.push({ barcode: c.barcode, size: st.size, charRef: st.charRef }));
+            (st.codes || []).forEach(c => out.push({ barcode: c.barcode, size: st.size, charRef: st.charRef, variantId: c.variant_id || null }));
         } else {
+            const cObj = (st.codes || []).find(c => c.barcode === (st.selectedBarcode || (st.codes[0] && st.codes[0].barcode)));
             const bc = st.selectedBarcode || (st.codes[0] && st.codes[0].barcode);
             if (!bc) return;
             const n = Math.max(1, parseInt(st.qty, 10) || 1);
-            for (let i = 0; i < n; i++) out.push({ barcode: bc, size: st.size, charRef: st.charRef });
+            for (let i = 0; i < n; i++) out.push({ barcode: bc, size: st.size, charRef: st.charRef, variantId: (cObj && cObj.variant_id) || null });
         }
     });
     return out;
@@ -9778,7 +9786,6 @@ async function csPrint() {
     const labels = csCollectLabels();
     if (!labels.length) { csShowError('Нет штрихкодов для печати по выбранным размерам.'); return; }
 
-    const { w, h } = csGetLabelSize();
     const prod = (barcodesState.products || []).find(p => String(p.id) === String(cashierState.selectedProductId));
     const name = prod ? (prod.name_ru || '') : '';
     const productC1Ref = cashierState.selectedProductC1Ref;
@@ -9789,6 +9796,7 @@ async function csPrint() {
         name: name,
         charRef: l.charRef,
         productC1Ref: productC1Ref,
+        variantId: l.variantId || null,
         priceOld: null, priceNew: null, currency: 'TJS'
     }));
 
@@ -9800,8 +9808,329 @@ async function csPrint() {
         }
     } catch (e) { console.warn('csPrint prices:', e); }
 
-    renderLabels(units, w, h);
-    bcDoPrint(w, h);
+    // Цена из РМК перекрывает 1С для переопределённых вариантов
+    await csApplyRmkPriceOverrides(units);
+    // Фолбэк для нативно оприходованных товаров (без 1С): цена/имя/размер по variant_id
+    await csFillFromVariants(units);
+
+    // Единый витринный шаблон 58×40 (как при поступлении)
+    csPrintLabels58x40(units);
+}
+
+// ═══ ВИТРИННЫЙ ЦЕННИК 58×40 мм — единый шаблон с печатью при поступлении ═══
+// Такой же макет, как recvBuildLabelsHTML в админке (раздел «Поступление»):
+// НАЗВАНИЕ / линия / РАЗМЕР | ЦЕНА / штрихкод EAN-13. Строгий размер 58×40 мм.
+// Печатает одну этикетку на каждый экземпляр (unit). Цена — продажная (priceNew).
+function csFmtPrice(n) {
+    const v = Math.round((Number(n) || 0) * 10) / 10;
+    return v.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+}
+// Убрать дублирующий префикс «Размер:» из значения характеристики
+// (в 1С характеристика заведена как «Размер: 35» — на этикетке уже есть бейдж «РАЗМЕР»).
+function csCleanSize(s) {
+    return String(s || '')
+        .replace(/^\s*разм(?:ер)?\.?\s*[:\-–—]?\s*/i, '')
+        .trim();
+}
+function csBuildLabelsHTML58x40(items) {
+    const cards = items.map((b, i) => {
+        const name = escapeHtml(String(b.name || b.productName || ''));
+        const size = escapeHtml(csCleanSize(b.size_label || b.size || ''));
+        const code = escapeHtml(String(b.unique_barcode || b.barcode || ''));
+        const price = (b.priceNew != null) ? b.priceNew : (b.salePrice != null ? b.salePrice : null);
+        const priceHtml = (price != null)
+            ? `<span class="lbl-price-num">${csFmtPrice(price)}</span> <span class="lbl-cur">TJS</span>`
+            : `<span class="lbl-price-num">—</span>`;
+        return `
+    <div class="lbl">
+      <div class="lbl-name">${name}</div>
+      <div class="lbl-hr"></div>
+      <div class="lbl-mid">
+        <div class="lbl-col">
+          <div class="lbl-tag">РАЗМЕР</div>
+          <div class="lbl-size">${size}</div>
+        </div>
+        <div class="lbl-vsep"></div>
+        <div class="lbl-col">
+          <div class="lbl-tag">ЦЕНА</div>
+          <div class="lbl-price">${priceHtml}</div>
+        </div>
+      </div>
+      <div class="lbl-bc"><svg class="bc" data-code="${code}" id="csbc${i}"></svg></div>
+    </div>`;
+    }).join('');
+
+    return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ценники</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"><\/script>
+    <style>
+      @page{size:58mm 40mm;margin:0}
+      *{box-sizing:border-box;margin:0;padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      html,body{width:58mm;background:#fff}
+      body{font-family:Arial,'Helvetica Neue',sans-serif}
+      @media screen{body{background:#e9edef;padding:6mm}}
+      .lbl{width:58mm;height:40mm;background:#fff;padding:2mm 2.5mm;
+           display:grid;grid-template-rows:8mm 0.5mm 11mm 1fr;row-gap:0.8mm;
+           overflow:hidden;page-break-after:always;break-after:page;
+           page-break-inside:avoid;break-inside:avoid}
+      .lbl:last-child{page-break-after:auto;break-after:auto}
+      @media screen{.lbl{margin-bottom:6mm;box-shadow:0 1px 5px rgba(0,0,0,.15)}}
+      /* Название — до 2 строк. Шрифт авто-подгоняется в fitLabels(). */
+      .lbl-name{font-size:3.1mm;font-weight:800;line-height:1.05;color:#000;text-transform:uppercase;
+                height:8mm;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+      .lbl-hr{background:#000;width:100%;height:0.4mm}
+      .lbl-mid{display:grid;grid-template-columns:1fr 0.4mm 1.15fr;align-items:center;column-gap:3mm;overflow:hidden}
+      .lbl-col{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1mm;overflow:hidden;min-width:0;width:100%}
+      .lbl-vsep{width:0.4mm;height:8mm;background:#000;align-self:center}
+      .lbl-tag{font-size:2mm;font-weight:800;letter-spacing:0.2mm;color:#fff;background:#000;
+               border-radius:0.8mm;padding:0.4mm 2mm;text-transform:uppercase;white-space:nowrap}
+      /* Размер — не переносится, шрифт авто-подгоняется в fitLabels() под ширину. */
+      .lbl-size{font-size:6mm;font-weight:900;color:#000;line-height:1;white-space:nowrap;max-width:100%}
+      .lbl-price{color:#000;line-height:1;white-space:nowrap}
+      .lbl-price-num{font-size:5mm;font-weight:900}
+      .lbl-cur{font-size:2.4mm;font-weight:800;margin-left:0.3mm}
+      .lbl-bc{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+      .lbl-bc svg{max-width:100%;max-height:100%;display:block}
+    </style></head><body>
+    ${cards}
+    <script>
+      // Авто-подгонка шрифта: длинные названия и длинные размеры («стандарт») уменьшаются, пока не влезут.
+      function fitOne(el, opts){
+        if(!el) return;
+        var min=opts.min, cur=opts.max, byW=opts.byWidth, byH=opts.byHeight;
+        var clampProp=null, hProp=null;
+        if(byH){ clampProp=el.style.webkitLineClamp; hProp=el.style.height;
+                 el.style.webkitLineClamp='unset'; el.style.display='block'; el.style.height='auto'; }
+        el.style.fontSize=cur+'mm';
+        var probe=document.createElement('div'); probe.style.height='8mm'; probe.style.position='absolute'; probe.style.visibility='hidden';
+        document.body.appendChild(probe); var maxH=probe.clientHeight; document.body.removeChild(probe);
+        var guard=0;
+        while(guard++<60){
+          var okW = byW ? (el.scrollWidth <= el.clientWidth+1) : true;
+          var okH = byH ? (el.scrollHeight <= maxH+1) : true;
+          if(okW && okH) break;
+          cur -= 0.15;
+          if(cur < min){ cur=min; el.style.fontSize=cur+'mm'; break; }
+          el.style.fontSize=cur+'mm';
+        }
+        if(byH){ el.style.display='-webkit-box'; el.style.webkitLineClamp = clampProp || '2'; el.style.height = hProp || '8mm'; }
+      }
+      function fitLabels(){
+        document.querySelectorAll('.lbl').forEach(function(lbl){
+          fitOne(lbl.querySelector('.lbl-size'), {max:6, min:2.6, byWidth:true, byHeight:false});
+          fitOne(lbl.querySelector('.lbl-name'), {max:3.1, min:2.2, byWidth:false, byHeight:true});
+        });
+      }
+      function draw(){
+        if(!window.JsBarcode){setTimeout(draw,120);return;}
+        document.querySelectorAll('svg.bc').forEach(function(el){
+          var code=el.getAttribute('data-code')||'';
+          try{
+            if(/^[0-9]{13}$/.test(code)){
+              JsBarcode(el,code,{format:'EAN13',width:1.6,height:34,fontSize:11,margin:0,textMargin:1,displayValue:true});
+            }else{
+              JsBarcode(el,code,{format:'CODE128',width:1.3,height:34,fontSize:11,margin:0,displayValue:true});
+            }
+          }catch(e){
+            JsBarcode(el,code,{format:'CODE128',width:1.3,height:34,fontSize:11,margin:0,displayValue:true});
+          }
+        });
+        fitLabels();
+        setTimeout(function(){fitLabels();window.focus();window.print();},400);
+      }
+      window.onload=draw;
+    <\/script></body></html>`;
+}
+// Открывает новое окно печати с ценниками 58×40 (как recvPrintLabels в админке)
+function csPrintLabels58x40(units) {
+    if (!units || !units.length) { alert('Нет данных для печати ценников.'); return; }
+    const html = csBuildLabelsHTML58x40(units);
+    const w = window.open('', '_blank');
+    if (w) { w.document.open(); w.document.write(html); w.document.close(); }
+    else { alert('Разрешите всплывающие окна для печати ценников.'); }
+}
+
+// Цена из РМК: если у варианта цена переопределена в админке (price_overridden=true),
+// берём product_variants.price (рМК), а НЕ цену из 1С. Связь:
+// stock_units.c1_char_ref → variant_id → product_variants(price, price_overridden).
+async function csApplyRmkPriceOverrides(units) {
+    try {
+        const chars = [...new Set((units || []).map(u => u.charRef).filter(Boolean))];
+        if (!chars.length) return;
+        // c1_char_ref → variant_id
+        const { data: su } = await ortobotClient
+            .from('stock_units')
+            .select('c1_char_ref,variant_id')
+            .in('c1_char_ref', chars)
+            .not('variant_id', 'is', null);
+        const varByChar = {};
+        (su || []).forEach(r => { if (!varByChar[r.c1_char_ref]) varByChar[r.c1_char_ref] = r.variant_id; });
+        const variantIds = [...new Set(Object.values(varByChar))];
+        if (!variantIds.length) return;
+        const { data: pv } = await ortobotClient
+            .from('product_variants')
+            .select('id,price,price_overridden')
+            .in('id', variantIds);
+        const rmkByVariant = {}; // variant_id → {price, overridden}
+        (pv || []).forEach(v => { rmkByVariant[v.id] = { price: (v.price != null ? Number(v.price) : null), overridden: v.price_overridden === true }; });
+        units.forEach(u => {
+            const vid = u.charRef ? varByChar[u.charRef] : null;
+            const rec = vid ? rmkByVariant[vid] : null;
+            if (rec && rec.overridden && rec.price != null) {
+                u.priceNew = rec.price;   // цена рМК перекрывает 1С
+            }
+        });
+    } catch (e) { console.warn('csApplyRmkPriceOverrides:', e); }
+}
+
+// Фолбэк для нативно оприходованных товаров (без 1С).
+// У таких экземпляров c1_char_ref/c1_prod_ref = null, есть только variant_id.
+// Берём имя (products.name_ru), цену (product_variants.price) и размер по variant_id,
+// если они ещё не заполнены через 1С. Работает и для 1С-товаров (как страховка).
+async function csFillFromVariants(units) {
+    try {
+        if (!Array.isArray(units) || !units.length) return;
+        // варианты, где нет цены ЛИБО нет внятного имени
+        const need = units.filter(u => u && u.variantId && (u.priceNew == null || !u.name || u.name === u.unique_barcode));
+        if (!need.length) return;
+        const vids = [...new Set(need.map(u => u.variantId))];
+        const { data: vars, error } = await ortobotClient
+            .from('product_variants')
+            .select('id,price,size_label,product_id,currency')
+            .in('id', vids);
+        if (error) throw error;
+        const varById = {};
+        (vars || []).forEach(v => { varById[v.id] = v; });
+        // имена товаров по product_id
+        const pids = [...new Set((vars || []).map(v => v.product_id).filter(Boolean))];
+        const nameById = {};
+        if (pids.length) {
+            const { data: prods } = await ortobotClient
+                .from('products').select('id,name_ru').in('id', pids);
+            (prods || []).forEach(p => { nameById[p.id] = p.name_ru; });
+        }
+        units.forEach(u => {
+            const v = u.variantId ? varById[u.variantId] : null;
+            if (!v) return;
+            if (u.priceNew == null && v.price != null) u.priceNew = Number(v.price);
+            if (v.currency) u.currency = v.currency;
+            if (!u.size_label && v.size_label) u.size_label = v.size_label;
+            const nm = nameById[v.product_id];
+            if (nm && (!u.name || u.name === u.unique_barcode || u.name === u.size_label)) u.name = nm;
+        });
+    } catch (e) { console.warn('csFillFromVariants:', e); }
+}
+
+// ═══ БЫСТРЫЙ ЦЕННИК ПО ШТРИХКОДУ (один или несколько, одним документом) ═══
+// Кассир вписывает последние 5 цифр (или полный код) — можно несколько,
+// по одному в строке / через запятую / пробел. Находим экземпляры in_stock
+// и печатаем ВСЕ ценники ОДНИМ документом. Склад/модель не нужны.
+// printed_at НЕ трогаем (витринный ценник можно печатать повторно).
+async function csQuickByTails() {
+    const inp = document.getElementById('csQuickTails');
+    const box = document.getElementById('csQuickResult');
+    if (box) box.innerHTML = '';
+    const raw = String((inp && inp.value) || '');
+    // токены: по строкам / запятым / пробелам / точкам с запятой; оставляем только цифры
+    const tokens = raw.split(/[\s,;\n\r]+/).map(s => s.replace(/\D/g, '')).filter(Boolean);
+    // убираем дубли-токены, сохраняя порядок
+    const seenTok = new Set();
+    const uniqTokens = tokens.filter(t => (seenTok.has(t) ? false : (seenTok.add(t), true)));
+    if (!uniqTokens.length) {
+        if (box) box.innerHTML = '<div style="color:#b00;">Введите хотя бы один штрихкод (последние 5 цифр или полный код).</div>';
+        return;
+    }
+    for (const t of uniqTokens) {
+        if (t.length < 3) {
+            if (box) box.innerHTML = `<div style="color:#b00;">«${escapeHtml(t)}» — слишком коротко. Нужно минимум 3 (лучше 5) последних цифр.</div>`;
+            return;
+        }
+    }
+    if (box) box.innerHTML = '<div style="color:#666;">⏳ Ищу товары…</div>';
+    try {
+        const units = [];        // итоговые units для печати (по одному на каждый введённый код)
+        const notFound = [];     // токены без совпадений
+        const ambiguous = [];    // токены с несколькими разными штрихкодами (взяли первый)
+        const usedBc = new Set(); // чтобы не дублировать один и тот же штрихкод
+
+        for (const t of uniqTokens) {
+            // полный 13-значный код — точное совпадение, иначе — по хвосту.
+            // ВИТРИННЫЙ ЦЕННИК печатаем для ЛЮБОГО штрихкода в базе — статус НЕ важен
+            // (продан/списан/резерв тоже можно распечатать). Фильтр по in_stock убран (v1.2.19).
+            let q = ortobotClient
+                .from('stock_units')
+                .select('unique_barcode,size_label,c1_char_ref,c1_prod_ref,variant_id,status');
+            q = (t.length >= 13) ? q.eq('unique_barcode', t) : q.like('unique_barcode', '%' + t);
+            const { data: rows, error } = await q;
+            if (error) throw error;
+            if (!rows || !rows.length) { notFound.push(t); continue; }
+            // уникальные штрихкоды среди найденных. Если один код встречается
+            // с разными статусами — приоритет отдаём in_stock (актуальные данные).
+            const byBc = new Map();
+            for (const r of rows) {
+                const ex = byBc.get(r.unique_barcode);
+                if (!ex) { byBc.set(r.unique_barcode, r); continue; }
+                if (ex.status !== 'in_stock' && r.status === 'in_stock') byBc.set(r.unique_barcode, r);
+            }
+            const uniq = [...byBc.values()];
+            if (uniq.length > 1) ambiguous.push(t);
+            const r = uniq[0];
+            if (usedBc.has(r.unique_barcode)) continue; // уже добавлен
+            usedBc.add(r.unique_barcode);
+            units.push({
+                unique_barcode: r.unique_barcode || '',
+                size_label: r.size_label || '',
+                name: '',
+                charRef: r.c1_char_ref || null,
+                productC1Ref: r.c1_prod_ref || null,
+                variantId: r.variant_id || null,
+                priceOld: null, priceNew: null, currency: 'TJS'
+            });
+        }
+
+        if (!units.length) {
+            if (box) box.innerHTML = `<div style="color:#b00;">❌ Штрихкод не найден в базе. Проверьте цифры: <b>${escapeHtml(notFound.join(', '))}</b></div>`;
+            return;
+        }
+
+        // имена товаров по c1_prod_ref
+        const prodRefs = [...new Set(units.map(u => u.productC1Ref).filter(Boolean))];
+        if (prodRefs.length) {
+            try {
+                const { data: prods } = await ortobotClient
+                    .from('products').select('c1_ref,name_ru').in('c1_ref', prodRefs);
+                const nameByRef = {};
+                (prods || []).forEach(p => { nameByRef[p.c1_ref] = p.name_ru; });
+                units.forEach(u => { u.name = nameByRef[u.productC1Ref] || u.size_label || u.unique_barcode; });
+            } catch (_) {}
+        }
+
+        // цены (1С + старая цена из Supabase) — общая функция печати
+        if (typeof bcEnsurePricesForUnits === 'function') {
+            await bcEnsurePricesForUnits(units);
+        }
+        // Цена из РМК перекрывает 1С для переопределённых вариантов
+        await csApplyRmkPriceOverrides(units);
+        // Фолбэк для нативно оприходованных товаров (без 1С): имя/цена/размер по variant_id
+        await csFillFromVariants(units);
+
+        // отчёт пользователю
+        let msg = `<div style="color:#127a12;">✅ Сформировано ценников: <b>${units.length}</b>. Открываю окно печати…</div>`;
+        msg += '<ul style="margin:8px 0 0 0;padding-left:18px;font-size:13px;">';
+        units.forEach(u => {
+            const p = (u.priceNew != null) ? (u.priceNew + ' TJS') : '—';
+            msg += `<li><b>${escapeHtml(u.name || '')}</b>${u.size_label ? ' · ' + escapeHtml(u.size_label) : ''} · ${p} · <span style="font-family:monospace;">${escapeHtml(u.unique_barcode)}</span></li>`;
+        });
+        msg += '</ul>';
+        if (notFound.length) msg += `<div style="color:#b00;margin-top:6px;">⚠️ Не найдены в базе: <b>${escapeHtml(notFound.join(', '))}</b></div>`;
+        if (ambiguous.length) msg += `<div style="color:#a76a00;margin-top:6px;">ℹ️ На несколько кодов нашлось несколько штрихкодов, взят первый: <b>${escapeHtml(ambiguous.join(', '))}</b>. Для точности впишите больше цифр или полный код.</div>`;
+        if (box) box.innerHTML = msg;
+
+        // Единый витринный шаблон 58×40 (как при поступлении)
+        csPrintLabels58x40(units);
+    } catch (e) {
+        console.error('csQuickByTails:', e);
+        if (box) box.innerHTML = `<div style="color:#b00;">Ошибка: ${escapeHtml(e && e.message ? e.message : String(e))}</div>`;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -10421,6 +10750,7 @@ function posEnterSalesArea() {
         setTimeout(() => { const inp = document.getElementById('posScanInput'); if (inp) inp.focus(); }, 100);
     }
     posSetupHardwareScanner();
+    posSetupSuffixSearch();   // привязка поиска по суффиксу (независимо от раннего return в setup‑сканера)
     if (typeof pmobApply === 'function') pmobApply();   // мобильный оверлей: свежие данные смены
 }
 
@@ -10452,6 +10782,41 @@ function posSetupHardwareScanner() {
         }
     };
     document.addEventListener('keydown', POS.keyHandler);
+    // Привязка поиска по последним цифрам (однократно).
+    posSetupSuffixSearch();
+}
+
+// Поиск по последним цифрам: кнопка «Найти» + Enter в поле (классика + мобайл).
+function posSetupSuffixSearch() {
+    const btn = document.getElementById('posSuffixBtn');
+    const inp = document.getElementById('posSuffixInput');
+    if (btn && !btn._bound) { btn._bound = true; btn.addEventListener('click', posFindBySuffix); }
+    if (inp && !inp._bound) {
+        inp._bound = true;
+        inp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); posFindBySuffix(); }
+        });
+    }
+    // Мобильная версия (отдельные элементы, та же логика).
+    const mbtn = document.getElementById('pmobSuffixBtn');
+    const minp = document.getElementById('pmobSuffixInput');
+    if (mbtn && !mbtn._bound) { mbtn._bound = true; mbtn.addEventListener('click', pmobFindBySuffix); }
+    if (minp && !minp._bound) {
+        minp._bound = true;
+        minp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); pmobFindBySuffix(); }
+        });
+    }
+    // Мобильный возврат: поиск по последним цифрам (когда камера не считывает).
+    const rbtn = document.getElementById('pmobRetSuffixBtn');
+    const rinp = document.getElementById('pmobRetSuffixInput');
+    if (rbtn && !rbtn._bound) { rbtn._bound = true; rbtn.addEventListener('click', pmobRetFindBySuffix); }
+    if (rinp && !rinp._bound) {
+        rinp._bound = true;
+        rinp.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') { e.preventDefault(); pmobRetFindBySuffix(); }
+        });
+    }
 }
 
 // Ручной ввод в поле (десктоп-сканер тоже сюда пишет + Enter)
@@ -10532,10 +10897,11 @@ function posAddToCart(it) {
 
     // ─── ЭКЗЕМПЛЯРНЫЙ штрихкод (у каждой пары свой уникальный код) ───
     if (it.uniqueBarcode) {
-        // не в наличии (уже продан/другой склад) — не добавляем
-        if (it.status && it.status !== 'in_stock') {
-            return '⛔ Экземпляр не в наличии (уже продан или списан).';
-        }
+        // ПРАВИЛО: статус экземпляра (sold/списан) БОЛЬШЕ НЕ БЛОКИРУЕТ продажу.
+        // Если товар физически есть (товарный остаток availableAtShop > 0) — разрешаем продать;
+        // бэкенд спишет свободный in_stock экземпляр того же размера. При 0 — только предупреждение.
+        // Откат: вернуть блок `if (!isNative220 && it.status && it.status !== 'in_stock') return '⛔ …';`.
+        // Плашку «числился проданным/списанным» НЕ показываем — она смущает кассира (продажа всё равно идёт).
         // ищем строку этого же варианта (группируем экземпляры одной модели+размера)
         let line = POS.cart.find(l => l.uniqueBarcode && l.charC1Ref === it.charC1Ref);
         if (line) {
@@ -10544,21 +10910,17 @@ function posAddToCart(it) {
                 POS.activeKey = line.key; posRenderCart();
                 return '⚠️ Этот экземпляр уже в чеке.';
             }
-            // не превышаем фактический остаток на складе
-            if (avail != null && line.scans.length >= avail) {
-                POS.activeKey = line.key; posRenderCart();
-                return `⛔ На складе кассы только ${avail} шт. Больше продать нельзя.`;
-            }
+            // ОСТАТОК по фактическим экземплярам админ-панели: НЕ блокируем
+            // превышение — предупреждаем, но разрешаем досканировать.
             line.scans.push(it.uniqueBarcode);
             line.qty = line.scans.length;
             if (avail != null) line.availableAtShop = avail;
+            // v1.2.20: предупреждение о превышении остатка погашено (никаких плашек).
             POS.activeKey = line.key; posRenderCart();
             return null;
         }
-        // новая строка экземплярного товара
-        if (avail != null && avail < 1) {
-            return '⛔ Товара нет на складе этой кассы.';
-        }
+        // новая строка экземплярного товара — при 0 на складе НЕ блокируем,
+        // а добавляем с предупреждением (правило: предупредить, но разрешить).
         line = {
             key: 'L' + (POS.keySeq++), kind: it.kind,
             barcode: it.barcode, uniqueBarcode: it.uniqueBarcode,
@@ -10567,7 +10929,9 @@ function posAddToCart(it) {
             price: Number(it.price) || 0, qty: 1, discountPct: 0,
             productC1Ref: it.productC1Ref, charC1Ref: it.charC1Ref || null,
             warehouseC1Ref: it.warehouseC1Ref || posShopWh() || null,
-            warning: it.warning || null,
+            // v1.2.20: по требованию — НИКАКИХ плашек. Предупреждение о нулевом
+            // остатке погашено (раньше показывали «Нет на складе… 0 шт.»).
+            warning: null,
             availableAtShop: avail, status: it.status || null,
         };
         POS.cart.push(line);
@@ -10579,19 +10943,18 @@ function posAddToCart(it) {
     // ─── ГРУППОВОЙ EAN (общий штрихкод на вариант, остаток из product_variants.stock) ───
     let line = POS.cart.find(l => !l.uniqueBarcode && l.barcode === it.barcode && l.charC1Ref === it.charC1Ref);
     if (line) {
-        if (avail != null && line.qty >= avail) {
-            POS.activeKey = line.key; posRenderCart();
-            return `⛔ На складе кассы только ${avail} шт. Больше продать нельзя.`;
-        }
+        // v1.2.20: продаём ВСЕГДА, даже если qty превышает остаток (или 0).
+        // Блокировка и плашка сняты по требованию. Откат: вернуть
+        // if (avail != null && line.qty >= avail) { … return '⛔ На складе кассы только N шт…'; }
         line.qty += 1;
         line.scans.push(it.barcode);
         if (avail != null) line.availableAtShop = avail;
         POS.activeKey = line.key; posRenderCart();
         return null;
     }
-    if (avail != null && avail < 1) {
-        return '⛔ Товара нет на складе этой кассы.';
-    }
+    // v1.2.20: нулевой остаток НЕ блокирует добавление в корзину (по требованию).
+    // Плашку «Товара нет на складе» убрали. Откат: вернуть
+    // if (avail != null && avail < 1) return '⛔ Товара нет на складе этой кассы.';
     line = {
         key: 'L' + (POS.keySeq++), kind: it.kind,
         barcode: it.barcode, uniqueBarcode: null,
@@ -10609,6 +10972,214 @@ function posAddToCart(it) {
     return null;
 }
 
+// ============================================================================
+// ПОИСК ТОВАРА ПО ПОСЛЕДНИМ ЦИФРАМ ШТРИХКОДА (v1.2.29)
+// Кассир вводит последние 5 цифр — находим экземпляры НЕЗАВИСИМО от статуса.
+// Клик по результату → posAddToCart(it) (тот же путь, что и обычный скан).
+// ============================================================================
+async function posFindBySuffix() {
+    const inp = document.getElementById('posSuffixInput');
+    const box = document.getElementById('posSuffixResults');
+    if (!inp || !box) return;
+    const sfx = String(inp.value || '').replace(/\D/g, '').trim();
+    if (sfx.length < 3) {
+        box.innerHTML = '<div class="pos-suffix-empty">Введите минимум 3 цифры.</div>';
+        return;
+    }
+    box.innerHTML = '<div class="pos-suffix-empty">⏳ Ищу…</div>';
+    try {
+        const wh = encodeURIComponent(posShopWh() || '');
+        const r = await posApiTimeout(`?action=find-by-suffix&suffix=${encodeURIComponent(sfx)}&wh=${wh}&limit=30`, { method: 'GET' }, 10000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        posRenderSuffixResults(r.data.items || [], sfx);
+    } catch (e) {
+        if (posIsNetworkError(e)) box.innerHTML = '<div class="pos-suffix-empty">📶 Нет связи — повторите позже.</div>';
+        else box.innerHTML = `<div class="pos-suffix-empty">⚠️ Ошибка: ${posEsc(e.message)}</div>`;
+    }
+}
+
+// временное хранилище найденных элементов (чтобы клик передавал полный объект без сериализации в DOM)
+let POS_SUFFIX_ITEMS = [];
+function posRenderSuffixResults(items, sfx) {
+    const box = document.getElementById('posSuffixResults');
+    if (!box) return;
+    POS_SUFFIX_ITEMS = Array.isArray(items) ? items : [];
+    if (!POS_SUFFIX_ITEMS.length) {
+        box.innerHTML = `<div class="pos-suffix-empty">Ничего не найдено по «${posEsc(sfx)}».</div>`;
+        return;
+    }
+    box.innerHTML = POS_SUFFIX_ITEMS.map((it, i) => {
+        const last5 = posEsc(it.last5 || String(it.uniqueBarcode || '').slice(-5));
+        const sz = it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : '';
+        return `<button type="button" class="pos-suffix-item" data-idx="${i}">
+            <span class="psi-main">
+              <span class="psi-name">${posEsc(it.name || last5)}</span>
+              <span class="psi-sub">№${last5}${sz}</span>
+            </span>
+            <span class="psi-price">${posMoney(Number(it.price) || 0)}</span>
+          </button>`;
+    }).join('');
+    box.querySelectorAll('.pos-suffix-item').forEach(btn => {
+        btn.addEventListener('click', () => posPickSuffixItem(Number(btn.dataset.idx)));
+    });
+}
+
+function posPickSuffixItem(idx) {
+    const it = POS_SUFFIX_ITEMS[idx];
+    if (!it) return;
+    const hint = document.getElementById('posScanHint');
+    const err = posAddToCart(it);
+    const last5 = String(it.uniqueBarcode || it.barcode || '').slice(-5);
+    if (err) {
+        if (hint) hint.innerHTML = err;
+        if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Нельзя добавить', String(err).replace(/<[^>]*>/g, '').trim(), true);
+    } else {
+        if (hint) hint.innerHTML = `✅ Добавлено: <b>${posEsc(it.name)}</b>${it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : ''} · №${posEsc(last5)}`;
+        if (POS.isMobile && typeof pmobScanSuccess === 'function') pmobScanSuccess();
+        // очистить поле и результаты после успешного добавления
+        const inp = document.getElementById('posSuffixInput');
+        const box = document.getElementById('posSuffixResults');
+        if (inp) inp.value = '';
+        if (box) box.innerHTML = '';
+        POS_SUFFIX_ITEMS = [];
+    }
+}
+
+// ============================================================================
+// МОБИЛЬНАЯ ВЕРСИЯ ПОИСКА ПО ПОСЛЕДНИМ ЦИФРАМ (v1.2.32)
+// Отдельные элементы (pmobSuffix*), тот же бэкенд (find-by-suffix) и posAddToCart.
+// ============================================================================
+async function pmobFindBySuffix() {
+    const inp = document.getElementById('pmobSuffixInput');
+    const box = document.getElementById('pmobSuffixResults');
+    if (!inp || !box) return;
+    const sfx = String(inp.value || '').replace(/\D/g, '').trim();
+    if (sfx.length < 3) {
+        box.innerHTML = '<div class="pmob-suffix-empty">Введите минимум 3 цифры.</div>';
+        return;
+    }
+    box.innerHTML = '<div class="pmob-suffix-empty">⏳ Ищу…</div>';
+    try {
+        const wh = encodeURIComponent(posShopWh() || '');
+        const r = await posApiTimeout(`?action=find-by-suffix&suffix=${encodeURIComponent(sfx)}&wh=${wh}&limit=30`, { method: 'GET' }, 10000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        pmobRenderSuffixResults(r.data.items || [], sfx);
+    } catch (e) {
+        if (posIsNetworkError(e)) box.innerHTML = '<div class="pmob-suffix-empty">📶 Нет связи — повторите позже.</div>';
+        else box.innerHTML = `<div class="pmob-suffix-empty">⚠️ Ошибка: ${posEsc(e.message)}</div>`;
+    }
+}
+
+// Отдельное хранилище для мобайл-результатов.
+let PMOB_SUFFIX_ITEMS = [];
+function pmobRenderSuffixResults(items, sfx) {
+    const box = document.getElementById('pmobSuffixResults');
+    if (!box) return;
+    PMOB_SUFFIX_ITEMS = Array.isArray(items) ? items : [];
+    if (!PMOB_SUFFIX_ITEMS.length) {
+        box.innerHTML = `<div class="pmob-suffix-empty">Ничего не найдено по «${posEsc(sfx)}».</div>`;
+        return;
+    }
+    box.innerHTML = PMOB_SUFFIX_ITEMS.map((it, i) => {
+        const last5 = posEsc(it.last5 || String(it.uniqueBarcode || '').slice(-5));
+        const sz = it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : '';
+        return `<button type="button" class="pmob-suffix-item" data-idx="${i}">
+            <span class="psi-main">
+              <span class="psi-name">${posEsc(it.name || last5)}</span>
+              <span class="psi-sub">№${last5}${sz}</span>
+            </span>
+            <span class="psi-price">${posMoney(Number(it.price) || 0)}</span>
+          </button>`;
+    }).join('');
+    box.querySelectorAll('.pmob-suffix-item').forEach(btn => {
+        btn.addEventListener('click', () => pmobPickSuffixItem(Number(btn.dataset.idx)));
+    });
+}
+
+function pmobPickSuffixItem(idx) {
+    const it = PMOB_SUFFIX_ITEMS[idx];
+    if (!it) return;
+    const err = posAddToCart(it);
+    const last5 = String(it.uniqueBarcode || it.barcode || '').slice(-5);
+    if (err) {
+        if (typeof pmobToast === 'function') pmobToast('Нельзя добавить', String(err).replace(/<[^>]*>/g, '').trim(), true);
+    } else {
+        if (typeof pmobScanSuccess === 'function') pmobScanSuccess();
+        if (typeof pmobToast === 'function') pmobToast('Добавлено', `${it.name || ''}${it.sizeLabel ? ' · ' + it.sizeLabel : ''} · №${last5}`.trim());
+        const inp = document.getElementById('pmobSuffixInput');
+        const box = document.getElementById('pmobSuffixResults');
+        if (inp) inp.value = '';
+        if (box) box.innerHTML = '';
+        PMOB_SUFFIX_ITEMS = [];
+    }
+}
+
+// ============================================================================
+// ВОЗВРАТ — ПОИСК ПО ПОСЛЕДНИМ ЦИФРАМ ШТРИХКОДА (когда камера не считывает)
+// Тот же бэкенд find-by-suffix, но по выбору — не в корзину, а в pmobRetHandleCode
+// (открывает чек продажи через lookup-sale-receipt). Сканирование не требуется.
+// ============================================================================
+let PMOB_RET_SUFFIX_ITEMS = [];
+
+async function pmobRetFindBySuffix() {
+    const inp = document.getElementById('pmobRetSuffixInput');
+    const box = document.getElementById('pmobRetSuffixResults');
+    if (!inp || !box) return;
+    const sfx = String(inp.value || '').replace(/\D/g, '').trim();
+    if (sfx.length < 3) {
+        box.innerHTML = '<div class="pmob-suffix-empty">Введите минимум 3 цифры.</div>';
+        return;
+    }
+    box.innerHTML = '<div class="pmob-suffix-empty">⏳ Ищу…</div>';
+    try {
+        // без фильтра по складу: возвращаемый товар мог быть продан/списан и не числиться на складе кассы
+        const r = await posApiTimeout(`?action=find-by-suffix&suffix=${encodeURIComponent(sfx)}&limit=30`, { method: 'GET' }, 10000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        pmobRenderRetSuffixResults(r.data.items || [], sfx);
+    } catch (e) {
+        if (posIsNetworkError(e)) box.innerHTML = '<div class="pmob-suffix-empty">📶 Нет связи — повторите позже.</div>';
+        else box.innerHTML = `<div class="pmob-suffix-empty">⚠️ Ошибка: ${posEsc(e.message)}</div>`;
+    }
+}
+
+function pmobRenderRetSuffixResults(items, sfx) {
+    const box = document.getElementById('pmobRetSuffixResults');
+    if (!box) return;
+    PMOB_RET_SUFFIX_ITEMS = Array.isArray(items) ? items : [];
+    if (!PMOB_RET_SUFFIX_ITEMS.length) {
+        box.innerHTML = `<div class="pmob-suffix-empty">Ничего не найдено по «${posEsc(sfx)}».</div>`;
+        return;
+    }
+    box.innerHTML = PMOB_RET_SUFFIX_ITEMS.map((it, i) => {
+        const last5 = posEsc(it.last5 || String(it.uniqueBarcode || '').slice(-5));
+        const sz = it.sizeLabel ? ' · ' + posEsc(it.sizeLabel) : '';
+        return `<button type="button" class="pmob-suffix-item" data-idx="${i}">
+            <span class="psi-main">
+              <span class="psi-name">${posEsc(it.name || last5)}</span>
+              <span class="psi-sub">№${last5}${sz}</span>
+            </span>
+            <span class="psi-price">${posMoney(Number(it.price) || 0)}</span>
+          </button>`;
+    }).join('');
+    box.querySelectorAll('.pmob-suffix-item').forEach(btn => {
+        btn.addEventListener('click', () => pmobPickRetSuffixItem(Number(btn.dataset.idx)));
+    });
+}
+
+function pmobPickRetSuffixItem(idx) {
+    const it = PMOB_RET_SUFFIX_ITEMS[idx];
+    if (!it) return;
+    const full = String(it.uniqueBarcode || it.barcode || '').trim();
+    if (!full) { if (typeof pmobToast === 'function') pmobToast('Нет штрихкода', 'У найденного товара нет уникального штрихкода', true); return; }
+    // очищаем поле/результаты и передаём полный штрихкод в ту же логику, что и скан камерой
+    const inp = document.getElementById('pmobRetSuffixInput');
+    const box = document.getElementById('pmobRetSuffixResults');
+    if (inp) inp.value = '';
+    if (box) box.innerHTML = '';
+    PMOB_RET_SUFFIX_ITEMS = [];
+    pmobRetHandleCode(full);
+}
+
 // Округление вниз до кратного 10 (523→520, 427→420). Только для положительных сумм.
 function posFloor10(x) {
     const v = Number(x) || 0;
@@ -10621,6 +11192,8 @@ function posFloor10(x) {
 // Из-за округления фактическая скидка получается чуть больше 5% — это ожидаемо.
 function posLineNet(l) {
     const gross = l.price * l.qty;
+    // Пронатор: фиксированная цена 30 с. без какой-либо скидки.
+    if (l.pronation) return Math.max(0, gross);
     if ((l.discountPct || 0) > 0) {
         return Math.max(0, posFloor10(gross * (1 - (l.discountPct || 0) / 100)));
     }
@@ -10637,15 +11210,25 @@ function posLineDiscInfo(l) {
     return { gross, net, amount, pct };
 }
 
-// Позиция «не в наличии на складе кассы»: экземпляр не in_stock, или на складе кассы 0 шт.
+// Блокировка оплаты ОТКЛЮЧЕНА: статус экземпляра (sold/списан) БОЛЬШЕ НЕ блокирует продажу.
+// Правило: продаём, если товарный остаток в шт. позволяет (бэкенд спишет свободный
+// экземпляр того же размера). Нулевой остаток тоже не блокирует — только предупреждает (posLineNoStock).
+// Откат: вернуть `if (l.status && l.status !== 'in_stock') return true;` (и исключение для 220).
 function posLineOutOfStock(l) {
-    if (l.status && l.status !== 'in_stock') return true;
-    if (l.availableAtShop != null && Number(l.availableAtShop) <= 0) return true;
     return false;
 }
-// Есть ли в корзине хоть одна позиция не в наличии на складе кассы
+// v1.2.20: по требованию — НИКАКИХ плашек про нулевой остаток. Мягкая пометка отключена.
+// Откат: return (l.availableAtShop != null && Number(l.availableAtShop) <= 0 && !(l.status && l.status !== 'in_stock'));
+function posLineNoStock(l) {
+    return false;
+}
+// Есть ли в корзине позиция, которую НЕЛЬЗЯ продать (продан/списан)
 function posCartHasOutOfStock() {
     return POS.cart.some(posLineOutOfStock);
+}
+// Есть ли в корзине позиция с нулевым фактическим остатком (только предупреждение)
+function posCartHasNoStock() {
+    return POS.cart.some(posLineNoStock);
 }
 
 // Скидка на чек = клиентская карта (10%) + ручные 5%, ограничено 100%
@@ -10698,12 +11281,23 @@ function posRenderCart() {
                 `<summary>${scans.length} шт. · штрихкоды ▾</summary>` +
                 `<div class="pos-code-list">${opts}</div></details>`;
         }
+        // Кнопка «Пронация» — только для товара «Супинаторы 125»
+        let pronHtml = '';
+        if (posIsSupinator(l)) {
+            const on = !!l.pronation;
+            pronHtml =
+                `<button type="button" class="pos-pron-btn${on ? ' on' : ''}" data-act="pron" ` +
+                `title="Продать как пронатор по 30 с.">` +
+                (on ? `✅ Пронатор (30 с.) · отменить` : `🔁 Как пронатор — 30 с.`) +
+                `</button>`;
+        }
         div.innerHTML = `
             <div class="pos-line-info">
               <div class="pos-line-name">${posEsc(l.name)}</div>
               <div class="pos-line-sub">${l.sizeLabel ? posEsc(l.sizeLabel) + ' · ' : ''}${priceInfo}</div>
               ${scanHtml ? `<div class="pos-line-codes">${scanHtml}</div>` : ''}
               ${warnText ? `<div class="pos-line-warn">⚠️ ${posEsc(warnText)}</div>` : ''}
+              ${pronHtml ? `<div class="pos-line-actions">${pronHtml}</div>` : ''}
             </div>
             <div class="pos-qty pos-qty-ro" title="Количество = число отсканированных товаров">×${l.qty}</div>
             <div class="pos-line-sum">${posMoney(net)}</div>
@@ -10714,6 +11308,7 @@ function posRenderCart() {
                 POS.activeKey = l.key;
                 const act = b.dataset.act;
                 if (act === 'rm') { posRemoveLine(l.key); return; }
+                if (act === 'pron') { posTogglePronation(l.key); return; }
                 if (act === 'rmscan') {
                     const idx = parseInt(b.dataset.idx, 10);
                     if (!isNaN(idx) && Array.isArray(l.scans)) {
@@ -10742,6 +11337,35 @@ function posRemoveLine(key) {
     posRenderCart();
 }
 
+// Товар — «Супинаторы 125»? (только у него есть кнопка «Пронация»)
+function posIsSupinator(l) {
+    return l && l.productC1Ref === POS_SUPINATOR_C1_REF;
+}
+
+// Переключатель «пронатор» для позиции супинатора:
+//  • вкл: сохраняем исходную цену, ставим 30 с., скидку на позиции снимаем
+//  • выкл: возвращаем исходную цену
+function posTogglePronation(key) {
+    const l = POS.cart.find(x => x.key === key);
+    if (!l || !posIsSupinator(l)) return;
+    if (l.pronation) {
+        // выключаем — возвращаем цену и название
+        l.pronation = false;
+        if (l.origPrice != null) { l.price = l.origPrice; l.origPrice = null; }
+        if (l.origName != null) { l.name = l.origName; l.origName = null; }
+    } else {
+        // включаем — фикс. 30 с., без скидки
+        l.origPrice = l.price;
+        l.origName = l.name;
+        l.price = POS_PRONATION_PRICE;
+        l.pronation = true;
+        l.discountPct = 0;                       // фикс 30 с. — скидка не действует
+        if (!/пронац/i.test(l.name)) l.name = l.name + ' (пронация)';
+    }
+    POS.activeKey = key;
+    posRenderCart();
+}
+
 function posToggleSaleBlocks(show) {
     const disc = document.getElementById('posDiscountCard');
     const tot = document.getElementById('posTotalsCard');
@@ -10759,21 +11383,21 @@ function posRenderTotals() {
     if (d) d.textContent = '−' + posMoney(t.disc);
     if (dRow) dRow.style.display = t.disc > 0 ? '' : 'none';
     if (grand) grand.textContent = posMoney(t.grand);
-    // блокировка «К оплате», если есть позиция не в наличии на складе кассы
+    // Оплата блокируется ТОЛЬКО при пустой корзине. Статус экземпляра (sold/списан)
+    // больше НЕ блокирует; нулевой остаток — только мягкое предупреждение.
     const toPay = document.getElementById('posToPayment');
     if (toPay) {
-        const blocked = !POS.cart.length || posCartHasOutOfStock();
-        toPay.disabled = blocked;
+        toPay.disabled = !POS.cart.length;
         let warn = document.getElementById('posStockWarn');
-        if (posCartHasOutOfStock()) {
+        if (posCartHasNoStock()) {
             if (!warn) {
                 warn = document.createElement('div');
                 warn.id = 'posStockWarn';
-                warn.className = 'pos-alert pos-alert-error';
                 warn.style.cssText = 'margin:10px 0 0;';
                 toPay.parentNode.insertBefore(warn, toPay);
             }
-            warn.innerHTML = '⛔ В чеке есть товар, который не числится на складе этой кассы. Продажа невозможна — удалите такую позицию.';
+            warn.className = 'pos-alert pos-alert-warn';
+            warn.innerHTML = '⚠️ В чеке есть товар, которого по факту нет на складе этой кассы. Продажа разрешена — проверьте наличие.';
             warn.style.display = '';
         } else if (warn) {
             warn.style.display = 'none';
@@ -11329,6 +11953,7 @@ async function posConfirmSale() {
             // чтобы net в 1С совпадал с тем, что видел кассир (а не номинальные 5%).
             qty: l.qty, price: l.price, discountPct: (l.discountPct ? posLineDiscInfo(l).pct : 0),
             uniqueBarcode: l.uniqueBarcode, barcode: l.barcode, name: l.name,
+            pronation: !!l.pronation,   // пронатор: фикс 30 с., скидка не размазывается
             // все отсканированные экземплярные штрихкоды (для экземплярного товара = каждый помечается отдельно)
             uniqueBarcodes: (l.uniqueBarcode && Array.isArray(l.scans)) ? l.scans.slice() : null,
         }));
@@ -11336,6 +11961,7 @@ async function posConfirmSale() {
         const cartPct = posCartDiscPct();
         if (cartPct > 0) {
             items.forEach(it => {
+                if (it.pronation) return;   // пронатор — фикс 30 с., скидка на чек не применяется
                 const combined = 1 - (1 - (it.discountPct || 0) / 100) * (1 - cartPct / 100);
                 it.discountPct = Math.round(combined * 10000) / 100; // до 2 знаков
             });
@@ -11349,6 +11975,10 @@ async function posConfirmSale() {
             shiftId: sh.id,
             warehouseC1Ref: posShopWh(),
             discountCardC1Ref: (POS.client && POS.client.c1_ref) || (POS.doctor && POS.doctor.c1_ref) || null,
+            // ВРАЧ (ВР) — отдельно от клиента, для учёта продаж/бонусов по врачам
+            doctorC1Ref: (POS.doctor && POS.doctor.c1_ref) || null,
+            doctorCode: (POS.doctor && POS.doctor.card_code) || null,
+            doctorName: (POS.doctor && POS.doctor.full_name) || null,
             items,
             payments: POS._payments || [],
         };
@@ -11462,6 +12092,16 @@ async function posCloseShift() {
         if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
         const closedShift = r.data.shift || {};
         const kassaName = (POS.shift && POS.shift.kassa_name) || closedShift.kassa_name || '';
+        // ФОНОВАЯ СИНХРОНИЗАЦИЯ С 1С (закрытие документа смены + ОРП) — fire-and-forget.
+        // НЕ ждём ответа: кассир сразу видит выручку, ОРП уйдёт в 1С через несколько секунд.
+        // Идемпотентно на бэкенде: повторный вызов не создаёт дубль ОРП.
+        try {
+            fetch(`${BARCODE_SVC_URL}/api/pos?action=close-shift-1c`, {
+                method: 'POST', keepalive: true,
+                headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET },
+                body: JSON.stringify({ shiftId: closedShift.id || (POS.shift && POS.shift.id) }),
+            }).catch(() => {});
+        } catch (_) { /* фоновая синхронизация не критична для закрытия смены */ }
         POS.shift = null;
         POS.chosen = null;
         const top = document.getElementById('posTopStatus');
@@ -11919,7 +12559,10 @@ function pmobRenderLines() {
         if (codeStr) parts.push(codeStr);
         const warn = l.warning || (oos ? 'Не числится на складе этой кассы' : '');
         const isGift = !!l.isGift;
-        const hasDisc = !isGift && (l.discountPct || 0) >= 5;
+        const isPron = !!l.pronation;
+        const isSup = posIsSupinator(l);
+        // У пронатора скидка не действует — кнопку 5% прячем
+        const hasDisc = !isGift && !isPron && (l.discountPct || 0) >= 5;
         const di = posLineDiscInfo(l);
         // Фактический % скидки (после округления вниз): 1 знак, без лишнего .0
         const realPct = di.pct % 1 === 0 ? String(Math.round(di.pct)) : di.pct.toFixed(1);
@@ -11934,9 +12577,10 @@ function pmobRenderLines() {
               ${warn ? `<div class="pmob-line-warn">⚠️ ${posEsc(warn)}</div>` : ''}
               ${isGift
                 ? `<div class="pmob-line-gift" style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:6px;background:#dcfce7;color:#166534;font-size:12px;font-weight:700;">🎁 подарок · 0 с.</div>`
-                : `<button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
-                      title="Скидка 5% на эту позицию (с округлением вниз до 10)">${hasDisc ? '−5%' : '5%'}</button>
-              ${hasDisc ? `<div class="pmob-line-discinfo">Скидка: −${pmobMoney(di.amount)} · ${realPct}%</div>` : ''}`}
+                : (isPron ? '' : `<button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
+                      title="Скидка 5% на эту позицию (с округлением вниз до 10)">${hasDisc ? '−5%' : '5%'}</button>`)
+              + `${hasDisc ? `<div class="pmob-line-discinfo">Скидка: −${pmobMoney(di.amount)} · ${realPct}%</div>` : ''}`}
+              ${isSup ? `<button type="button" class="pmob-line-pron${isPron ? ' on' : ''}" title="Продать как пронатор по 30 с.">${isPron ? '✅ Пронатор 30 с. · отмена' : '🔁 Пронатор — 30 с.'}</button>` : ''}
             </div>
             <div class="pmob-line-right">
               <div class="pmob-line-price">${pmobMoney(di.net)}</div>
@@ -11947,6 +12591,8 @@ function pmobRenderLines() {
         row.querySelector('.pmob-line-rm').addEventListener('click', () => posRemoveLine(l.key));
         const discBtn = row.querySelector('.pmob-line-disc');
         if (discBtn) discBtn.addEventListener('click', () => pmobToggleLineDisc(l.key));
+        const pronBtn = row.querySelector('.pmob-line-pron');
+        if (pronBtn) pronBtn.addEventListener('click', () => posTogglePronation(l.key));
         box.appendChild(row);
     });
     // Кнопка акции «2+1» под списком (мобильный кассир).
@@ -11972,7 +12618,7 @@ function pmobRenderPromo(box) {
 // Скидка 5% на КОНКРЕТНУЮ позицию (повторное нажатие снимает).
 function pmobToggleLineDisc(key) {
     const l = POS.cart.find(x => x.key === key);
-    if (!l || l.isGift) return;
+    if (!l || l.isGift || l.pronation) return;   // пронатор — фикс 30 с., скидка не применяется
     l.discountPct = (l.discountPct || 0) >= 5 ? 0 : 5;
     POS.activeKey = key;
     posRenderCart();   // общая перерисовка: ПК-корзина + итоги + мобильный список

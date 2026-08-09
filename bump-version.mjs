@@ -40,7 +40,7 @@ let changed = 0;
   if (out !== src) { writeFileSync(p, out); changed++; }
 }
 
-// 2+3) index.html — ?v= у style.css и app.js
+// 2+3+4) index.html — ?v= у style.css и app.js + window.__APP_BUILD
 {
   const p = join(DIR, 'index.html');
   let src = readFileSync(p, 'utf8');
@@ -48,9 +48,20 @@ let changed = 0;
   // style.css?v=... и app.js?v=... (в href/src)
   src = src.replace(/(style\.css\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(app\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  // window.__APP_BUILD = '...'  — билд страницы для авто-обновления (СРАВНИВАЕТСЯ с version.json).
+  // ЕСЛИ НЕ ОБНОВЛЯТЬ — касса уйдёт в бесконечный location.reload() (билд никогда не совпадёт).
+  src = src.replace(/(window\.__APP_BUILD\s*=\s*)['"][^'"]*['"]/, `$1'${VERSION}'`);
   if (!/style\.css\?v=/.test(before)) { console.error('index.html: не найден style.css?v='); process.exit(1); }
   if (!/app\.js\?v=/.test(before)) { console.error('index.html: не найден app.js?v='); process.exit(1); }
+  if (!/window\.__APP_BUILD\s*=/.test(before)) { console.error('index.html: не найден window.__APP_BUILD'); process.exit(1); }
   if (src !== before) { writeFileSync(p, src); changed++; }
+}
+
+// 5) version.json — серверный билд (ИСТОЧНИК ИСТИНЫ для авто-обновления). Обязан совпадать с __APP_BUILD.
+{
+  const p = join(DIR, 'version.json');
+  writeFileSync(p, `{ "build": "${VERSION}" }\n`);
+  changed++;
 }
 
 // 4) admin-rmk.html — ?v= у admin-rmk.css и admin-rmk.js (опционально: файл может отсутствовать)

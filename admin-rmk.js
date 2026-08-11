@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.33';
+const RMK_VERSION = '1.2.34';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.34', date: '12.08.2026', title: 'Матрица «Поиск товара»: раскладка по факту экземпляров',
+    items: [
+      'Исправлено неверное распределение товара по клеткам склад×размер: матрица теперь строится по СКЛАДУ И РАЗМЕРУ ЭКЗЕМПЛЯРА (stock_units), а не по атрибутам варианта.',
+      'Корневая причина: часть экземпляров привязана к варианту с чужим размером (артефакт рассинхрона) — такие штуки «переезжали» в чужую клетку.',
+      'Панель кодов по клику на ячейку теперь фильтруется по складу и размеру экземпляра — число кодов совпадает с количеством в клетке.',
+      'RPC stock_matrix также исправлен: группировка по одному нормализованному размеру (убраны дубли клеток).',
+    ],
+  },
   {
     v: '1.2.33', date: '11.08.2026', title: 'Остатки вариантов: надёжный пересчёт при перемещениях',
     items: [
@@ -1816,7 +1825,7 @@ async function loadUnitsPanel(pid) {
   const isOverridden = cellInfo.priceOverridden === true;
   panel.innerHTML = `<div class="loading">⏳ Загружаю коды…</div>`;
   try {
-    const d = await posApi(`?action=variant-units&variant_id=${encodeURIComponent(sel.vid)}`, { method: 'GET' });
+    const d = await posApi(`?action=variant-units&variant_id=${encodeURIComponent(sel.vid)}&warehouse_id=${encodeURIComponent(sel.whId)}&size=${encodeURIComponent(sel.size)}`, { method: 'GET' });
     const units = d.units || [];
     const chips = units.length
       ? units.map(u => {

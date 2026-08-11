@@ -1167,3 +1167,113 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
   .psa-prod-stats{margin-left:0;gap:18px 24px}
   .psa-legend{gap:8px 12px}
 }
+
+/* ═══════════════════════════════════════════════════
+   РАЗДЕЛ «БЕКАПЫ»
+   ═══════════════════════════════════════════════════ */
+.bk-tabs{
+  display:flex; align-items:center; gap:6px;
+  background:var(--card); border:1px solid var(--line);
+  border-radius:var(--radius); padding:6px; margin-bottom:16px;
+  box-shadow:var(--shadow);
+}
+.bk-tab{
+  appearance:none; border:0; background:transparent; cursor:pointer;
+  font:inherit; font-size:14px; font-weight:600; color:var(--tx2);
+  padding:9px 18px; border-radius:var(--radius-sm); transition:all .15s;
+  white-space:nowrap;
+}
+.bk-tab:hover{ background:var(--g-soft); color:var(--g3); }
+.bk-tab.active{ background:var(--g); color:#fff; box-shadow:0 2px 6px rgba(16,185,129,.28); }
+.bk-tabs-actions{ margin-left:auto; }
+
+.bk-kpis{ margin-bottom:16px; }
+
+/* бейдж «частично» (жёлтый) */
+.badge.amber2{ background:#fffbeb; color:var(--amber); border:1px solid #fde68a; }
+
+/* инлайн-статус проверки в таблице разделов */
+.bk-chk{
+  display:inline-block; font-size:12.5px; font-weight:600; color:var(--tx3);
+}
+.bk-chk.ok{ color:var(--g2); }
+.bk-chk.bad{ color:var(--amber); }
+
+/* пагинация таблицы разделов */
+.bk-pager{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-top:14px; padding-top:14px; border-top:1px solid var(--line2);
+}
+.bk-pager-btns{ display:flex; align-items:center; gap:10px; }
+.bk-pager-cur{ font-size:13px; font-weight:600; color:var(--tx2); min-width:54px; text-align:center; }
+
+/* вкладка «Настройки» */
+.bk-set-row{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:13px 2px; border-bottom:1px solid var(--line2); font-size:14px;
+}
+.bk-set-row:last-of-type{ border-bottom:0; }
+.bk-set-k{ color:var(--tx2); }
+.bk-set-v{ color:var(--tx); text-align:right; }
+.bk-g{ color:var(--g2); }
+
+/* вкладка «Восстановление» */
+.bk-rest-grid{
+  display:grid; grid-template-columns:1fr 1.3fr; gap:26px;
+  margin-top:6px;
+}
+.bk-lbl{
+  display:block; font-size:12.5px; font-weight:600; color:var(--tx2);
+  margin-bottom:7px; text-transform:uppercase; letter-spacing:.02em;
+}
+.bk-select{
+  width:100%; font:inherit; font-size:14px; color:var(--tx);
+  padding:11px 12px; border:1px solid var(--line); border-radius:var(--radius-sm);
+  background:#fff; cursor:pointer;
+}
+.bk-select:focus{ outline:0; border-color:var(--g); box-shadow:0 0 0 3px var(--g-soft2); }
+.bk-mode{
+  font-size:13px; color:var(--tx2); background:var(--g-soft);
+  border:1px solid var(--g-soft2); border-radius:var(--radius-sm); padding:10px 12px;
+}
+.bk-rest-chk-head{
+  display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;
+}
+.bk-rest-chks{
+  display:grid; grid-template-columns:1fr 1fr; gap:6px 18px;
+  max-height:320px; overflow-y:auto; padding:12px;
+  border:1px solid var(--line); border-radius:var(--radius-sm); background:#fafcfb;
+}
+.bk-rest-chk{
+  display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--tx);
+  cursor:pointer; padding:3px 2px;
+}
+.bk-rest-chk input{ accent-color:var(--g); width:15px; height:15px; cursor:pointer; }
+.bk-rest-chk.bk-all{ font-weight:600; color:var(--g3); }
+.bk-rest-actions{
+  display:flex; align-items:center; justify-content:flex-end; gap:12px;
+  margin-top:18px; padding-top:16px; border-top:1px solid var(--line2);
+}
+.bk-rest-note{
+  margin-top:16px; padding:13px 15px; border-radius:var(--radius-sm); font-size:13.5px;
+}
+.bk-rest-note.dry{ background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; }
+.bk-rest-note.done{ background:var(--g-soft); border:1px solid var(--g-soft2); color:var(--g3); }
+
+/* нижняя инфо-панель */
+.bk-footinfo{
+  display:flex; align-items:flex-start; gap:10px;
+  margin-top:16px; padding:14px 16px; font-size:13px; color:var(--tx2);
+  background:var(--g-soft); border:1px solid var(--g-soft2); border-radius:var(--radius-sm);
+}
+.bk-footinfo b{ color:var(--g3); }
+.bk-footinfo-ic{
+  flex:0 0 auto; width:20px; height:20px; border-radius:50%;
+  background:var(--g); color:#fff; font-size:13px; font-weight:700;
+  display:flex; align-items:center; justify-content:center;
+}
+
+@media(max-width:1100px){
+  .bk-rest-grid{ grid-template-columns:1fr; gap:18px; }
+  .bk-rest-chks{ grid-template-columns:1fr; }
+}

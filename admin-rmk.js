@@ -7,8 +7,19 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.35';
+const RMK_VERSION = '1.2.36';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.36', date: '12.08.2026', title: 'Новый раздел «Бекапы»: резервное копирование и восстановление данных',
+    items: [
+      'Добавлен раздел «Бекапы» (только админы) с 4 вкладками: Состояние, История, Настройки, Восстановление.',
+      'Состояние: 6 KPI (последний/следующий бэкап, размер, защищено данных, хранилище Supabase, RPO) + таблица сверки по разделам.',
+      'Охват бэкапа: продажи, чеки, возвраты, остатки, поступления, перемещения, дисконтные карты, врачи, сотрудники/пользователи, кассовые смены, весь блок Выручка-Расходы и др. (36 таблиц).',
+      'Расписание: транзакционные бэкапы каждые 30 мин (хранение 24 ч), полный бэкап раз в сутки (Vercel Cron).',
+      'Восстановление с выбором точки и разделов: сначала безопасный dry-run, затем обязательное подтверждение (upsert по id, без удаления текущих).',
+      'Хранилище — Supabase (таблица rmk_backups), проверка целостности со счётчиками live.',
+    ],
+  },
   {
     v: '1.2.35', date: '12.08.2026', title: 'Перемещение: вариант целевого склада по размеру экземпляра (фикс нативных товаров)',
     items: [
@@ -589,8 +600,9 @@ const VIEW_META = {
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
   receiving: { title: 'Поступление товара', sub: 'Приём товара от поставщика: калькулятор цены и генерация штрихкодов' },
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
+  backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'doctors', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'finance', 'receiving'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'doctors', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'finance', 'receiving', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -725,6 +737,7 @@ function renderView(force) {
   else if (v === 'transfer') renderTransfer(force);
   else if (v === 'finance') renderFinance(force);
   else if (v === 'receiving') renderReceiving(force);
+  else if (v === 'backups') renderBackups(force);
 }
 
 // общий помощник кеширования запросов
@@ -4740,6 +4753,332 @@ function finCatName(id) { const c = FIN.cats.find(x => x.id === id); return c ? 
 function finCatIcon(id) { const c = FIN.cats.find(x => x.id === id); return c && c.icon ? c.icon : '📌'; }
 // период расхода для отображения: expense_date или период-месяц
 function finExpDate(e) { return e.expense_date || (e.period_month ? e.period_month : ''); }
+
+// ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: БЕКАПЫ (резервное копирование и восстановление)
+// ══════════════════════════════════════════════════════════
+const BK = { loaded: false, tab: 'state', overview: null, runs: [], sel: null, sections: [], secPage: 1, secPer: 10 };
+
+// человеческий размер (байты → KB/MB/GB)
+function fmtBytes(n) {
+  const b = Number(n) || 0;
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(2) + ' KB';
+  if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(2) + ' MB';
+  return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+// ISO → «DD.MM.YYYY HH:MM» по Душанбе (+5)
+function bkDT(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso); if (isNaN(d)) return '—';
+  const s = new Date(d.getTime() + 5 * 3600 * 1000);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${p(s.getUTCDate())}.${p(s.getUTCMonth() + 1)}.${s.getUTCFullYear()} ${p(s.getUTCHours())}:${p(s.getUTCMinutes())}`;
+}
+// минут → «через N мин / N ч M мин»
+function bkMinsUntil(iso) {
+  if (!iso) return '—';
+  const diff = Math.round((new Date(iso) - new Date()) / 60000);
+  if (diff <= 0) return 'сейчас';
+  if (diff < 60) return `через ${diff} мин`;
+  return `через ${Math.floor(diff / 60)} ч ${diff % 60} мин`;
+}
+
+async function renderBackups(force) {
+  const box = $('bkBody');
+  if (force) BK.loaded = false;
+  if (!BK.loaded) {
+    box.innerHTML = `<div class="loading">⏳ Загружаю данные бэкапов…</div>`;
+    try {
+      const [ov, ls] = await Promise.all([
+        posApi('?action=backup-overview', { method: 'GET' }),
+        posApi('?action=backup-list&limit=200', { method: 'GET' }),
+      ]);
+      BK.overview = ov || {};
+      BK.runs = (ls && ls.runs) || [];
+      const defFull = BK.runs.find(r => r.kind === 'full') || BK.runs[0] || null;
+      BK.sel = defFull ? defFull.run_id : null;
+      if (BK.sel) { await bkLoadSections(BK.sel); }
+      BK.loaded = true;
+    } catch (e) {
+      box.innerHTML = errBar('Не удалось загрузить бэкапы: ' + (e.message || e));
+      return;
+    }
+  }
+  bkPaint();
+}
+
+async function bkLoadSections(runId) {
+  const d = await posApi('?action=backup-sections&run_id=' + encodeURIComponent(runId), { method: 'GET' });
+  BK.sections = (d && d.sections) || [];
+  BK.secPage = 1;
+}
+
+function bkTabBtn(key, label) {
+  return `<button class="bk-tab ${BK.tab === key ? 'active' : ''}" data-bktab="${key}">${label}</button>`;
+}
+
+function bkPaint() {
+  const box = $('bkBody');
+  box.innerHTML = `
+    <div class="bk-tabs">
+      ${bkTabBtn('state', 'Состояние')}
+      ${bkTabBtn('history', 'История')}
+      ${bkTabBtn('settings', 'Настройки')}
+      ${bkTabBtn('restore', 'Восстановление')}
+      <div class="bk-tabs-actions">
+        <button class="btn btn-primary btn-sm" id="bkCreateNow">☁ Создать бэкап сейчас</button>
+      </div>
+    </div>
+    <div id="bkTabBody"></div>
+    <div class="bk-footinfo">
+      <span class="bk-footinfo-ic">ℹ</span>
+      <b>Информация:</b> Бэкапы хранятся в Supabase и проверяются на целостность после каждого создания. Транзакционные — каждые 30 мин, полный — раз в сутки.
+    </div>
+  `;
+  box.querySelectorAll('.bk-tab').forEach(b =>
+    b.addEventListener('click', () => { BK.tab = b.dataset.bktab; bkPaint(); }));
+  $('bkCreateNow').addEventListener('click', () => bkCreate('full'));
+  bkPaintTab();
+}
+
+function bkPaintTab() {
+  const t = BK.tab;
+  if (t === 'state') return bkPaintState();
+  if (t === 'history') return bkPaintHistory();
+  if (t === 'settings') return bkPaintSettings();
+  if (t === 'restore') return bkPaintRestore();
+}
+
+// ─── ВКЛАДКА «СОСТОЯНИЕ»: 6 KPI + таблица разделов ───
+function bkPaintState() {
+  const box = $('bkTabBody');
+  const o = BK.overview || {};
+  const lf = o.last_full || null;
+  const rpo = o.rpo_minutes;
+  const rpoTone = rpo == null ? 'gray' : (rpo <= 45 ? 'g' : (rpo <= 120 ? 'amber' : 'red'));
+  const rpoSub = rpo == null ? 'нет данных' : (rpo <= 45 ? 'Норма' : (rpo <= 120 ? 'Повышенный' : 'Критичный'));
+  const kpis = `
+    <div class="kpis bk-kpis">
+      ${kpi('✅', 'Последний успешный бэкап', lf ? `<span style="font-size:19px">${bkDT(lf.at)}</span>` : '—', 'g', lf ? 'Полный бэкап' : 'нет бэкапов')}
+      ${kpi('⏱', 'Следующий бэкап', `<span style="font-size:19px">${bkDT(o.next_tx_at)}</span>`, 'gray', bkMinsUntil(o.next_tx_at) + ' · инкрементальный')}
+      ${kpi('🗄', 'Размер последней копии', lf ? fmtBytes(lf.size_bytes) : '—', 'gray', 'сжатый jsonb')}
+      ${kpi('🛡', 'Защищено данных', `${fmtInt(o.sections_total || 0)} <small>разд.</small>`, 'g', fmtInt(o.records_total || 0) + ' записей')}
+      ${kpi('☁', 'Статус хранилища', 'Supabase <small>OK</small>', 'g', `полных ${fmtInt(o.full_count || 0)} · tx ${fmtInt(o.tx_count || 0)}`)}
+      ${kpi('⚠', 'RPO (потеря данных)', rpo == null ? '—' : `${rpo} <small>мин</small>`, rpoTone, rpoSub)}
+    </div>`;
+
+  box.innerHTML = kpis + `
+    <div class="card card-pad" style="margin-top:4px">
+      <div class="card-h-row">
+        <div><h3>Состояние разделов</h3><div class="muted" style="font-size:12.5px;margin-top:2px">Сверка данных в последнем бэкапе</div></div>
+        <button class="btn btn-ghost btn-sm" id="bkRefreshSec">↻ Проверить все разделы</button>
+      </div>
+      <div id="bkSecWrap"></div>
+    </div>`;
+  $('bkRefreshSec').addEventListener('click', async () => {
+    if (!BK.sel) return;
+    $('bkSecWrap').innerHTML = `<div class="loading">⏳ Проверяю…</div>`;
+    try { await bkLoadSections(BK.sel); } catch (e) { $('bkSecWrap').innerHTML = errBar(e.message || e); return; }
+    bkPaintSections();
+  });
+  bkPaintSections();
+}
+
+function bkPaintSections() {
+  const wrap = $('bkSecWrap'); if (!wrap) return;
+  const all = BK.sections || [];
+  if (!all.length) { wrap.innerHTML = `<div class="tbl-empty">Нет данных по разделам</div>`; return; }
+  const per = BK.secPer, page = BK.secPage;
+  const pages = Math.max(1, Math.ceil(all.length / per));
+  const rows = all.slice((page - 1) * per, page * per);
+  const statusBadge = (m) => m === 'ok'
+    ? `<span class="badge ok">✓ Успешно</span>`
+    : (m === 'partial' ? `<span class="badge amber2">⚠ Частично</span>` : `<span class="badge off">—</span>`);
+  const checkBadge = (s) => s.match === 'ok'
+    ? `<span class="bk-chk ok">Совпадает</span>`
+    : (s.match === 'partial' ? `<span class="bk-chk bad">${s.diff > 0 ? '+' : ''}${s.diff} зап.</span>` : `<span class="bk-chk">—</span>`);
+  const body = rows.map(s => `
+    <tr>
+      <td class="strong">${esc(s.title)}</td>
+      <td class="muted">${esc(s.data_type)}</td>
+      <td class="r tnum">${s.live_count == null ? '—' : fmtInt(s.live_count)}</td>
+      <td class="r tnum">${fmtInt(s.backup_count)}</td>
+      <td class="c muted">${bkDT(s.created_at)}</td>
+      <td class="c">${statusBadge(s.match)}</td>
+      <td class="c">${checkBadge(s)}</td>
+      <td class="r muted">${fmtBytes(s.size_bytes)}</td>
+    </tr>`).join('');
+  wrap.innerHTML = `
+    <div class="tbl-wrap">
+      <table class="tbl">
+        <thead><tr>
+          <th>Раздел</th><th>Тип данных</th><th class="r">Записей в системе</th>
+          <th class="r">В последнем бэкапе</th><th class="c">Последний бэкап</th>
+          <th class="c">Статус</th><th class="c">Проверка</th><th class="r">Размер</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <div class="bk-pager">
+      <span class="muted">Показано ${rows.length} из ${all.length}</span>
+      <div class="bk-pager-btns">
+        <button class="btn btn-ghost btn-sm" id="bkSecPrev" ${page <= 1 ? 'disabled' : ''}>‹</button>
+        <span class="bk-pager-cur">${page} / ${pages}</span>
+        <button class="btn btn-ghost btn-sm" id="bkSecNext" ${page >= pages ? 'disabled' : ''}>›</button>
+      </div>
+    </div>`;
+  const pv = $('bkSecPrev'), nx = $('bkSecNext');
+  if (pv) pv.addEventListener('click', () => { if (BK.secPage > 1) { BK.secPage--; bkPaintSections(); } });
+  if (nx) nx.addEventListener('click', () => { if (BK.secPage < pages) { BK.secPage++; bkPaintSections(); } });
+}
+
+// ─── ВКЛАДКА «ИСТОРИЯ» ───
+function bkPaintHistory() {
+  const box = $('bkTabBody');
+  const runs = BK.runs || [];
+  const rowsH = runs.map(r => `
+    <tr>
+      <td class="c muted">${bkDT(r.created_at)}</td>
+      <td class="c">${r.kind === 'tx' ? '<span class="badge off">Инкрементальный</span>' : '<span class="badge ok">Полный</span>'}</td>
+      <td class="r muted">${fmtBytes(r.size_bytes)}</td>
+      <td class="r tnum">${fmtInt(r.rows_total)}</td>
+      <td class="c tnum">${fmtInt(r.tables_count)}</td>
+      <td class="muted" style="font-size:12px">${esc(r.version || '')}</td>
+      <td class="c"><span class="badge ok">✓ Успешно</span></td>
+      <td class="c"><button class="btn btn-ghost btn-sm" data-bkrestore="${esc(r.run_id)}">↺ Восстановить</button></td>
+    </tr>`).join('');
+  box.innerHTML = `
+    <div class="card card-pad">
+      <div class="card-h-row"><h3>История бэкапов</h3><span class="muted">Всего точек: ${runs.length}</span></div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th class="c">Дата и время</th><th class="c">Тип</th><th class="r">Размер</th><th class="r">Записей</th><th class="c">Разделов</th><th>Версия</th><th class="c">Статус</th><th class="c">Действия</th></tr></thead>
+        <tbody>${rowsH || `<tr><td colspan="8" class="tbl-empty">Нет бэкапов</td></tr>`}</tbody>
+      </table></div>
+    </div>`;
+  box.querySelectorAll('[data-bkrestore]').forEach(b =>
+    b.addEventListener('click', () => { BK.sel = b.dataset.bkrestore; BK.tab = 'restore'; bkPaint(); }));
+}
+
+// ─── ВКЛАДКА «НАСТРОЙКИ» ───
+function bkPaintSettings() {
+  const box = $('bkTabBody');
+  const row = (k, v) => `<div class="bk-set-row"><span class="bk-set-k">${k}</span><span class="bk-set-v">${v}</span></div>`;
+  box.innerHTML = `
+    <div class="card card-pad" style="max-width:640px">
+      <div class="card-h-row"><h3>Настройки бэкапов</h3></div>
+      ${row('Тип расписания', '<b>Смешанное</b>')}
+      ${row('Инкрементальный (транзакции)', '<b class="bk-g">Каждые 30 минут</b>')}
+      ${row('Полный бэкап', '<b class="bk-g">Ежедневно в 03:00 (Ташкент)</b>')}
+      ${row('Хранение транзакционных', '24 часа (48 снимков)')}
+      ${row('Хранение полных', '30 дней')}
+      ${row('Хранилище', 'Supabase (PostgreSQL, таблица rmk_backups)')}
+      ${row('Проверка целостности', 'Сверка со счётчиками live')}
+      <div class="muted" style="font-size:12px;margin-top:14px">Расписание управляется Vercel Cron. Ручной бэкап — кнопкой «Создать бэкап сейчас».</div>
+    </div>`;
+}
+
+// ─── ВКЛАДКА «ВОССТАНОВЛЕНИЕ» ───
+function bkPaintRestore() {
+  const box = $('bkTabBody');
+  const runs = BK.runs || [];
+  const opts = runs.map(r => `<option value="${esc(r.run_id)}" ${r.run_id === BK.sel ? 'selected' : ''}>${bkDT(r.created_at)} — ${r.kind === 'tx' ? 'инкрементальный' : 'полный'} (${fmtInt(r.rows_total)} зап.)</option>`).join('');
+  const secs = BK.sections || [];
+  const chk = secs.map(s => `
+    <label class="bk-rest-chk"><input type="checkbox" class="bk-rt" value="${esc(s.table)}" checked> ${esc(s.title)} <span class="muted">(${fmtInt(s.backup_count)})</span></label>`).join('');
+  box.innerHTML = `
+    <div class="card card-pad">
+      <div class="card-h-row"><div><h3>Быстрое восстановление</h3><div class="muted" style="font-size:12.5px;margin-top:2px">Сначала — безопасная проверка (dry-run), потом подтверждение.</div></div></div>
+      <div class="bk-rest-grid">
+        <div>
+          <label class="bk-lbl">Точка восстановления</label>
+          <select id="bkRunSel" class="bk-select">${opts || '<option>Нет точек</option>'}</select>
+          <label class="bk-lbl" style="margin-top:12px">Тип восстановления</label>
+          <div class="bk-mode">Upsert по id (обновить/добавить, без удаления текущих)</div>
+        </div>
+        <div>
+          <div class="bk-rest-chk-head"><label class="bk-lbl">Разделы для восстановления</label><label class="bk-rest-chk bk-all"><input type="checkbox" id="bkAll" checked> Выбрать все</label></div>
+          <div class="bk-rest-chks">${chk || '<span class="muted">Сначала выберите точку</span>'}</div>
+        </div>
+      </div>
+      <div id="bkRestResult"></div>
+      <div class="bk-rest-actions">
+        <button class="btn btn-ghost" id="bkDryRun">🔍 Проверить (dry-run)</button>
+        <button class="btn btn-primary" id="bkDoRestore" style="min-width:280px">↺ Запустить восстановление</button>
+      </div>
+    </div>`;
+  $('bkRunSel').addEventListener('change', async (e) => {
+    BK.sel = e.target.value;
+    $('bkRestResult').innerHTML = `<div class="loading">⏳ Загружаю разделы…</div>`;
+    try { await bkLoadSections(BK.sel); } catch (err) { $('bkRestResult').innerHTML = errBar(err.message || err); return; }
+    bkPaintRestore();
+  });
+  const allCb = $('bkAll');
+  if (allCb) allCb.addEventListener('change', () => {
+    box.querySelectorAll('.bk-rt').forEach(c => { c.checked = allCb.checked; });
+  });
+  $('bkDryRun').addEventListener('click', () => bkRestore(true));
+  $('bkDoRestore').addEventListener('click', () => bkRestore(false));
+}
+
+function bkSelectedTables() {
+  const box = $('bkTabBody');
+  const all = Array.from(box.querySelectorAll('.bk-rt'));
+  const checked = all.filter(c => c.checked).map(c => c.value);
+  if (!all.length || checked.length === all.length) return null;
+  return checked;
+}
+
+async function bkRestore(dryRun) {
+  if (!BK.sel) { alert('Сначала выберите точку восстановления'); return; }
+  const tables = bkSelectedTables();
+  const selCount = tables == null ? (BK.sections || []).length : tables.length;
+  if (selCount === 0) { alert('Выберите хотя бы один раздел'); return; }
+  if (!dryRun) {
+    const ptLabel = bkDT((BK.runs.find(r => r.run_id === BK.sel) || {}).created_at);
+    if (!confirm(`ВНИМАНИЕ: реальное восстановление из точки ${ptLabel}.\nРазделов: ${selCount}. Данные будут обновлены/добавлены по id (без удаления текущих).\n\nПродолжить?`)) return;
+  }
+  const btn = dryRun ? $('bkDryRun') : $('bkDoRestore');
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = dryRun ? 'Проверяю…' : 'Восстанавливаю…'; }
+  try {
+    const d = await posApi('?action=backup-restore', {
+      method: 'POST',
+      body: JSON.stringify({ run_id: BK.sel, tables, dry_run: dryRun }),
+    });
+    const rows = (d.tables || []).map(r => `<tr><td class="strong">${esc(r.title)}</td><td class="r tnum">${fmtInt(r.rows)}</td><td class="muted">${esc(r.note || '')}</td></tr>`).join('');
+    const head = dryRun
+      ? `<div class="bk-rest-note dry">🔍 Проверка (dry-run): будет восстановлено <b>${fmtInt(d.total_rows)}</b> записей. Реальная запись НЕ произведена.</div>`
+      : `<div class="bk-rest-note done">✅ Восстановлено <b>${fmtInt(d.total_rows)}</b> записей в ${(d.tables||[]).length} раздел(ах).</div>`;
+    $('bkRestResult').innerHTML = head + `<div class="tbl-wrap" style="margin-top:10px"><table class="tbl"><thead><tr><th>Раздел</th><th class="r">Записей</th><th>Примечание</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  } catch (e) {
+    $('bkRestResult').innerHTML = errBar('Ошибка восстановления: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
+async function bkCreate(kind) {
+  const label = kind === 'tx' ? 'транзакционный' : 'полный';
+  if (!confirm(`Создать ${label} бэкап сейчас?`)) return;
+  const btn = $('bkCreateNow');
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Создаю…'; }
+  try {
+    const d = await posApi('?action=backup-create', {
+      method: 'POST',
+      body: JSON.stringify({ kind, version: 'RMK v' + RMK_VERSION + (kind === 'tx' ? ' tx' : ' manual'), keepDays: 30, keepHours: 24 }),
+    });
+    alert(`✅ Бэкап создан: ${fmtInt(d.rows_total)} записей в ${d.tables_count} таблицах.`);
+    BK.loaded = false;
+    renderBackups(true);
+  } catch (e) {
+    alert('Ошибка создания бэкапа: ' + (e.message || e));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
+}
+
 
 async function renderFinance(force) {
   const box = $('finBody');

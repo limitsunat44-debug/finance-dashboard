@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.38';
+const RMK_VERSION = '1.2.39';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.39', date: '13.08.2026', title: 'Фикс сверки перемещения для native-товаров',
+    items: [
+      'Исправлен баг: при перемещении native-товаров (созданных в РМК, без 1С) экран сверки помечал их как «Не найдены».',
+      'Причина: сверка считала товар найденным только при наличии ссылки на 1С, которой у native-товаров нет по определению.',
+      'Теперь найденным считается любой экземпляр с 1С-ссылкой ИЛИ с реальным штрихкодом; строка переименована в «Найдены» (с подсчётом native).',
+      'Само перемещение native-товаров работало и раньше — проблема была только в отображении сверки.',
+    ],
+  },
   {
     v: '1.2.38', date: '13.08.2026', title: 'Создание номенклатуры из раздела «Поступление»',
     items: [
@@ -4450,8 +4459,14 @@ function trCheckHTML() {
   const dupMap = {};
   codes.forEach(c => { dupMap[c] = (dupMap[c] || 0) + 1; });
   const dups = Object.keys(dupMap).filter(c => dupMap[c] > 1);
-  const notFound = TR.items.filter(i => !i.productC1Ref).length;
-  const matched = TR.items.filter(i => i.productC1Ref).length;
+  // Найденным считаем экземпляр, который скан вернул с привязкой к 1С (productC1Ref)
+  // ЛИБО native-товар (без 1С, но с реальным штрихкодом из stock_units).
+  // В TR.items вообще попадают только экземпляры, найденные бэком (found:true),
+  // поэтому «не найден» = нет ни 1С-ссылки, ни штрихкода (аномалия).
+  const isFound = i => !!(i.productC1Ref || i.barcode);
+  const notFound = TR.items.filter(i => !isFound(i)).length;
+  const matched = TR.items.filter(i => isFound(i)).length;
+  const nativeCnt = TR.items.filter(i => !i.productC1Ref && i.barcode).length;
   return `
   <div class="tr-wrap">
     <div class="tr-kpis three">
@@ -4463,7 +4478,7 @@ function trCheckHTML() {
       <div class="tr-card-head sm"><span class="tr-ic">✅</span><div><h2>Сверка товаров</h2><p>Проверьте коды и количество перед проведением</p></div></div>
       <div class="tr-check-block">
         <div class="tr-check-title">Проверка кодов</div>
-        <div class="tr-check-row ok"><span>Совпадают (найдены в 1С)</span><b>${fmtInt(matched)}</b></div>
+        <div class="tr-check-row ok"><span>Найдены${nativeCnt ? ` (из них native: ${fmtInt(nativeCnt)})` : ''}</span><b>${fmtInt(matched)}</b></div>
         <div class="tr-check-row ${notFound ? 'warn' : ''}"><span>Не найдены</span><b>${fmtInt(notFound)}</b></div>
         <div class="tr-check-row ${dups.length ? 'warn' : ''}"><span>Дублируются</span><b>${fmtInt(dups.length)}</b></div>
       </div>

@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.37';
+const RMK_VERSION = '1.2.38';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.38', date: '13.08.2026', title: 'Создание номенклатуры из раздела «Поступление»',
+    items: [
+      'Кнопка «+ Создать номенклатуру» теперь открывает форму: наименование, категория, артикул, цена и размеры.',
+      'Категории: Мужская/Женская обувь, Обувь для мальчиков/девочек, Товар. Размерная сетка подставляется автоматически (детская 19–36, взрослая 36–46).',
+      'Создаётся native-товар (без привязки к 1С) + варианты по выбранным размерам с остатком 0; штрихкоды появятся при проведении поступления.',
+      'После создания товар сразу добавляется в текущий документ поступления.',
+    ],
+  },
   {
     v: '1.2.37', date: '13.08.2026', title: 'Фикс рассинхрона номенклатуры при перепроведении поступления',
     items: [
@@ -6499,6 +6508,7 @@ function recvPaintNew() {
       <!-- Калькулятор цены -->
       <div class="recv-calc-col" id="recvCalcCol">${recvCalcHTML()}</div>
     </div>
+    <div id="recvModal"></div>
   `;
 
   recvBindHead();
@@ -6615,8 +6625,104 @@ function recvBindHead() {
   const post = $('recvPost'); if (post) post.onclick = () => recvSubmit(true);
   const newDoc = $('recvNewDoc'); if (newDoc) newDoc.onclick = () => { recvResetForm(); recvPaint(); };
   const printTop = $('recvPrintLabelsTop'); if (printTop) printTop.onclick = recvPrintLabels;
-  const createNom = $('recvCreateNom'); if (createNom) createNom.onclick = () => alert('Создание номенклатуры — отдельный раздел (в разработке). Пока добавляйте существующие товары через поиск.');
+  const createNom = $('recvCreateNom'); if (createNom) createNom.onclick = recvCreateNomForm;
   const addRow = $('recvAddRow'); if (addRow) addRow.onclick = () => { const s = $('recvSearch'); if (s) s.focus(); };
+}
+
+// ── Модалка: создание номенклатуры (native-товар) ──────────────────────────
+// v1.2.38. Категории и размерная сетка синхронизированы с backend recvSizeGrid().
+const RECV_NOM_CATS = ['Мужская обувь', 'Женская обувь', 'Обувь для мальчиков', 'Обувь для девочек', 'Товар'];
+function recvNomSizeGrid(category) {
+  const c = String(category || '').toLowerCase();
+  const range = (a, b) => { const r = []; for (let i = a; i <= b; i++) r.push(String(i)); return r; };
+  if (c.includes('девоч') || c.includes('мальчик') || c.includes('детск')) return range(19, 36);
+  if (c.includes('мужск') || c.includes('женск') || c.includes('обув')) return range(36, 46);
+  return [];
+}
+function recvCreateNomForm() {
+  const m = $('recvModal');
+  if (!m) return;
+  const catOpts = RECV_NOM_CATS.map(c => `<option value="${esc(c)}"${c === 'Мужская обувь' ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  m.innerHTML = `
+    <div class="fin-modal-bg" id="recvNomBg">
+      <div class="fin-modal">
+        <div class="fin-modal-head"><h3>Новая номенклатура</h3><button class="fin-modal-x" id="recvNomClose">✕</button></div>
+        <div class="fin-modal-body">
+          <label class="fld"><span>Наименование товара *</span><input id="rnName" placeholder="Напр. Ortosalon 3349-5A черн."></label>
+          <label class="fld"><span>Категория *</span><select id="rnCat">${catOpts}</select></label>
+          <label class="fld"><span>Артикул (необязательно)</span><input id="rnSku" placeholder="напр. 3349-5A"></label>
+          <label class="fld"><span>Цена продажи, ${CUR} (необязательно)</span><input id="rnPrice" type="number" step="0.01" min="0" placeholder="можно задать позже в поступлении"></label>
+          <div class="fld" id="rnSizesFld">
+            <span>Размеры <small id="rnSizesHint" style="color:var(--muted,#8a8f98)"></small></span>
+            <div id="rnSizes" class="rn-sizes"></div>
+          </div>
+        </div>
+        <div class="fin-modal-foot"><span></span><div>
+          <button class="btn btn-ghost btn-sm" id="rnCancel">Отмена</button>
+          <button class="btn btn-primary btn-sm" id="rnSave">Создать и добавить</button></div></div>
+        <div id="rnMsg"></div>
+      </div>
+    </div>`;
+
+  const close = () => { m.innerHTML = ''; };
+  $('recvNomClose').onclick = close;
+  $('rnCancel').onclick = close;
+  $('recvNomBg').onclick = (e) => { if (e.target.id === 'recvNomBg') close(); };
+
+  // рендер размерной сетки по категории (все размеры выбраны по умолчанию)
+  const paintSizes = () => {
+    const cat = $('rnCat').value;
+    const grid = recvNomSizeGrid(cat);
+    const box = $('rnSizes');
+    const hint = $('rnSizesHint');
+    const fld = $('rnSizesFld');
+    if (!grid.length) {
+      fld.style.display = 'none';
+      box.innerHTML = '';
+      if (hint) hint.textContent = '';
+      return;
+    }
+    fld.style.display = '';
+    if (hint) hint.textContent = `(${grid[0]}–${grid[grid.length - 1]}, снимите лишние)`;
+    box.innerHTML = grid.map(s =>
+      `<label class="rn-size"><input type="checkbox" class="rn-size-cb" value="${esc(s)}" checked><span>${esc(s)}</span></label>`
+    ).join('');
+  };
+  $('rnCat').onchange = paintSizes;
+  paintSizes();
+
+  $('rnName').focus();
+
+  $('rnSave').onclick = async () => {
+    const name = $('rnName').value.trim();
+    if (!name) { $('rnMsg').innerHTML = errBar('Укажите наименование товара'); $('rnName').focus(); return; }
+    const category = $('rnCat').value;
+    const sku = $('rnSku').value.trim();
+    const priceRaw = $('rnPrice').value.trim();
+    let price = null;
+    if (priceRaw !== '') {
+      const p = Number(priceRaw);
+      if (!isFinite(p) || p < 0) { $('rnMsg').innerHTML = errBar('Цена указана некорректно'); return; }
+      price = p;
+    }
+    const sizes = Array.from(document.querySelectorAll('.rn-size-cb'))
+      .filter(cb => cb.checked).map(cb => cb.value);
+
+    const btn = $('rnSave');
+    btn.disabled = true; btn.textContent = 'Создаю…';
+    try {
+      const d = await posApi('?action=recv-create-product', {
+        method: 'POST',
+        body: JSON.stringify({ name, category, sku: sku || null, price, sizes }),
+      });
+      if (!d || !d.ok || !d.product) throw new Error((d && d.error) || 'Не удалось создать номенклатуру');
+      close();
+      recvAddProduct(d.product); // сразу добавляем в текущий документ
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Создать и добавить';
+      $('rnMsg').innerHTML = errBar(e.message || String(e));
+    }
+  };
 }
 
 // ── Поиск товара с автодополнением ──

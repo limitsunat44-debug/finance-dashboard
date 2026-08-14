@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.39';
+const RMK_VERSION = '1.2.40';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.40', date: '14.08.2026', title: 'Выручка и Статистика — из локальной кассы (без 1С)',
+    items: [
+      'Раздел «Статистика» теперь считает выручку, чеки, топ-магазины/продавцы/товары из локальной кассы (Supabase), а не из 1С.',
+      'Топ-товары больше не ограничены 150 чеками и считаются быстрее (состав чека уже в базе).',
+      'Раздел «Выручка-Расходы»: выручка и прибыль по магазинам теперь из локальной кассы, а не из агрегата 1С (sales_daily_1c).',
+      'Себестоимость (COGS 50%) и расчёт чистой прибыли не изменились — поменялся только источник выручки.',
+      'Важно: локальная касса хранит чеки с июня 2026 — за более ранние периоды выручка показывается пустой.'
+    ]
+  },
   {
     v: '1.2.39', date: '13.08.2026', title: 'Фикс сверки перемещения для native-товаров',
     items: [
@@ -5807,7 +5817,7 @@ async function finPaintOverview() {
     const profitTone = s.net_profit >= 0 ? 'green' : 'red';
     const kpiRow = `
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));margin-bottom:14px">
-        ${kpi('💰','Выручка (из 1С)', money(s.revenue),'green', 'чистая, продажи − возвраты')}
+        ${kpi('💰','Выручка', money(s.revenue),'green', 'чистая (локальная касса): продажи − возвраты')}
         ${kpi('📌','Постоянные расходы', money(s.expenses_fixed),'amber', 'аренда, оклады и т.д.')}
         ${kpi('🧾','Переменные расходы', money(s.expenses_variable),'amber', 'закуп, логистика и т.д.')}
         ${kpi('👥','Зарплаты', money(s.payroll_total),'blue', `оклад ${fmtInt(s.payroll_oklad)} + % ${fmtInt(s.payroll_percent)}`)}
@@ -5826,7 +5836,7 @@ async function finPaintOverview() {
       <div class="card card-pad" style="margin-bottom:14px">
         <h3 class="fin-h3">Финансовый результат ${prorated ? '<span class="fin-note">(пропорц. дням периода)</span>' : ''}</h3>
         <div class="fin-fr">
-          ${line('Выручка (net из 1С)', s.revenue, 1, false)}
+          ${line('Выручка (net, локальная касса)', s.revenue, 1, false)}
           ${line(`Себестоимость товара (${Math.round(s.cogs_rate*100)}%)`, s.cogs, -1, false)}
           ${line('Постоянные расходы', s.expenses_fixed, -1, false)}
           ${line('Переменные расходы', s.expenses_variable, -1, false)}
@@ -5877,7 +5887,7 @@ async function finDrawOverviewTrend(canvasId, from, to) {
   const el = $(canvasId); if (!el) return;
   destroyChart(canvasId);
   try {
-    // Выручка по дням из 1С (через отдельный публичный проект — читаем на бэке нельзя по дням, берём агрегат).
+    // Выручка по дням — агрегат из локальной кассы (pos_receipts), распределяем равномерно по дням.
     // Простая версия: расходы по дням (shop_expenses.expense_date) + выручка распределяем равномерно.
     const s = FIN.profit ? FIN.profit.summary : null;
     const days = [];

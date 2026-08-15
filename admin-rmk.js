@@ -7,8 +7,19 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.41';
+const RMK_VERSION = '1.2.42';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.42', date: '15.08.2026', title: 'Справочник размеров при приходе: выбор из существующих, без дублей',
+    items: [
+      'Создание номенклатуры: размеры теперь выбираются из справочника существующих размеров (все категории, не только обувь) — M/L/S, XS–XXL, числовые, диапазоны, см, «стандарт», ортопедические.',
+      'Раньше для категории «Товар» и всего не-обувного размеры не предлагались и создавался вариант «без размера» → ошибка. Теперь такого нет.',
+      'Размеры больше не проставляются автоматически «все» — вы явно выбираете нужные (галочки). Для обуви есть кнопка «выбрать типовую сетку».',
+      'Можно добавить свой размер вручную (напр. «41» или «M») — он попадёт в выбор.',
+      'При приходе на существующий товар показываются его РЕАЛЬНЫЕ размеры (в т.ч. у товара из эпохи 1С) — варианты не пересоздаются, дубли размеров не плодятся (сравнение по нормализованному размеру: «размер:40» = «40»).',
+      'Справочник дедуплицирован: один «стандарт» вместо десятка вариантов написания; мусорные значения («кол-во», «сканирование» и т.п.) отфильтрованы.',
+    ],
+  },
   {
     v: '1.2.41', date: '15.08.2026', title: 'Фикс: разные товары сливались в одну строку чека (касса кассира)',
     items: [
@@ -6664,8 +6675,11 @@ function recvBindHead() {
 }
 
 // ── Модалка: создание номенклатуры (native-товар) ──────────────────────────
-// v1.2.38. Категории и размерная сетка синхронизированы с backend recvSizeGrid().
+// v1.2.42. Размеры выбираются из справочника существующих размеров (все категории),
+// а не из жёсткой числовой сетки. Дедуп по sizeKey — на backend.
 const RECV_NOM_CATS = ['Мужская обувь', 'Женская обувь', 'Обувь для мальчиков', 'Обувь для девочек', 'Товар'];
+
+// Авто-сетка по категории (для кнопки «выбрать типовую сетку обуви»).
 function recvNomSizeGrid(category) {
   const c = String(category || '').toLowerCase();
   const range = (a, b) => { const r = []; for (let i = a; i <= b; i++) r.push(String(i)); return r; };
@@ -6673,6 +6687,18 @@ function recvNomSizeGrid(category) {
   if (c.includes('мужск') || c.includes('женск') || c.includes('обув')) return range(36, 46);
   return [];
 }
+
+// Кэш справочника размеров { groupName: [{label,count}] }.
+let recvSizeCatalogCache = null;
+async function recvLoadSizeCatalog() {
+  if (recvSizeCatalogCache) return recvSizeCatalogCache;
+  const d = await posApi('?action=recv-size-catalog');
+  recvSizeCatalogCache = (d && d.groups) || {};
+  return recvSizeCatalogCache;
+}
+// Порядок групп в UI.
+const RECV_SIZE_GROUP_ORDER = ['Числовые', 'Малые/детские', 'Буквенные', 'Универсальные', 'Диапазоны', 'Сантиметры', 'Ортопедические', 'Прочие'];
+
 function recvCreateNomForm() {
   const m = $('recvModal');
   if (!m) return;
@@ -6687,8 +6713,13 @@ function recvCreateNomForm() {
           <label class="fld"><span>Артикул (необязательно)</span><input id="rnSku" placeholder="напр. 3349-5A"></label>
           <label class="fld"><span>Цена продажи, ${CUR} (необязательно)</span><input id="rnPrice" type="number" step="0.01" min="0" placeholder="можно задать позже в поступлении"></label>
           <div class="fld" id="rnSizesFld">
-            <span>Размеры <small id="rnSizesHint" style="color:var(--muted,#8a8f98)"></small></span>
-            <div id="rnSizes" class="rn-sizes"></div>
+            <span>Размеры <small id="rnSizesHint" style="color:var(--muted,#8a8f98)">(выберите нужные — по умолчанию ничего не выбрано)</small></span>
+            <div class="rn-size-tools">
+              <input id="rnSizeAdd" class="rn-size-add" placeholder="добавить свой размер и Enter (напр. M, 41, стандарт)">
+              <button type="button" class="btn btn-ghost btn-xs" id="rnSizeGridBtn" style="display:none">выбрать типовую сетку</button>
+              <button type="button" class="btn btn-ghost btn-xs" id="rnSizeClear">снять все</button>
+            </div>
+            <div id="rnSizes" class="rn-sizes-cat">Загрузка справочника…</div>
           </div>
         </div>
         <div class="fin-modal-foot"><span></span><div>
@@ -6703,27 +6734,80 @@ function recvCreateNomForm() {
   $('rnCancel').onclick = close;
   $('recvNomBg').onclick = (e) => { if (e.target.id === 'recvNomBg') close(); };
 
-  // рендер размерной сетки по категории (все размеры выбраны по умолчанию)
-  const paintSizes = () => {
-    const cat = $('rnCat').value;
-    const grid = recvNomSizeGrid(cat);
+  // Выбранные размеры (sizeKey -> label), сохраняются при смене категории.
+  const selected = new Map();
+  const sizeKeyLocal = s => String(s || '').trim().toLowerCase();
+
+  // Рендер справочника (группы с чекбоксами). Ничего не выбрано по умолчанию.
+  const renderCatalog = (groups) => {
     const box = $('rnSizes');
-    const hint = $('rnSizesHint');
-    const fld = $('rnSizesFld');
-    if (!grid.length) {
-      fld.style.display = 'none';
-      box.innerHTML = '';
-      if (hint) hint.textContent = '';
-      return;
+    if (!box) return;
+    const parts = [];
+    for (const g of RECV_SIZE_GROUP_ORDER) {
+      const items = groups[g];
+      if (!items || !items.length) continue;
+      parts.push(`<div class="rn-size-group"><div class="rn-size-group-h">${esc(g)}</div><div class="rn-sizes">` +
+        items.map(it => {
+          const k = sizeKeyLocal(it.label);
+          const on = selected.has(k) ? ' checked' : '';
+          return `<label class="rn-size"><input type="checkbox" class="rn-size-cb" value="${esc(it.label)}"${on}><span>${esc(it.label)}</span></label>`;
+        }).join('') + `</div></div>`);
     }
-    fld.style.display = '';
-    if (hint) hint.textContent = `(${grid[0]}–${grid[grid.length - 1]}, снимите лишние)`;
-    box.innerHTML = grid.map(s =>
-      `<label class="rn-size"><input type="checkbox" class="rn-size-cb" value="${esc(s)}" checked><span>${esc(s)}</span></label>`
-    ).join('');
+    // размеры, добавленные вручную, которых нет в справочнике
+    const extra = [];
+    for (const [k, label] of selected) {
+      const inCat = Object.values(groups).some(arr => arr.some(it => sizeKeyLocal(it.label) === k));
+      if (!inCat) extra.push(label);
+    }
+    if (extra.length) {
+      parts.push(`<div class="rn-size-group"><div class="rn-size-group-h">Добавленные вручную</div><div class="rn-sizes">` +
+        extra.map(label => `<label class="rn-size"><input type="checkbox" class="rn-size-cb" value="${esc(label)}" checked><span>${esc(label)}</span></label>`).join('') +
+        `</div></div>`);
+    }
+    box.innerHTML = parts.join('') || '<div style="color:var(--muted,#8a8f98);font-size:13px">Справочник пуст. Добавьте размер вручную выше.</div>';
+    // навешиваем обработчики чекбоксов (обновляют selected)
+    box.querySelectorAll('.rn-size-cb').forEach(cb => {
+      cb.onchange = () => {
+        const k = sizeKeyLocal(cb.value);
+        if (cb.checked) selected.set(k, cb.value); else selected.delete(k);
+      };
+    });
   };
-  $('rnCat').onchange = paintSizes;
-  paintSizes();
+
+  // Кнопка «выбрать типовую сетку» — только для обуви.
+  const refreshGridBtn = () => {
+    const grid = recvNomSizeGrid($('rnCat').value);
+    $('rnSizeGridBtn').style.display = grid.length ? '' : 'none';
+  };
+  $('rnCat').onchange = refreshGridBtn;
+
+  $('rnSizeGridBtn').onclick = () => {
+    recvNomSizeGrid($('rnCat').value).forEach(s => selected.set(sizeKeyLocal(s), s));
+    renderCatalog(recvSizeCatalogCache || {});
+  };
+  $('rnSizeClear').onclick = () => { selected.clear(); renderCatalog(recvSizeCatalogCache || {}); };
+
+  // Добавление своего размера.
+  const addManual = () => {
+    const inp = $('rnSizeAdd');
+    const val = (inp.value || '').trim();
+    if (!val) return;
+    selected.set(sizeKeyLocal(val), val);
+    inp.value = '';
+    renderCatalog(recvSizeCatalogCache || {});
+  };
+  $('rnSizeAdd').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addManual(); } };
+
+  // грузим справочник
+  (async () => {
+    try {
+      const groups = await recvLoadSizeCatalog();
+      renderCatalog(groups);
+      refreshGridBtn();
+    } catch (e) {
+      $('rnSizes').innerHTML = errBar('Не удалось загрузить справочник размеров: ' + (e.message || e));
+    }
+  })();
 
   $('rnName').focus();
 
@@ -6739,8 +6823,7 @@ function recvCreateNomForm() {
       if (!isFinite(p) || p < 0) { $('rnMsg').innerHTML = errBar('Цена указана некорректно'); return; }
       price = p;
     }
-    const sizes = Array.from(document.querySelectorAll('.rn-size-cb'))
-      .filter(cb => cb.checked).map(cb => cb.value);
+    const sizes = Array.from(selected.values());
 
     const btn = $('rnSave');
     btn.disabled = true; btn.textContent = 'Создаю…';
@@ -6758,7 +6841,6 @@ function recvCreateNomForm() {
     }
   };
 }
-
 // ── Поиск товара с автодополнением ──
 let recvSearchTimer = null;
 function recvBindSearch() {

@@ -10903,7 +10903,12 @@ function posAddToCart(it) {
         // Откат: вернуть блок `if (!isNative220 && it.status && it.status !== 'in_stock') return '⛔ …';`.
         // Плашку «числился проданным/списанным» НЕ показываем — она смущает кассира (продажа всё равно идёт).
         // ищем строку этого же варианта (группируем экземпляры одной модели+размера)
-        let line = POS.cart.find(l => l.uniqueBarcode && l.charC1Ref === it.charC1Ref);
+        // ФИКС v1.2.41: группируем СТРОГО по variantId (точный ключ варианта товара).
+        // Раньше группировали по charC1Ref — у нативных товаров он NULL, и `null === null`
+        // сливал РАЗНЫЕ товары в одну строку (баг: обувь 40 и коврик в одну позицию).
+        // Если variantId нет (старый бэкенд/данные) — НЕ группируем: каждый скан = своя строка.
+        const grpVar = it.variantId || null;
+        let line = grpVar ? POS.cart.find(l => l.uniqueBarcode && l.variantId && l.variantId === grpVar) : null;
         if (line) {
             // этот штрихкод уже сканирован?
             if (line.scans.includes(it.uniqueBarcode)) {
@@ -10928,6 +10933,7 @@ function posAddToCart(it) {
             name: it.name, sizeLabel: it.sizeLabel || null,
             price: Number(it.price) || 0, qty: 1, discountPct: 0,
             productC1Ref: it.productC1Ref, charC1Ref: it.charC1Ref || null,
+            variantId: it.variantId || null,
             warehouseC1Ref: it.warehouseC1Ref || posShopWh() || null,
             // v1.2.20: по требованию — НИКАКИХ плашек. Предупреждение о нулевом
             // остатке погашено (раньше показывали «Нет на складе… 0 шт.»).

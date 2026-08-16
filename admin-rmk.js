@@ -7,8 +7,15 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.44';
+const RMK_VERSION = '1.2.45';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.45', date: '17.08.2026', title: 'Поиск товара: копирование уникального кода по клику',
+    items: [
+      'В панели экземпляров (склад × размер) чипы показывают ПОЛНЫЙ уникальный код (раньше — только последние 4 цифры).',
+      'Клик по чипу мгновенно копирует код в буфер обмена (с иконкой копирования и подтверждением).',
+    ],
+  },
   {
     v: '1.2.44', date: '17.08.2026', title: 'Автосинхронизация числового остатка с поэкземплярным фактом',
     items: [
@@ -1929,8 +1936,10 @@ async function loadUnitsPanel(pid) {
     const units = d.units || [];
     const chips = units.length
       ? units.map(u => {
+          const full = String(u.barcode || '');
           const al = (u.aliases||[]).length ? `<span class="psm-alias" title="доп. коды: ${esc((u.aliases||[]).join(', '))}">+${(u.aliases||[]).length}</span>` : '';
-          return `<span class="psm-chip" title="${esc(u.barcode||'')}"><span class="psm-dot"></span>⋯${esc(u.last4||'')}${al}</span>`;
+          const copyIco = `<svg class="psm-copyico" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
+          return `<button type="button" class="psm-chip psm-chip-copy" data-copy="${esc(full)}" title="Нажмите, чтобы скопировать: ${esc(full)}"><span class="psm-dot"></span><span class="psm-chip-code">${esc(full)}</span>${al}${copyIco}</button>`;
         }).join('')
       : `<div class="psm-nounits">Нет экземпляров в наличии</div>`;
     const infoIcon = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><circle cx="12" cy="7.5" r=".6" fill="currentColor" stroke="none"/></svg>`;
@@ -1938,7 +1947,7 @@ async function loadUnitsPanel(pid) {
       <div class="psm-panel-head"><span>Размер <b>${esc(sel.size)}</b> — ${esc(whName)} <span class="psm-cnt">(${fmtInt(units.length)} шт)</span></span><button class="psm-close" id="psmClose_${esc(pid)}" title="Закрыть">×</button></div>
       <div class="psm-grid">
         <div class="psm-col">
-          <div class="psm-sub">Уникальные коды (последние 4 цифры)</div>
+          <div class="psm-sub">Уникальные коды (нажмите, чтобы скопировать)</div>
           <div class="psm-chips">${chips}</div>
         </div>
         <div class="psm-col">
@@ -1965,6 +1974,27 @@ async function loadUnitsPanel(pid) {
       </div>`;
     const closeBtn = document.getElementById('psmClose_' + cssIdEsc(pid)) || document.getElementById('psmClose_' + pid);
     if (closeBtn) closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); cached.sel = null; renderDetailMatrix(pid); });
+    // --- копирование уникального кода по клику на чип ---
+    panel.querySelectorAll('.psm-chip-copy').forEach(chip => {
+      chip.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const code = chip.getAttribute('data-copy') || '';
+        if (!code) return;
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(code);
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = code; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.focus(); ta.select();
+            document.execCommand('copy'); document.body.removeChild(ta);
+          }
+          chip.classList.add('psm-chip-copied');
+          setTimeout(() => chip.classList.remove('psm-chip-copied'), 900);
+          docToast('Код скопирован: ' + code);
+        } catch (_) { docToast('Не удалось скопировать'); }
+      });
+    });
     const btn = document.getElementById('psmAssign_' + cssIdEsc(pid)) || document.getElementById('psmAssign_' + pid);
     const inp = document.getElementById('psmEan_' + cssIdEsc(pid)) || document.getElementById('psmEan_' + pid);
     if (btn) btn.addEventListener('click', (ev) => { ev.stopPropagation(); assignBarcode(pid); });

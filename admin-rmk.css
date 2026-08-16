@@ -1288,3 +1288,35 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
   .bk-rest-grid{ grid-template-columns:1fr; gap:18px; }
   .bk-rest-chks{ grid-template-columns:1fr; }
 }
+
+/* ═══════════ ИНВЕНТАРИЗАЦИЯ ═══════════ */
+.sec-h{font-size:13px;font-weight:700;color:var(--tx2);margin:18px 2px 8px;text-transform:uppercase;letter-spacing:.04em}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.btn-danger{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;box-shadow:0 2px 8px rgba(220,38,38,.25)}
+.btn-danger:hover{box-shadow:0 4px 14px rgba(220,38,38,.35)}
+.btn-danger:disabled,.btn-primary:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:16px;font-size:12px;font-weight:700}
+.pill.g{background:var(--g-soft2);color:var(--g3)} .pill.amber{background:#fef3c7;color:#92400e}
+.pill.red{background:var(--red-soft);color:var(--red)} .pill.blue{background:#e0edff;color:#1e40af}
+.pill.violet{background:#f3e8ff;color:#7c3aed} .pill.gray{background:#f1f5f4;color:var(--tx2)}
+
+.inv-counter{text-align:center;padding:14px 0 6px}
+.inv-counter .big{font-size:44px;font-weight:800;color:var(--g3);line-height:1;letter-spacing:-.02em}
+.inv-counter .big small{font-size:22px;color:var(--tx2);font-weight:700}
+.inv-bar{height:9px;border-radius:6px;background:#eef2f0;overflow:hidden;margin:12px auto 0;max-width:520px}
+.inv-bar>i{display:block;height:100%;background:linear-gradient(90deg,var(--g),var(--g2));border-radius:6px;transition:width .4s}
+
+.inv-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:16px}
+.inv-tile{background:var(--panel,#fff);border:1.5px solid var(--line);border-radius:12px;padding:12px 6px;text-align:center}
+.inv-tile .n{font-size:24px;font-weight:800;line-height:1}
+.inv-tile .l{font-size:11px;color:var(--tx2);margin-top:6px}
+.inv-tile.t-g .n{color:#16a34a} .inv-tile.t-amber .n{color:#d97706}
+.inv-tile.t-red .n{color:#dc2626} .inv-tile.t-blue .n{color:#2563eb} .inv-tile.t-violet .n{color:#7c3aed}
+
+.inv-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:9px;vertical-align:middle}
+.inv-apply{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}
+.inv-apply-step{border:1.5px solid var(--line);border-radius:12px;padding:16px}
+.inv-apply-step.danger{border-color:#fecaca;background:#fef2f2}
+.inv-apply-step h4{margin:0 0 8px;font-size:15px}
+.inv-apply-step p{font-size:13px;margin:0 0 12px}
+@media(max-width:760px){.inv-apply{grid-template-columns:1fr}.inv-tiles{grid-template-columns:repeat(3,1fr)}}

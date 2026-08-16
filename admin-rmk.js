@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.42';
+const RMK_VERSION = '1.2.43';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.43', date: '16.08.2026', title: 'Новая вкладка «Инвентаризация»: пересчёт склада с телефона',
+    items: [
+      'Реестр сессий инвентаризации (активные / на проверке / завершённые).',
+      'Карточка сессии с живой лентой сканов и счётчиком факт/ожидание.',
+      'Акт расхождений: совпало / недостача / вернётся / с др. складов / продано во время.',
+      'Применение в два шага: безопасные изменения (возвраты/перемещения) + списание недостач с откатом.',
+      'Сканирование — с телефона (отдельная страница /inventory.html с камерой).',
+    ],
+  },
   {
     v: '1.2.42', date: '15.08.2026', title: 'Справочник размеров при приходе: выбор из существующих, без дублей',
     items: [
@@ -655,11 +665,12 @@ const VIEW_META = {
   cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
   shiftreports:{ title: 'Отчёты по продажам за день', sub: 'Отчёт по каждой закрытой смене: чеки, способы оплаты, нал/безнал' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
+  inventory: { title: 'Инвентаризация', sub: 'Пересчёт склада: сессии, акт расхождений и применение изменений' },
   receiving: { title: 'Поступление товара', sub: 'Приём товара от поставщика: калькулятор цены и генерация штрихкодов' },
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'doctors', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'finance', 'receiving', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'doctors', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'inventory', 'finance', 'receiving', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -792,6 +803,7 @@ function renderView(force) {
   else if (v === 'cashreport') renderCashReport(force);
   else if (v === 'shiftreports') renderShiftReports(force);
   else if (v === 'transfer') renderTransfer(force);
+  else if (v === 'inventory') renderInventory(force);
   else if (v === 'finance') renderFinance(force);
   else if (v === 'receiving') renderReceiving(force);
   else if (v === 'backups') renderBackups(force);
@@ -7442,6 +7454,281 @@ async function recvPrintLabels() {
     else alert('Разрешите всплывающие окна для печати этикеток.');
   }
 }
+
+
+
+// ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: ИНВЕНТАРИЗАЦИЯ (пересчёт склада)
+//  D1 реестр → D2 карточка сессии (живая лента) → D3 акт → применение/откат
+// ══════════════════════════════════════════════════════════
+
+// Вызов backend инвентаризации (/api/inv-count)
+async function invcApi(path, opts) {
+  const res = await svcFetch(`${BARCODE_SVC_URL}/api/inv-count${path}`, {
+    ...(opts || {}),
+    headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': BARCODE_SVC_SECRET, ...((opts && opts.headers) || {}) },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || (data && data.ok === false)) throw new Error((data && data.error) || `HTTP ${res.status}`);
+  return data;
+}
+
+// склады: id → имя (для отображения). Совпадает со справочником РМК.
+const INV_WAREHOUSES = [
+  { id: 'bed362a0-c29e-4397-ad58-798bccf3066d', name: 'Основной склад' },
+  { id: 'f1d6d375-f379-4b0f-b881-c24fbcfa2e84', name: 'Интернет' },
+  { id: '5ca2d3e6-29c1-4d1a-aeee-832fa513e2e2', name: 'Айни' },
+  { id: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Баракат' },
+  { id: '19db06fa-deb5-47db-acd7-486c5bc679d0', name: 'Сиёма' },
+  { id: '8f0bf6e3-1ffc-4267-8f4b-1e79179dd2a7', name: 'Сити-Молл' },
+];
+const invWhName = (id) => (INV_WAREHOUSES.find(w => w.id === id) || {}).name || '—';
+
+const invState = { view: 'list', session: null, act: null, poll: null };
+
+function invStatusBadge(st) {
+  if (st === 'active') return '<span class="badge b-green">Идёт</span>';
+  if (st === 'paused') return '<span class="badge b-amber">Пауза</span>';
+  if (st === 'review') return '<span class="badge b-amber">На проверке</span>';
+  if (st === 'applied') return '<span class="badge b-blue">Применена</span>';
+  if (st === 'done') return '<span class="badge b-blue">Завершена</span>';
+  if (st === 'cancelled') return '<span class="badge b-gray">Отменена</span>';
+  return `<span class="badge gray">${esc(st)}</span>`;
+}
+
+// ---- D1: реестр сессий ----
+async function renderInventory(force) {
+  invStopPoll();
+  invState.view = 'list';
+  const box = $('invBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю сессии инвентаризации…</div>`;
+  try {
+    const r = await invcApi('?action=inv-list&limit=100');
+    const sessions = r.sessions || [];
+    const active = sessions.filter(s => ['active', 'paused'].includes(s.status));
+    const review = sessions.filter(s => s.status === 'review');
+    const done = sessions.filter(s => ['applied', 'done', 'cancelled'].includes(s.status));
+
+    const card = (s) => {
+      const exp = s.expected_count || 0;
+      const m = s.summary_json || {};
+      const scanned = (m.matched?.count || 0) + (m.revived?.count || 0) + (m.moved?.count || 0);
+      const pct = exp ? Math.min(100, Math.round(scanned / exp * 100)) : 0;
+      return `<tr data-open="${s.id}" style="cursor:pointer">
+        <td class="strong">${esc(invWhName(s.warehouse_id))}</td>
+        <td>${s.zone ? esc(s.zone) : '<span class="muted">Весь склад</span>'}</td>
+        <td>${invStatusBadge(s.status)}</td>
+        <td class="muted">${esc(s.started_by || '—')}</td>
+        <td class="muted">${dushTime(s.started_at, true)}</td>
+        <td class="r tnum">${exp ? fmtInt(exp) : '—'}</td>
+        <td class="r">${s.status === 'review' || s.status === 'applied' ? pct + '%' : '—'}</td>
+      </tr>`;
+    };
+    const tbl = (rows) => `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Склад</th><th>Зона</th><th>Статус</th><th>Начал</th><th>Начата</th><th class="r">Ожидалось</th><th class="r">Прогресс</th></tr></thead>
+      <tbody>${rows.length ? rows.map(card).join('') : '<tr><td class="tbl-empty" colspan="7">Нет сессий</td></tr>'}</tbody>
+    </table></div>`;
+
+    box.innerHTML = `
+      <div class="card card-pad" style="margin-bottom:16px">
+        <div class="card-h-row">
+          <h3>Инвентаризация склада</h3>
+          <div style="display:flex;gap:8px">
+            <a class="btn btn-ghost" id="invReload">⟳ Обновить</a>
+          </div>
+        </div>
+        <p class="muted" style="margin:4px 0 0">Сканирование остатков ведётся с телефона (страница <b>/inventory.html</b>). Здесь — контроль сессий, акт расхождений и применение изменений.</p>
+      </div>
+      ${active.length ? `<h4 class="sec-h">Активные</h4>${tbl(active)}` : ''}
+      ${review.length ? `<h4 class="sec-h">Ждут проверки</h4>${tbl(review)}` : ''}
+      <h4 class="sec-h">Завершённые</h4>${tbl(done)}
+    `;
+    $('invReload').onclick = () => renderInventory(true);
+    box.querySelectorAll('tr[data-open]').forEach(tr => tr.onclick = () => invOpenSession(tr.getAttribute('data-open')));
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить сессии: ' + e.message);
+  }
+}
+
+// ---- D2: карточка сессии + живая лента ----
+async function invOpenSession(id) {
+  invState.view = 'session';
+  const box = $('invBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю сессию…</div>`;
+  try {
+    await invRenderSession(id);
+    // авто-обновление для активных сессий (живая лента)
+    const s = invState.session;
+    if (s && ['active', 'paused'].includes(s.status)) {
+      invState.poll = setInterval(() => invRenderSession(id, true), 5000);
+    }
+  } catch (e) {
+    box.innerHTML = errBar('Ошибка: ' + e.message);
+  }
+}
+
+async function invRenderSession(id, silent) {
+  const r = await invcApi('?action=inv-session&sessionId=' + encodeURIComponent(id) + '&scanLimit=60');
+  invState.session = r.session;
+  const s = r.session, c = r.counts || {};
+  const exp = r.expectedNow ?? s.expected_count ?? 0;
+  const fact = (r.products || []).reduce((a, p) => a + (p.fact || 0), 0);
+  const pct = exp ? Math.min(100, Math.round(fact / exp * 100)) : 0;
+  const box = $('invBody');
+
+  const tile = (n, l, cls) => `<div class="inv-tile ${cls}"><div class="n">${fmtInt(n)}</div><div class="l">${l}</div></div>`;
+  const feed = (r.recentScans || []).map(x => {
+    const map = { matched: ['✓', 'Учтён', 'g'], duplicate: ['⟳', 'Дубль', 'amber'], unknown: ['?', 'Не в базе', 'red'], revived: ['↺', 'Вернётся', 'blue'], moved: ['⇄', 'С др. склада', 'violet'] };
+    const [ic, lbl, col] = map[x.result] || ['•', x.result, 'gray'];
+    return `<tr><td class="mono">${esc(x.barcode)}</td><td><span class="pill ${col}">${ic} ${lbl}</span></td><td class="muted r">${dushTime(x.scanned_at, false)}</td></tr>`;
+  }).join('');
+
+  const canFinish = ['active', 'paused'].includes(s.status);
+  const canAct = ['active', 'paused', 'review'].includes(s.status);
+
+  box.innerHTML = `
+    <div style="margin-bottom:14px"><a class="link" id="invBack">← Все сессии</a></div>
+    <div class="card card-pad" style="margin-bottom:16px">
+      <div class="card-h-row">
+        <div><h3 style="margin:0">${esc(invWhName(s.warehouse_id))}${s.zone ? ' · ' + esc(s.zone) : ''}</h3>
+          <p class="muted" style="margin:4px 0 0">Начал: ${esc(s.started_by || '—')} · ${dushTime(s.started_at, true)} ${invStatusBadge(s.status)}</p></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${canAct ? `<a class="btn btn-primary" id="invBtnAct">📋 Рассчитать акт</a>` : ''}
+          <a class="btn btn-ghost" id="invBtnReload">⟳</a>
+        </div>
+      </div>
+      <div class="inv-counter">
+        <div class="big">${fmtInt(fact)} <small>/ ${fmtInt(exp)}</small></div>
+        <div class="inv-bar"><i style="width:${pct}%"></i></div>
+        <div class="muted" style="font-size:13px;margin-top:6px">${pct}% отсканировано · всего сканов: ${fmtInt(c.total || 0)}</div>
+      </div>
+      <div class="inv-tiles">
+        ${tile(c.matched || 0, 'Учтено', 't-g')}
+        ${tile(c.duplicate || 0, 'Дубли', 't-amber')}
+        ${tile(c.unknown || 0, 'Не в базе', 't-red')}
+        ${tile(c.revived || 0, 'Вернётся', 't-blue')}
+        ${tile(c.moved || 0, 'С др. склада', 't-violet')}
+      </div>
+    </div>
+    <div class="card card-pad">
+      <div class="card-h-row"><h3>Последние сканы ${canFinish ? '<span class="pill g" style="margin-left:8px">● живая лента</span>' : ''}</h3></div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Штрихкод</th><th>Результат</th><th class="r">Время</th></tr></thead>
+        <tbody>${feed || '<tr><td class="tbl-empty" colspan="3">Сканов пока нет</td></tr>'}</tbody>
+      </table></div>
+    </div>
+    <div id="invActBox" style="margin-top:16px"></div>
+  `;
+  $('invBack').onclick = () => { invStopPoll(); renderInventory(true); };
+  $('invBtnReload').onclick = () => invRenderSession(id);
+  const bAct = $('invBtnAct'); if (bAct) bAct.onclick = () => invComputeAct(id);
+  // если акт уже был посчитан ранее и лежит в state — показать
+  if (invState.act && invState.act.sessionId === id && !silent) invRenderAct(invState.act);
+}
+
+// ---- D3: акт расхождений ----
+async function invComputeAct(id) {
+  const abox = $('invActBox');
+  abox.innerHTML = `<div class="loading">⏳ Считаю акт (сверка с продажами за период)…</div>`;
+  invStopPoll(); // расчёт акта переводит в review — активная лента больше не нужна
+  try {
+    const r = await invcApi('?action=inv-act', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
+    invState.act = { sessionId: id, summary: r.summary, detail: r.detail };
+    invRenderAct(invState.act);
+  } catch (e) {
+    abox.innerHTML = errBar('Не удалось рассчитать акт: ' + e.message);
+  }
+}
+
+function invMoney(sum) { return `${fmtNum(sum || 0)} <span class="cur">${CUR}</span>`; }
+
+function invRenderAct(act) {
+  const s = act.summary, d = act.detail || {};
+  const abox = $('invActBox');
+  const row = (color, label, o, note) => `<tr>
+    <td><span class="inv-dot" style="background:${color}"></span>${label}</td>
+    <td class="r tnum">${fmtInt(o.count)}</td>
+    <td class="r tnum">${invMoney(o.sum)}</td>
+    <td class="muted">${note || ''}</td></tr>`;
+
+  const missingList = (d.missing || []).slice(0, 500);
+  const reviveList = (d.revived || []);
+  const moveList = (d.moved || []);
+
+  abox.innerHTML = `
+    <div class="card card-pad">
+      <div class="card-h-row"><h3>📋 Акт расхождений</h3></div>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Категория</th><th class="r">Кол-во</th><th class="r">Сумма</th><th>Действие</th></tr></thead>
+        <tbody>
+          ${row('#22c55e', 'Совпало (в наличии)', s.matched, 'изменений не требуется')}
+          ${row('#ef4444', 'Недостача (не найдено)', s.missing, 'кандидаты на списание')}
+          ${row('#3b82f6', 'Вернётся из списания', s.revived, 'были списаны/проданы — восстановить')}
+          ${row('#a855f7', 'С других складов', s.moved, 'переместить на этот склад')}
+          ${row('#f97316', 'Продано во время', s.soldDuring, 'не недостача — продажи за время пересчёта')}
+          ${row('#94a3b8', 'Неизвестные (не в базе)', s.unknown, 'штрихкоды без карточки')}
+        </tbody>
+      </table></div>
+
+      <div class="inv-apply">
+        <div class="inv-apply-step">
+          <h4>Шаг 1 — Безопасные изменения</h4>
+          <p class="muted">Вернуть из списания <b>${fmtInt(s.revived.count)}</b> и переместить с других складов <b>${fmtInt(s.moved.count)}</b>. Это не удаляет данные, легко откатывается.</p>
+          <button class="btn btn-primary" id="invApplySafe" ${(s.revived.count + s.moved.count) ? '' : 'disabled'}>Применить безопасные изменения</button>
+        </div>
+        <div class="inv-apply-step danger">
+          <h4>Шаг 2 — Списание недостач</h4>
+          <p class="muted">Списать <b>${fmtInt(s.missing.count)}</b> экземпляров на сумму <b>${invMoney(s.missing.sum)}</b>. Действие меняет остатки — выполняйте после проверки. Можно откатить.</p>
+          <input type="text" id="invWoReason" placeholder="Причина списания (обязательно)" style="width:100%;margin-bottom:8px">
+          <button class="btn btn-danger" id="invWriteoff" ${s.missing.count ? '' : 'disabled'}>Списать недостачи (${fmtInt(s.missing.count)})</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px">
+        <a class="link" id="invRevert">↩ Откатить применённые изменения этой сессии</a>
+      </div>
+    </div>
+  `;
+
+  const bSafe = $('invApplySafe');
+  if (bSafe) bSafe.onclick = async () => {
+    if (!confirm(`Применить: вернуть ${s.revived.count}, переместить ${s.moved.count}?`)) return;
+    bSafe.disabled = true; bSafe.textContent = 'Применяю…';
+    try {
+      const reviveIds = reviveList.map(x => x.id).filter(Boolean);
+      const moveIds = moveList.map(x => x.id).filter(Boolean);
+      const rr = await invcApi('?action=inv-apply-safe', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId, reviveIds, moveIds, appliedBy: state.user || 'admin' }) });
+      alert(`Готово: возвращено ${rr.revived}, перемещено ${rr.moved}.`);
+      invComputeAct(act.sessionId);
+    } catch (e) { alert('Ошибка: ' + e.message); bSafe.disabled = false; bSafe.textContent = 'Применить безопасные изменения'; }
+  };
+
+  const bWo = $('invWriteoff');
+  if (bWo) bWo.onclick = async () => {
+    const reason = ($('invWoReason').value || '').trim();
+    if (!reason) { alert('Укажите причину списания.'); return; }
+    if (!confirm(`СПИСАТЬ ${s.missing.count} экз. на ${fmtNum(s.missing.sum)} ${CUR}? Причина: ${reason}`)) return;
+    bWo.disabled = true; bWo.textContent = 'Списываю…';
+    try {
+      const missingIds = missingList.map(x => x.id).filter(Boolean);
+      const rr = await invcApi('?action=inv-writeoff', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId, reason, missingIds, appliedBy: state.user || 'admin' }) });
+      alert(`Списано: ${rr.written} экз.`);
+      invState.act = null; renderInventory(true);
+    } catch (e) { alert('Ошибка: ' + e.message); bWo.disabled = false; bWo.textContent = `Списать недостачи (${fmtInt(s.missing.count)})`; }
+  };
+
+  const bRev = $('invRevert');
+  if (bRev) bRev.onclick = async () => {
+    if (!confirm('Откатить ВСЕ применённые изменения этой сессии (возвраты, перемещения, списания)?')) return;
+    try {
+      const rr = await invcApi('?action=inv-revert', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId }) });
+      alert(`Откачено действий: ${rr.reverted}.`);
+      invState.act = null; renderInventory(true);
+    } catch (e) { alert('Ошибка: ' + e.message); }
+  };
+}
+
+function invStopPoll() { if (invState.poll) { clearInterval(invState.poll); invState.poll = null; } }
 
 
 // ══════════════════════════════════════════════════════════

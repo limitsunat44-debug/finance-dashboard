@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260815-164054">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260816-000010">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -17,7 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20260815-164054"></script>
+  <script src="fonts-dejavu.js?v=20260816-000010"></script>
 </head>
 <body>
 
@@ -83,6 +83,7 @@
         <button class="sb-item" data-view="shiftreports"><span class="sb-ic">📊</span> Отчёты продаж за день</button>
         <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
         <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
+        <button class="sb-item" data-view="inventory"><span class="sb-ic">📥</span> Инвентаризация</button>
         <button class="sb-item" data-view="finance"><span class="sb-ic">💸</span> Выручка-Расходы</button>
         <button class="sb-item" data-view="backups"><span class="sb-ic">💾</span> Бекапы</button>
       </nav>
@@ -230,6 +231,10 @@
           <div id="trBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <section class="view" id="view-inventory">
+          <div id="invBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <section class="view" id="view-finance">
           <div id="finBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
@@ -251,6 +256,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260815-164054"></script>
+  <script src="admin-rmk.js?v=20260816-000010"></script>
 </body>
 </html>

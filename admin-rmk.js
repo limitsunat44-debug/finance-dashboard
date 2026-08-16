@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.43';
+const RMK_VERSION = '1.2.44';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.44', date: '17.08.2026', title: 'Автосинхронизация числового остатка с поэкземплярным фактом',
+    items: [
+      'После применения акта инвентаризации числовой остаток («Поиск товара» у кассира) автоматически выравнивается по факту экземпляров (шаги «возвраты/перемещения», «списание недостач», откат).',
+      'Новая кнопка «⚖️ Пересчитать остатки» в разделе Инвентаризация: предпросмотр расхождений и ручное выравнивание (по складу или всей базе).',
+      'Безопасный режим по умолчанию: товары без сгенерированных штрихкодов не обнуляются (опция полного пересчёта — отдельной галочкой).',
+      'Ночная авто-сверка остатков в 04:00 (Душанбе): еженочно выравнивает числовой остаток по факту, пока касса не работает.',
+    ],
+  },
   {
     v: '1.2.43', date: '16.08.2026', title: 'Новая вкладка «Инвентаризация»: пересчёт склада с телефона',
     items: [
@@ -7534,6 +7543,7 @@ async function renderInventory(force) {
         <div class="card-h-row">
           <h3>Инвентаризация склада</h3>
           <div style="display:flex;gap:8px">
+            <a class="btn btn-ghost" id="invRecalcBtn" title="Выровнять числовой остаток по факту экземпляров">⚖️ Пересчитать остатки</a>
             <a class="btn btn-ghost" id="invReload">⟳ Обновить</a>
           </div>
         </div>
@@ -7544,10 +7554,88 @@ async function renderInventory(force) {
       <h4 class="sec-h">Завершённые</h4>${tbl(done)}
     `;
     $('invReload').onclick = () => renderInventory(true);
+    $('invRecalcBtn').onclick = () => invOpenRecalcModal();
     box.querySelectorAll('tr[data-open]').forEach(tr => tr.onclick = () => invOpenSession(tr.getAttribute('data-open')));
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить сессии: ' + e.message);
   }
+}
+
+// ---- Пересчёт остатков (Уровень 2): выровнять product_variants.stock по факту ----
+function invOpenRecalcModal() {
+  let host = document.getElementById('invRecalcModal');
+  if (!host) { host = document.createElement('div'); host.id = 'invRecalcModal'; document.body.appendChild(host); }
+  const whOpts = ['<option value="">Вся база (все склады)</option>']
+    .concat(INV_WAREHOUSES.map(w => `<option value="${w.id}">${esc(w.name)}</option>`)).join('');
+  host.innerHTML = `
+    <div class="fin-modal-bg" id="invRcBg">
+      <div class="fin-modal fin-modal-wide">
+        <div class="fin-modal-head"><h3>⚖️ Пересчёт числовых остатков по факту</h3><button class="fin-modal-x" id="invRcClose">✕</button></div>
+        <div class="fin-modal-body">
+          <p class="muted" style="margin:0">Выравнивает числовой остаток (то, что видит кассир в «Поиск товара») по факту отсканированных экземпляров (штрихкодов в наличии). Сначала посмотрите расхождения, потом примените.</p>
+          <label class="fld"><span>Охват</span><select id="invRcWh">${whOpts}</select></label>
+          <label class="fld fld-check"><input type="checkbox" id="invRcZero"> Включая обнуление товаров без экземпляров</label>
+          <p class="muted" style="margin:-6px 0 0;font-size:12px">Без галочки (безопасно): товары, у которых сейчас нет ни одного экземпляра в наличии (легаси без штрихкодов), НЕ обнуляются. С галочкой: обнуляются и они (полный пересчёт).</p>
+          <div id="invRcReport"></div>
+        </div>
+        <div class="fin-modal-foot">
+          <button class="btn btn-ghost btn-sm" id="invRcReportBtn">🔍 Показать расхождения</button>
+          <div><button class="btn btn-ghost btn-sm" id="invRcCancel">Отмена</button>
+          <button class="btn btn-primary btn-sm" id="invRcApply">⚖️ Применить пересчёт</button></div>
+        </div>
+      </div>
+    </div>`;
+  const close = () => { host.innerHTML = ''; };
+  $('invRcClose').onclick = close;
+  $('invRcCancel').onclick = close;
+  $('invRcBg').addEventListener('click', e => { if (e.target.id === 'invRcBg') close(); });
+
+  // Предпросмотр расхождений (только чтение)
+  $('invRcReportBtn').onclick = async () => {
+    const whId = $('invRcWh').value;
+    const rep = $('invRcReport');
+    rep.innerHTML = `<div class="loading" style="padding:10px 0">⏳ Считаю расхождения…</div>`;
+    try {
+      const body = { action: 'recalc-report' }; if (whId) body.warehouseId = whId;
+      const r = await invcApi('?action=recalc-report', { method: 'POST', body: JSON.stringify(body) });
+      const rows = (r.sample || []).slice(0, 20).map(x => `<tr>
+        <td>${esc(invWhName(x.wh))}</td><td>${esc(x.size || '—')}</td>
+        <td class="r tnum">${fmtInt(x.stock)}</td><td class="r tnum">${fmtInt(x.fact)}</td>
+        <td class="r tnum" style="color:${x.diff>0?'var(--red)':'var(--green,#16a34a)'}">${x.diff>0?'+':''}${fmtInt(x.diff)}</td></tr>`).join('');
+      rep.innerHTML = `
+        <div class="card card-pad" style="margin-top:6px;background:var(--bg2,#f8fafc)">
+          <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px">
+            <span>Проверено: <b>${fmtInt(r.checked)}</b></span>
+            <span>Расхождений: <b>${fmtInt(r.mismatch)}</b></span>
+            <span title="Цифра больше факта, экземпляры есть">Завышено: <b>${fmtInt(r.overWithUnits)}</b></span>
+            <span title="Цифра >0, экземпляров нет — обнуляются только с галочкой">Без экз., цифра>0: <b>${fmtInt(r.overZeroFact)}</b></span>
+            <span title="Цифра меньше факта — поднимется">Занижено: <b>${fmtInt(r.under)}</b></span>
+          </div>
+          <div class="muted" style="font-size:12px;margin-top:6px">Сумма завышения ≈ ${fmtInt(r.sumOver)} с. · сумма занижения ≈ ${fmtInt(r.sumUnder)} с.</div>
+          ${rows ? `<div class="tbl-wrap" style="margin-top:10px;max-height:260px;overflow:auto"><table class="tbl"><thead><tr><th>Склад</th><th>Размер</th><th class="r">Цифра</th><th class="r">Факт</th><th class="r">Разн.</th></tr></thead><tbody>${rows}</tbody></table></div><div class="muted" style="font-size:12px;margin-top:4px">Показаны топ-20 по влиянию на сумму.</div>` : '<p class="muted" style="margin-top:8px">Расхождений нет — цифры уже совпадают с фактом.</p>'}
+        </div>`;
+    } catch (e) { rep.innerHTML = errBar('Ошибка отчёта: ' + (e.message || e)); }
+  };
+
+  // Применить пересчёт
+  $('invRcApply').onclick = async () => {
+    const whId = $('invRcWh').value;
+    const zero = $('invRcZero').checked;
+    const scope = whId ? `склад «${invWhName(whId)}»` : 'ВСЯ база (все склады)';
+    const mode = zero ? 'ПОЛНЫЙ (с обнулением товаров без экземпляров)' : 'безопасный (пустые не обнуляются)';
+    if (!confirm(`Пересчитать остатки?\n\nОхват: ${scope}\nРежим: ${mode}\n\nЧисловой остаток будет выровнен по факту экземпляров.`)) return;
+    const btn = $('invRcApply'); btn.textContent = '⏳ Пересчитываю…'; btn.style.pointerEvents = 'none';
+    try {
+      const body = { action: 'recalc-stock', includeZeroing: zero };
+      if (whId) body.warehouseId = whId; else body.all = true;
+      const r = await invcApi('?action=recalc-stock', { method: 'POST', body: JSON.stringify(body) });
+      docToast(`Готово: обработано ${fmtInt(r.targeted)}, исправлено ${fmtInt(r.fixed)}`);
+      close();
+    } catch (e) {
+      docToast('Ошибка: ' + (e.message || e));
+      btn.textContent = '⚖️ Применить пересчёт'; btn.style.pointerEvents = '';
+    }
+  };
 }
 
 // ---- D2: карточка сессии + живая лента ----

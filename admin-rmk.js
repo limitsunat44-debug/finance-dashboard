@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.47';
+const RMK_VERSION = '1.2.48';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.48', date: '17.08.2026', title: 'Приход товара: цена по размеру и по диапазонам размеров',
+    items: [
+      'Теперь у разных размеров одного товара может быть разная продажная цена — поле цены появилось под каждым размером.',
+      'В калькуляторе добавлены диапазоны размеров (напр. 18–20 = одна цена, 21–25 = другая) и кнопка «Применить общую цену всем размерам».',
+      'Пустое поле цены под размером = общая цена из калькулятора.',
+      'Цена, заданная одному размеру, больше НЕ применяется ко всем остальным автоматически; прошлые приходы не затрагиваются.',
+      'Ценники и штрихкоды печатаются с ценой конкретного размера.',
+    ],
+  },
   {
     v: '1.2.47', date: '17.08.2026', title: 'Отчёт по снятию ДС: «Прочее» разбивается по конкретному банку',
     items: [
@@ -6489,6 +6499,35 @@ function recvPriceChanged(it) {
   return Math.round(recvEffPrice(it) * 100) / 100 !== Math.round(Number(it.base_price) * 100) / 100;
 }
 
+// v1.2.48 — ЦЕНА ПО РАЗМЕРУ.
+// it.pricesBySize = { <размер>: цена } — точечные переопределения. Размер без записи → общая цена (recvEffPrice).
+function recvSizePrice(it, sz) {
+  if (it && it.pricesBySize && it.pricesBySize[sz] != null && it.pricesBySize[sz] !== '' && Number(it.pricesBySize[sz]) > 0) {
+    return Math.round(Number(it.pricesBySize[sz]) * 100) / 100;
+  }
+  return recvEffPrice(it);
+}
+// есть ли хоть одна отдельная цена по размеру?
+function recvHasSizePrices(it) {
+  if (!it || !it.pricesBySize) return false;
+  return Object.keys(it.pricesBySize).some(k => it.pricesBySize[k] != null && it.pricesBySize[k] !== '' && Number(it.pricesBySize[k]) > 0);
+}
+// payload prices{}: только размеры с положительной отдельной ценой
+function recvPricesPayload(it) {
+  if (!it || !it.pricesBySize) return null;
+  const out = {};
+  for (const k of Object.keys(it.pricesBySize)) {
+    const v = it.pricesBySize[k];
+    if (v != null && v !== '' && Number(v) > 0) out[k] = Math.round(Number(v) * 100) / 100;
+  }
+  return Object.keys(out).length ? out : null;
+}
+// парсинг метки размера в число (для диапазонов): «28»→8, «размер:28»→8, «28.5»→28.5
+function recvSizeNum(sz) {
+  const m = String(sz == null ? '' : sz).match(/-?\d+(?:[.,]\d+)?/);
+  return m ? Number(m[0].replace(',', '.')) : null;
+}
+
 function recvItemQty(it) {
   let n = 0; const s = it.sizes || {};
   for (const k of Object.keys(s)) n += Math.max(0, Math.round(Number(s[k]) || 0));
@@ -6679,13 +6718,22 @@ function recvItemsHTML() {
 
 function recvRowHTML(it) {
   const grid = it.sizeGrid || [];
-  const sizesHTML = grid.length
-    ? `<div class="recv-sizes">${grid.map(sz => `
+  const effP = recvEffPrice(it);
+  const sizeCell = (sz) => {
+    const ov = it.pricesBySize && it.pricesBySize[sz] != null && it.pricesBySize[sz] !== '' && Number(it.pricesBySize[sz]) > 0;
+    const pv = ov ? esc(String(it.pricesBySize[sz])) : '';
+    return `
         <div class="recv-size-cell">
           <div class="recv-size-lbl">${esc(sz)}</div>
           <input class="recv-size-inp" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" inputmode="numeric"
                  value="${it.sizes && it.sizes[sz] ? esc(String(it.sizes[sz])) : ''}" placeholder="–">
-        </div>`).join('')}</div>`
+          <input class="recv-size-price ${ov ? 'recv-size-price-set' : ''}" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" step="0.01" inputmode="decimal"
+                 value="${pv}" placeholder="${fmtNum(effP)}" title="Цена для размера ${esc(sz)} (пусто = общая ${fmtNum(effP)} ${CUR})">
+        </div>`;
+  };
+  const sizesHTML = grid.length
+    ? `<div class="recv-sizes">${grid.map(sizeCell).join('')}</div>
+       <div class="recv-sizes-hint">Цена под размером — отдельная (пусто = общая ${fmtNum(effP)} ${CUR}). Диапазоны и «применить всем» — в калькуляторе (🧮).</div>`
     : `<div class="recv-nosize"><label class="recv-lbl">Количество (шт.)</label>
         <input class="recv-size-inp recv-qty-solo" data-uid="${it.uid}" data-size="_" type="number" min="0" inputmode="numeric"
                value="${it.sizes && it.sizes['_'] ? esc(String(it.sizes['_'])) : ''}" placeholder="0"></div>`;
@@ -6753,12 +6801,45 @@ function recvCalcHTML() {
         <span class="recv-suffix">${CUR}</span>
       </div>
       <div class="recv-sale-calc">Расчёт калькулятора: <b id="recvSaleCalc">${fmtNum(sale)} ${CUR}</b> <button type="button" class="recv-sale-usecalc" id="recvUseCalc">использовать</button></div>
-      ${hasBase ? `<div class="recv-sale-base ${changed ? 'recv-sale-changed' : ''}" id="recvSaleBase">${changed ? '⚠ Цена изменена (в базе: ' + fmtNum(it.base_price) + ' ' + CUR + '). При проведении обновится у всех вариантов товара.' : 'Цена из базы: ' + fmtNum(it.base_price) + ' ' + CUR}</div>` : `<div class="recv-sale-sub">за пару · новая цена товара</div>`}
+      ${hasBase ? `<div class="recv-sale-base ${changed ? 'recv-sale-changed' : ''}" id="recvSaleBase">${changed ? '⚠ Цена изменена (в базе: ' + fmtNum(it.base_price) + ' ' + CUR + '). Общая цена — для размеров без отдельной цены.' : 'Цена из базы: ' + fmtNum(it.base_price) + ' ' + CUR}</div>` : `<div class="recv-sale-sub">за пару · общая цена (для размеров без отдельной цены)</div>`}
     </div>
-    <button class="btn btn-outline recv-apply-all" id="recvApplyAll">Применить ко всем товарам</button>
+    ${recvSizePricesHTML(it)}
+    <button class="btn btn-outline recv-apply-all" id="recvApplyAll">Применить калькулятор ко всем товарам</button>
     <button class="btn btn-primary recv-gen-bc" id="recvGenBarcodes">▐╫ Сгенерировать штрихкоды</button>
     <button class="btn btn-outline recv-print" id="recvPrintLabels">🖨 Распечатать ценники</button>
   </div>`;
+}
+
+// v1.2.48 — блок «Цены по размерам» в калькуляторе: сводка + диапазоны + «применить всем»
+function recvSizePricesHTML(it) {
+  const grid = (it.sizeGrid || []);
+  if (!grid.length) return ''; // товары без размерной сетки — цена одна
+  const effP = recvEffPrice(it);
+  // сводка текущих отдельных цен
+  const setSizes = grid.filter(sz => it.pricesBySize && it.pricesBySize[sz] != null && it.pricesBySize[sz] !== '' && Number(it.pricesBySize[sz]) > 0);
+  const summary = setSizes.length
+    ? setSizes.map(sz => `<span class="recv-sp-chip">${esc(sz)}: <b>${fmtNum(Number(it.pricesBySize[sz]))}</b></span>`).join('')
+    : `<span class="recv-sp-none">Отдельных цен нет — все размеры по общей цене (${fmtNum(effP)} ${CUR}).</span>`;
+  return `
+    <div class="recv-sizeprices">
+      <div class="recv-sec-subtitle">Цены по размерам</div>
+      <div class="recv-sp-summary">${summary}</div>
+      <div class="recv-sp-range">
+        <span class="recv-sp-lbl">Диапазон:</span>
+        <input class="finput recv-sp-from" id="recvSpFrom" type="number" inputmode="numeric" placeholder="от" title="Размер от">
+        <span class="recv-sp-dash">–</span>
+        <input class="finput recv-sp-to" id="recvSpTo" type="number" inputmode="numeric" placeholder="до" title="Размер до">
+        <span class="recv-sp-eq">=</span>
+        <input class="finput recv-sp-price" id="recvSpPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="цена" title="Цена для этого диапазона">
+        <span class="recv-suffix">${CUR}</span>
+        <button type="button" class="btn btn-outline recv-sp-apply-range" id="recvSpApplyRange">Назначить</button>
+      </div>
+      <div class="recv-sp-actions">
+        <button type="button" class="recv-sp-link" id="recvSpApplyAll">Применить общую цену (${fmtNum(effP)} ${CUR}) всем размерам</button>
+        ${setSizes.length ? `<button type="button" class="recv-sp-link recv-sp-clear" id="recvSpClear">Сбросить цены по размерам</button>` : ''}
+      </div>
+      <div class="recv-sp-hint">Пустое поле цены под размером = общая цена. Диапазон проставляет цену всем размерам в границах (включительно).</div>
+    </div>`;
 }
 
 // ── Привязка обработчиков шапки ──
@@ -7003,6 +7084,18 @@ function recvBindItems() {
       recvUpdateTotalsLive(it);
     };
   });
+  // v1.2.48 — отдельная цена под каждым размером
+  document.querySelectorAll('.recv-size-price').forEach(inp => {
+    inp.oninput = () => {
+      const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
+      it.pricesBySize = it.pricesBySize || {};
+      const sz = inp.dataset.size;
+      const v = inp.value;
+      if (v === '' || Number(v) <= 0) { delete it.pricesBySize[sz]; inp.classList.remove('recv-size-price-set'); }
+      else { it.pricesBySize[sz] = Math.round(Number(v) * 100) / 100; inp.classList.add('recv-size-price-set'); }
+      recvPersist();
+    };
+  });
   document.querySelectorAll('.recv-cost-inp').forEach(inp => {
     inp.oninput = () => {
       const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
@@ -7071,6 +7164,46 @@ function recvBindCalc() {
     recvPersist();
     recvPaint();
   };
+
+  // v1.2.48 — Цены по размерам: диапазон
+  const spApplyRange = $('recvSpApplyRange');
+  if (spApplyRange) spApplyRange.onclick = () => {
+    const it = recvActiveItem(); if (!it) return;
+    const fromV = $('recvSpFrom') ? $('recvSpFrom').value : '';
+    const toV = $('recvSpTo') ? $('recvSpTo').value : '';
+    const priceV = $('recvSpPrice') ? $('recvSpPrice').value : '';
+    const price = Number(priceV);
+    if (!(price > 0)) { alert('Укажите цену для диапазона.'); return; }
+    let lo = fromV === '' ? -Infinity : Number(fromV);
+    let hi = toV === '' ? Infinity : Number(toV);
+    if (lo > hi) { const t = lo; lo = hi; hi = t; }
+    it.pricesBySize = it.pricesBySize || {};
+    let n = 0;
+    (it.sizeGrid || []).forEach(sz => {
+      const num = recvSizeNum(sz);
+      if (num == null) return;
+      if (num >= lo && num <= hi) { it.pricesBySize[sz] = Math.round(price * 100) / 100; n++; }
+    });
+    if (!n) { alert('В этом диапазоне нет размеров товара.'); return; }
+    recvPersist();
+    recvPaint();
+  };
+  // Применить общую цену всем размерам (сброс отдельных → все по recvEffPrice)
+  const spApplyAll = $('recvSpApplyAll');
+  if (spApplyAll) spApplyAll.onclick = () => {
+    const it = recvActiveItem(); if (!it) return;
+    it.pricesBySize = {};
+    recvPersist();
+    recvPaint();
+  };
+  // Сбросить цены по размерам (то же, что «применить общую»)
+  const spClear = $('recvSpClear');
+  if (spClear) spClear.onclick = () => {
+    const it = recvActiveItem(); if (!it) return;
+    it.pricesBySize = {};
+    recvPersist();
+    recvPaint();
+  };
 }
 
 function recvRecalcSale() {
@@ -7092,7 +7225,7 @@ function recvUpdateSaleFlags() {
   const changed = recvPriceChanged(it);
   baseEl.className = 'recv-sale-base' + (changed ? ' recv-sale-changed' : '');
   baseEl.innerHTML = changed
-    ? '⚠ Цена изменена (в базе: ' + fmtNum(it.base_price) + ' ' + CUR + '). При проведении обновится у всех вариантов товара.'
+    ? '⚠ Цена изменена (в базе: ' + fmtNum(it.base_price) + ' ' + CUR + '). Общая цена — для размеров без отдельной цены.'
     : 'Цена из базы: ' + fmtNum(it.base_price) + ' ' + CUR;
 }
 
@@ -7154,9 +7287,11 @@ async function recvSubmit(isPost) {
       cost_price: it.cost_price, transport_cost: it.transport_cost,
       fixed_cost_pct: it.fixed_cost_pct, variable_cost_pct: it.variable_cost_pct,
       doctor_pct: it.doctor_pct, seller_pct: it.seller_pct, profit_pct: it.profit_pct,
-      // v1.2.30 — ручная цена (если задана) + базовая цена (для каскада)
+      // v1.2.30 — ручная цена (если задана) + базовая цена
       sale_price_override: (it.sale_price_override != null && it.sale_price_override !== '') ? it.sale_price_override : null,
       base_price: (it.base_price != null && it.base_price !== '') ? it.base_price : null,
+      // v1.2.48 — цены по размерам { <размер>: цена } (null если отдельных цен нет)
+      prices: recvPricesPayload(it),
     })),
   };
   // товары без размерной сетки: переносим количество '_' в sizes как ключ 'без размера'

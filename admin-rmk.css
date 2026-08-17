@@ -829,6 +829,12 @@ table.tbl.cr-tbl{width:auto!important;min-width:0;table-layout:auto}
 .recv-size-lbl{font-size:11px;color:var(--tx2);margin-bottom:3px}
 .recv-size-inp{width:100%;padding:6px 4px;border:1.5px solid var(--line);border-radius:8px;text-align:center;font-size:13px;background:#fff}
 .recv-size-inp:focus{outline:none;border-color:var(--g)}
+/* v1.2.48 — цена под каждым размером */
+.recv-size-price{width:100%;margin-top:4px;padding:4px 3px;border:1px dashed var(--line);border-radius:7px;text-align:center;font-size:11px;color:var(--tx2);background:#fbfbfb}
+.recv-size-price:focus{outline:none;border-style:solid;border-color:var(--g)}
+.recv-size-price::placeholder{color:var(--tx3);font-style:italic}
+.recv-size-price-set{border-style:solid;border-color:var(--g);color:var(--g3);font-weight:700;background:var(--g-soft)}
+.recv-sizes-hint{font-size:11px;color:var(--tx3);margin-top:6px;line-height:1.35}
 .recv-nosize .recv-lbl{display:block;margin-bottom:4px}
 .recv-qty-solo{max-width:120px}
 .recv-cost{display:flex;flex-direction:column;gap:4px}
@@ -867,6 +873,23 @@ table.tbl.cr-tbl{width:auto!important;min-width:0;table-layout:auto}
 .recv-sale-base{font-size:12px;color:var(--tx2);margin-top:6px;line-height:1.35}
 .recv-sale-changed{color:#b45309;font-weight:600;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:6px 8px}
 .recv-apply-all{width:100%}
+/* v1.2.48 — цены по размерам в калькуляторе */
+.recv-sizeprices{border:1px solid var(--line);border-radius:12px;padding:12px;background:#fff;display:flex;flex-direction:column;gap:8px}
+.recv-sec-subtitle{font-size:13px;font-weight:700;color:var(--tx)}
+.recv-sp-summary{display:flex;flex-wrap:wrap;gap:6px}
+.recv-sp-chip{font-size:11px;background:var(--g-soft);color:var(--g3);border-radius:6px;padding:3px 7px}
+.recv-sp-chip b{font-weight:800}
+.recv-sp-none{font-size:12px;color:var(--tx2)}
+.recv-sp-range{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.recv-sp-lbl{font-size:12px;color:var(--tx2)}
+.recv-sp-from,.recv-sp-to,.recv-sp-price{width:64px;padding:6px 6px;border:1.5px solid var(--line);border-radius:8px;text-align:center;font-size:13px}
+.recv-sp-from:focus,.recv-sp-to:focus,.recv-sp-price:focus{outline:none;border-color:var(--g)}
+.recv-sp-dash,.recv-sp-eq{font-size:13px;color:var(--tx2)}
+.recv-sp-apply-range{padding:6px 12px;font-size:13px}
+.recv-sp-actions{display:flex;flex-direction:column;gap:4px;align-items:flex-start}
+.recv-sp-link{border:none;background:transparent;color:var(--acc,#2563eb);cursor:pointer;font-size:12px;text-decoration:underline;padding:0}
+.recv-sp-clear{color:var(--red,#dc2626)}
+.recv-sp-hint{font-size:11px;color:var(--tx3);line-height:1.35}
 .recv-gen-bc{width:100%;font-size:15px}
 .recv-print{width:100%}
 

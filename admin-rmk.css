@@ -835,6 +835,21 @@ table.tbl.cr-tbl{width:auto!important;min-width:0;table-layout:auto}
 .recv-size-price::placeholder{color:var(--tx3);font-style:italic}
 .recv-size-price-set{border-style:solid;border-color:var(--g);color:var(--g3);font-weight:700;background:var(--g-soft)}
 .recv-sizes-hint{font-size:11px;color:var(--tx3);margin-top:6px;line-height:1.35}
+/* v1.2.49 — добавление размера существующему товару */
+.recv-addsize{margin-top:8px}
+.recv-addsize-btn{border:1.5px dashed var(--line);background:#fff;border-radius:8px;color:var(--g2);font-size:12px;font-weight:600;padding:5px 12px;cursor:pointer}
+.recv-addsize-btn:hover{border-color:var(--g);background:var(--g-soft)}
+.recv-addsize-panel{margin-top:8px;border:1px solid var(--line);border-radius:10px;padding:10px;background:#fbfbfb;display:flex;flex-direction:column;gap:8px}
+.recv-as-load{font-size:12px;color:var(--tx2)}
+.recv-as-title{font-size:12px;font-weight:700;color:var(--tx)}
+.recv-as-chips{display:flex;flex-wrap:wrap;gap:6px}
+.recv-as-chip{border:1.5px solid var(--line);background:#fff;border-radius:14px;font-size:12px;padding:4px 10px;cursor:pointer;color:var(--tx1)}
+.recv-as-chip:hover{border-color:var(--g);background:var(--g-soft);color:var(--g3)}
+.recv-as-empty{font-size:12px;color:var(--tx2)}
+.recv-as-manual{display:flex;gap:6px;align-items:center}
+.recv-as-input{flex:1;min-width:0;padding:6px 9px;border:1.5px solid var(--line);border-radius:8px;font-size:13px}
+.recv-as-input:focus{outline:none;border-color:var(--g)}
+.recv-as-add{padding:6px 12px;font-size:13px;white-space:nowrap}
 .recv-nosize .recv-lbl{display:block;margin-bottom:4px}
 .recv-qty-solo{max-width:120px}
 .recv-cost{display:flex;flex-direction:column;gap:4px}

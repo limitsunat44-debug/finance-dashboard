@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.48';
+const RMK_VERSION = '1.2.49';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.49', date: '17.08.2026', title: 'Приход товара: добавление размера существующему товару',
+    items: [
+      'У существующего товара теперь можно добавить недостающий размер прямо в строке поступления — кнопка «＋ размер».',
+      'Размеры берутся из общего справочника (показываются только те, которых ещё нет) или вводятся вручную.',
+      'Новый размер при проведении автоматически создаёт новый вариант товара со штрихкодами.',
+    ],
+  },
   {
     v: '1.2.48', date: '17.08.2026', title: 'Приход товара: цена по размеру и по диапазонам размеров',
     items: [
@@ -6528,6 +6536,80 @@ function recvSizeNum(sz) {
   return m ? Number(m[0].replace(',', '.')) : null;
 }
 
+// v1.2.49 — ключ размера для сравнения (устойчив к префиксу/регистру), как на backend sizeKey
+function recvSizeKeyL(s) {
+  return String(s == null ? '' : s).replace(/^\s*размер\s*:?\s*/i, '').trim().toLowerCase();
+}
+// сортировка сетки: числовые по возрастанию, нечисловые — в конец по алфавиту
+function recvSortGrid(grid) {
+  return [...grid].sort((a, b) => {
+    const na = recvSizeNum(a), nb = recvSizeNum(b);
+    if (na != null && nb != null) return na - nb;
+    if (na != null) return -1;
+    if (nb != null) return 1;
+    return String(a).localeCompare(String(b), 'ru');
+  });
+}
+// добавить размер в сетку позиции (без дублей по recvSizeKeyL). true = добавлен
+function recvAddSizeToItem(it, label) {
+  const lab = String(label || '').trim();
+  if (!lab) return false;
+  it.sizeGrid = it.sizeGrid || [];
+  const k = recvSizeKeyL(lab);
+  if (it.sizeGrid.some(s => recvSizeKeyL(s) === k)) return false; // уже есть
+  it.sizeGrid = recvSortGrid([...it.sizeGrid, lab]);
+  return true;
+}
+
+// v1.2.49 — рендер панели «＋ размер» для существующей позиции.
+// Показывает недостающие размеры из справочника (чипы) + ручной ввод.
+async function recvRenderAddSizePanel(it, panel) {
+  panel.innerHTML = `<div class="recv-as-load">Загрузка справочника размеров…</div>`;
+  let groups = {};
+  try { groups = await recvLoadSizeCatalog(); } catch (e) { groups = {}; }
+  const have = new Set((it.sizeGrid || []).map(recvSizeKeyL));
+  // собираем все метки из справочника в порядке групп, без уже имеющихся
+  const missing = [];
+  const seen = new Set();
+  for (const g of RECV_SIZE_GROUP_ORDER) {
+    const arr = groups[g]; if (!arr || !arr.length) continue;
+    for (const s of arr) {
+      const k = recvSizeKeyL(s.label);
+      if (have.has(k) || seen.has(k)) continue;
+      seen.add(k); missing.push(s.label);
+    }
+  }
+  const chips = missing.length
+    ? missing.map(lab => `<button type="button" class="recv-as-chip" data-uid="${it.uid}" data-size="${esc(lab)}">＋ ${esc(lab)}</button>`).join('')
+    : `<span class="recv-as-empty">Все размеры из справочника уже в сетке. Добавьте свой ниже.</span>`;
+  panel.innerHTML = `
+    <div class="recv-as-title">Добавить размер из справочника</div>
+    <div class="recv-as-chips">${chips}</div>
+    <div class="recv-as-manual">
+      <input class="finput recv-as-input" data-uid="${it.uid}" placeholder="свой размер (напр. 21, M, стандарт) и Enter">
+      <button type="button" class="btn btn-outline recv-as-add" data-uid="${it.uid}">Добавить</button>
+    </div>`;
+  // чипы из справочника
+  panel.querySelectorAll('.recv-as-chip').forEach(ch => {
+    ch.onclick = () => {
+      if (recvAddSizeToItem(it, ch.dataset.size)) { recvPersist(); recvPaint(); }
+    };
+  });
+  // ручной ввод
+  const inp = panel.querySelector('.recv-as-input');
+  const addManual = () => {
+    if (!inp) return;
+    const v = (inp.value || '').trim();
+    if (!v) return;
+    if (recvAddSizeToItem(it, v)) { recvPersist(); recvPaint(); }
+    else { inp.value = ''; alert('Такой размер уже есть в сетке.'); }
+  };
+  if (inp) inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addManual(); } };
+  const addBtn = panel.querySelector('.recv-as-add');
+  if (addBtn) addBtn.onclick = addManual;
+  if (inp) inp.focus();
+}
+
 function recvItemQty(it) {
   let n = 0; const s = it.sizes || {};
   for (const k of Object.keys(s)) n += Math.max(0, Math.round(Number(s[k]) || 0));
@@ -6731,12 +6813,20 @@ function recvRowHTML(it) {
                  value="${pv}" placeholder="${fmtNum(effP)}" title="Цена для размера ${esc(sz)} (пусто = общая ${fmtNum(effP)} ${CUR})">
         </div>`;
   };
+  // v1.2.49 — кнопка/панель добавления размера существующему товару (из справочника или вручную)
+  const addSizeUI = `
+      <div class="recv-addsize">
+        <button type="button" class="recv-addsize-btn" data-uid="${it.uid}">＋ размер</button>
+        <div class="recv-addsize-panel" data-uid="${it.uid}" style="display:none"></div>
+      </div>`;
   const sizesHTML = grid.length
     ? `<div class="recv-sizes">${grid.map(sizeCell).join('')}</div>
-       <div class="recv-sizes-hint">Цена под размером — отдельная (пусто = общая ${fmtNum(effP)} ${CUR}). Диапазоны и «применить всем» — в калькуляторе (🧮).</div>`
+       ${addSizeUI}
+       <div class="recv-sizes-hint">Цена под размером — отдельная (пусто = общая ${fmtNum(effP)} ${CUR}). Нет нужного размера — кнопка «＋ размер». Диапазоны и «применить всем» — в калькуляторе (🧮).</div>`
     : `<div class="recv-nosize"><label class="recv-lbl">Количество (шт.)</label>
         <input class="recv-size-inp recv-qty-solo" data-uid="${it.uid}" data-size="_" type="number" min="0" inputmode="numeric"
-               value="${it.sizes && it.sizes['_'] ? esc(String(it.sizes['_'])) : ''}" placeholder="0"></div>`;
+               value="${it.sizes && it.sizes['_'] ? esc(String(it.sizes['_'])) : ''}" placeholder="0"></div>
+       ${addSizeUI}`;
   const active = it.uid === recv.activeCalcUid ? 'recv-row-active' : '';
   return `
     <div class="recv-row ${active}" data-uid="${it.uid}">
@@ -7094,6 +7184,20 @@ function recvBindItems() {
       if (v === '' || Number(v) <= 0) { delete it.pricesBySize[sz]; inp.classList.remove('recv-size-price-set'); }
       else { it.pricesBySize[sz] = Math.round(Number(v) * 100) / 100; inp.classList.add('recv-size-price-set'); }
       recvPersist();
+    };
+  });
+  // v1.2.49 — кнопка «＋ размер»: раскрыть/свернуть панель добавления
+  document.querySelectorAll('.recv-addsize-btn').forEach(btn => {
+    btn.onclick = () => {
+      const it = recv.items.find(x => x.uid === btn.dataset.uid); if (!it) return;
+      const panel = document.querySelector(`.recv-addsize-panel[data-uid="${it.uid}"]`);
+      if (!panel) return;
+      if (panel.style.display === 'none' || !panel.style.display) {
+        panel.style.display = 'block';
+        recvRenderAddSizePanel(it, panel);
+      } else {
+        panel.style.display = 'none';
+      }
     };
   });
   document.querySelectorAll('.recv-cost-inp').forEach(inp => {

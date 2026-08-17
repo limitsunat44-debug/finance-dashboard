@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.46';
+const RMK_VERSION = '1.2.47';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.47', date: '17.08.2026', title: 'Отчёт по снятию ДС: «Прочее» разбивается по конкретному банку',
+    items: [
+      'В отчёте о снятии ДС оплаты через отдельные банки (Имон, Alif Salom, DCity и др.) теперь показываются отдельной строкой — больше не сливаются в одну «Прочее».',
+      'Строка по банку показывается только если по нему были оплаты (как и раньше); безымянные остаются в общей строке «Прочее».',
+      'Разбивка работает в таблице, PDF и Excel-экспорте.',
+    ],
+  },
   {
     v: '1.2.46', date: '17.08.2026', title: 'Инвентаризация: перемещение экземпляра правильно меняет вариант склада-получателя',
     items: [
@@ -3263,19 +3271,37 @@ async function renderCashReport(force) {
           <td class="c cr-vcell">${crCheck(true)}</td>
         </tr>`;
       });
-      // Прочее (если есть)
-      const oSale = (s.sale && s.sale.other) || 0, oRet = (s.ret && s.ret.other) || 0;
-      if (Math.abs(oSale) >= 0.005 || Math.abs(oRet) >= 0.005) {
-        const net = oSale - oRet;
-        rowsHtml += `<tr class="cr-sub">
-          <td class="cr-num muted">${num}.${buckets.length + 1}</td>
-          <td class="cr-type">Прочее</td>
-          <td class="r">${money(oSale)}</td>
-          <td class="r ${oRet>0?'cr-ret':'muted'}">${money(oRet)}</td>
-          <td class="r strong">${money(net)}</td>
-          <td class="c"><input type="text" class="cr-cash" value="${fmtNum(net)}" data-net="${net}"></td>
-          <td class="c cr-vcell">${crCheck(true)}</td>
-        </tr>`;
+      // Прочие оплаты — РАЗБИВКА по конкретному банку/названию (Alif Salom, Имон, DCity…).
+      // Backend отдаёт s.otherPays[] (только ненулевые). Каждый банк — отдельная строка.
+      // Fallback (старый backend без otherPays): единая строка «Прочее».
+      const oPays = Array.isArray(s.otherPays) ? s.otherPays : null;
+      if (oPays) {
+        oPays.forEach((op, oi) => {
+          const net = (op.net != null) ? op.net : ((op.sale||0) - (op.ret||0));
+          rowsHtml += `<tr class="cr-sub">
+            <td class="cr-num muted">${num}.${buckets.length + 1 + oi}</td>
+            <td class="cr-type">${esc(op.label || 'Прочее')}</td>
+            <td class="r">${money(op.sale||0)}</td>
+            <td class="r ${(op.ret||0)>0?'cr-ret':'muted'}">${money(op.ret||0)}</td>
+            <td class="r strong">${money(net)}</td>
+            <td class="c"><input type="text" class="cr-cash" value="${fmtNum(net)}" data-net="${net}"></td>
+            <td class="c cr-vcell">${crCheck(true)}</td>
+          </tr>`;
+        });
+      } else {
+        const oSale = (s.sale && s.sale.other) || 0, oRet = (s.ret && s.ret.other) || 0;
+        if (Math.abs(oSale) >= 0.005 || Math.abs(oRet) >= 0.005) {
+          const net = oSale - oRet;
+          rowsHtml += `<tr class="cr-sub">
+            <td class="cr-num muted">${num}.${buckets.length + 1}</td>
+            <td class="cr-type">Прочее</td>
+            <td class="r">${money(oSale)}</td>
+            <td class="r ${oRet>0?'cr-ret':'muted'}">${money(oRet)}</td>
+            <td class="r strong">${money(net)}</td>
+            <td class="c"><input type="text" class="cr-cash" value="${fmtNum(net)}" data-net="${net}"></td>
+            <td class="c cr-vcell">${crCheck(true)}</td>
+          </tr>`;
+        }
       }
     });
     // итоговая строка
@@ -3420,9 +3446,18 @@ function cashExportPdf(rep, buckets, per) {
         if (Math.abs(sale) < 0.005 && Math.abs(ret) < 0.005) return;
         body.push([num + '.' + (bi + 1), b.label + badge(b.key), N(sale), N(ret), N(sale - ret), '', '']);
       });
-      const oSale = (s.sale && s.sale.other) || 0, oRet = (s.ret && s.ret.other) || 0;
-      if (Math.abs(oSale) >= 0.005 || Math.abs(oRet) >= 0.005)
-        body.push([num + '.' + (buckets.length + 1), 'Прочее', N(oSale), N(oRet), N(oSale - oRet), '', '']);
+      // Прочие оплаты — разбивка по банку (otherPays[]); fallback — единая «Прочее».
+      const oPays = Array.isArray(s.otherPays) ? s.otherPays : null;
+      if (oPays) {
+        oPays.forEach((op, oi) => {
+          const net = (op.net != null) ? op.net : ((op.sale||0) - (op.ret||0));
+          body.push([num + '.' + (buckets.length + 1 + oi), (op.label || 'Прочее'), N(op.sale||0), N(op.ret||0), N(net), '', '']);
+        });
+      } else {
+        const oSale = (s.sale && s.sale.other) || 0, oRet = (s.ret && s.ret.other) || 0;
+        if (Math.abs(oSale) >= 0.005 || Math.abs(oRet) >= 0.005)
+          body.push([num + '.' + (buckets.length + 1), 'Прочее', N(oSale), N(oRet), N(oSale - oRet), '', '']);
+      }
     });
     const foot = [['', 'Итого по всем магазинам', N(g.saleTotal), N(g.retTotal), N(g.total), '', '']];
 
@@ -3506,9 +3541,19 @@ function cashExportXlsx(rep, buckets, per) {
         if (Math.abs(sale) < 0.005 && Math.abs(ret) < 0.005) return;
         aoa.push([n + '.' + (bi + 1), b.label + badge(b.key), sale, ret, sale - ret, sale - ret, '✓']);
       });
-      const oS = num(s.sale && s.sale.other), oR = num(s.ret && s.ret.other);
-      if (Math.abs(oS) >= 0.005 || Math.abs(oR) >= 0.005)
-        aoa.push([n + '.' + (buckets.length + 1), 'Прочее', oS, oR, oS - oR, oS - oR, '✓']);
+      // Прочие оплаты — разбивка по банку (otherPays[]); fallback — единая «Прочее».
+      const oPays = Array.isArray(s.otherPays) ? s.otherPays : null;
+      if (oPays) {
+        oPays.forEach((op, oi) => {
+          const sale = num(op.sale), ret = num(op.ret);
+          const net = (op.net != null) ? num(op.net) : (sale - ret);
+          aoa.push([n + '.' + (buckets.length + 1 + oi), (op.label || 'Прочее'), sale, ret, net, net, '✓']);
+        });
+      } else {
+        const oS = num(s.sale && s.sale.other), oR = num(s.ret && s.ret.other);
+        if (Math.abs(oS) >= 0.005 || Math.abs(oR) >= 0.005)
+          aoa.push([n + '.' + (buckets.length + 1), 'Прочее', oS, oR, oS - oR, oS - oR, '✓']);
+      }
     });
     aoa.push(['', 'Итого по всем магазинам', num(g.saleTotal), num(g.retTotal), num(g.total), num(g.total), '✓']);
 

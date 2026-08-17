@@ -7,8 +7,15 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.49';
+const RMK_VERSION = '1.2.50';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.50', date: '17.08.2026', title: 'Доступ: Umed — поступление товара и поставщики',
+    items: [
+      'Пользователю Umed открыта вкладка «Поступление товара»: создание/редактирование документов поступления, список всех документов и справочник поставщиков.',
+      'Ранее у Umed была только «Перемещение товаров» — она сохранена.',
+    ],
+  },
   {
     v: '1.2.49', date: '17.08.2026', title: 'Приход товара: добавление размера существующему товару',
     items: [
@@ -489,8 +496,9 @@ const ADMIN_ACCOUNTS = {
   'Sunnat':   { password: 'Sunna0909', displayName: 'Sunnat',   allowedTabs: '*' },
   'Iskandar': { password: '1111',      displayName: 'Iskandar', allowedTabs: '*' },
   'Shahida':  { password: 's2364170',  displayName: 'Shahida',  allowedTabs: '*' },
-  // Ограниченный доступ: только вкладка «Перемещение товаров»
-  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer'] },
+  // Ограниченный доступ: Перемещение товаров + Поступление товара
+  // (вкладка receiving включает: новый документ, документы поступления, поставщики — создание/редактирование)
+  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'receiving'] },
 };
 // true, если у аккаунта есть хоть какой-то доступ в админку
 function accHasAccess(acc) {

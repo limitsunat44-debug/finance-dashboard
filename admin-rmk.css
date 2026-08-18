@@ -1367,3 +1367,12 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
 .inv-apply-step h4{margin:0 0 8px;font-size:15px}
 .inv-apply-step p{font-size:13px;margin:0 0 12px}
 @media(max-width:760px){.inv-apply{grid-template-columns:1fr}.inv-tiles{grid-template-columns:repeat(3,1fr)}}
+/* v1.2.51 — кнопка удаления скана в живой ленте */
+.inv-scan-del{width:26px;height:26px;line-height:1;padding:0;border:1px solid var(--line);background:#fff;border-radius:7px;color:#c0392b;font-size:13px;cursor:pointer;transition:background .15s,border-color .15s}
+.inv-scan-del:hover{border-color:var(--red,#dc2626);background:var(--red-soft,#fdeaea)}
+/* v1.2.51 — секции списков товаров в акте */
+.inv-act-sec{padding:14px 16px}
+.inv-act-sec summary{list-style:none}
+.inv-act-sec summary::-webkit-details-marker{display:none}
+.inv-act-sec summary::before{content:'\25b8';display:inline-block;margin-right:4px;color:var(--tx2);transition:transform .15s}
+.inv-act-sec[open] summary::before{transform:rotate(90deg)}

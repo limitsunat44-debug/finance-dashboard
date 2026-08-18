@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.50';
+const RMK_VERSION = '1.2.51';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.51', date: '18.08.2026', title: 'Инвентаризация: удаление сканов в живой ленте + списки товаров в акте с пагинацией',
+    items: [
+      'В живой ленте сканов появилась кнопка удаления — можно убрать дубли и ошибочно отсканированные штрихкоды, чтобы они не попали в акт (только для активной/приостановленной сессии).',
+      'При удалении скана счётчики (Учтено/Дубли/…) и статусы оставшихся сканов того же штрихкода пересчитываются автоматически.',
+      'В акте расхождений теперь видны сами товары по категориям (Недостача, Вернётся, С др. складов и т.д.) — разворачивающиеся списки с пагинацией по 50 позиций на страницу.',
+    ],
+  },
   {
     v: '1.2.50', date: '17.08.2026', title: 'Доступ: Umed — поступление товара и поставщики',
     items: [
@@ -7823,7 +7831,8 @@ const INV_WAREHOUSES = [
 ];
 const invWhName = (id) => (INV_WAREHOUSES.find(w => w.id === id) || {}).name || '—';
 
-const invState = { view: 'list', session: null, act: null, poll: null };
+const invState = { view: 'list', session: null, act: null, poll: null, actPage: {} };
+const INV_ACT_PAGE_SIZE = 50;
 
 function invStatusBadge(st) {
   if (st === 'active') return '<span class="badge b-green">Идёт</span>';
@@ -7995,13 +8004,17 @@ async function invRenderSession(id, silent) {
   const box = $('invBody');
 
   const tile = (n, l, cls) => `<div class="inv-tile ${cls}"><div class="n">${fmtInt(n)}</div><div class="l">${l}</div></div>`;
+  const canFinish = ['active', 'paused'].includes(s.status);
   const feed = (r.recentScans || []).map(x => {
     const map = { matched: ['✓', 'Учтён', 'g'], duplicate: ['⟳', 'Дубль', 'amber'], unknown: ['?', 'Не в базе', 'red'], revived: ['↺', 'Вернётся', 'blue'], moved: ['⇄', 'С др. склада', 'violet'] };
     const [ic, lbl, col] = map[x.result] || ['•', x.result, 'gray'];
-    return `<tr><td class="mono">${esc(x.barcode)}</td><td><span class="pill ${col}">${ic} ${lbl}</span></td><td class="muted r">${dushTime(x.scanned_at, false)}</td></tr>`;
+    // v1.2.51 — кнопка удаления скана (только для активной/приостановленной сессии)
+    const delCell = canFinish
+      ? `<td class="r"><button class="inv-scan-del" data-scan-id="${esc(x.id)}" data-bc="${esc(x.barcode)}" title="Удалить этот скан (дубль/ошибка)">✕</button></td>`
+      : '';
+    return `<tr><td class="mono">${esc(x.barcode)}</td><td><span class="pill ${col}">${ic} ${lbl}</span></td><td class="muted r">${dushTime(x.scanned_at, false)}</td>${delCell}</tr>`;
   }).join('');
 
-  const canFinish = ['active', 'paused'].includes(s.status);
   const canAct = ['active', 'paused', 'review'].includes(s.status);
 
   box.innerHTML = `
@@ -8031,8 +8044,8 @@ async function invRenderSession(id, silent) {
     <div class="card card-pad">
       <div class="card-h-row"><h3>Последние сканы ${canFinish ? '<span class="pill g" style="margin-left:8px">● живая лента</span>' : ''}</h3></div>
       <div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Штрихкод</th><th>Результат</th><th class="r">Время</th></tr></thead>
-        <tbody>${feed || '<tr><td class="tbl-empty" colspan="3">Сканов пока нет</td></tr>'}</tbody>
+        <thead><tr><th>Штрихкод</th><th>Результат</th><th class="r">Время</th>${canFinish ? '<th class="r"></th>' : ''}</tr></thead>
+        <tbody>${feed || `<tr><td class="tbl-empty" colspan="${canFinish ? 4 : 3}">Сканов пока нет</td></tr>`}</tbody>
       </table></div>
     </div>
     <div id="invActBox" style="margin-top:16px"></div>
@@ -8040,8 +8053,28 @@ async function invRenderSession(id, silent) {
   $('invBack').onclick = () => { invStopPoll(); renderInventory(true); };
   $('invBtnReload').onclick = () => invRenderSession(id);
   const bAct = $('invBtnAct'); if (bAct) bAct.onclick = () => invComputeAct(id);
+  // v1.2.51 — удаление скана из живой ленты
+  box.querySelectorAll('.inv-scan-del').forEach(btn => {
+    btn.onclick = () => invDeleteScan(id, btn.getAttribute('data-scan-id'), btn.getAttribute('data-bc'));
+  });
   // если акт уже был посчитан ранее и лежит в state — показать
   if (invState.act && invState.act.sessionId === id && !silent) invRenderAct(invState.act);
+}
+
+// v1.2.51 — удалить ошибочный скан / дубль из живой ленты
+async function invDeleteScan(sessionId, scanId, barcode) {
+  if (!scanId) return;
+  if (!confirm(`Удалить скан ${barcode || ''}?\n\nСкан будет убран из ленты и не попадёт в акт. Используйте для дублей и ошибочно отсканированных штрихкодов.`)) return;
+  // во время удаления остановим авто-поллинг, чтобы он не перетёр результат
+  invStopPoll();
+  try {
+    await invcApi('?action=inv-scan-delete', { method: 'POST', body: JSON.stringify({ sessionId, scanId }) });
+    // перерисуем сессию (она сама возобновит поллинг)
+    await invOpenSession(sessionId);
+  } catch (e) {
+    alert('Не удалось удалить скан: ' + e.message);
+    await invOpenSession(sessionId);
+  }
 }
 
 // ---- D3: акт расхождений ----
@@ -8049,6 +8082,7 @@ async function invComputeAct(id) {
   const abox = $('invActBox');
   abox.innerHTML = `<div class="loading">⏳ Считаю акт (сверка с продажами за период)…</div>`;
   invStopPoll(); // расчёт акта переводит в review — активная лента больше не нужна
+  invState.actPage = {}; // сброс пагинации при новом расчёте
   try {
     const r = await invcApi('?action=inv-act', { method: 'POST', body: JSON.stringify({ sessionId: id }) });
     invState.act = { sessionId: id, summary: r.summary, detail: r.detail };
@@ -8073,6 +8107,18 @@ function invRenderAct(act) {
   const reviveList = (d.revived || []);
   const moveList = (d.moved || []);
 
+  // v1.2.51 — развёрнутые списки товаров по категориям с пагинацией (по 50)
+  invState.actPage = invState.actPage || {};
+  const actCats = [
+    { key: 'missing',    color: '#ef4444', title: 'Недостача (не найдено)', list: d.missing || [] },
+    { key: 'revived',    color: '#3b82f6', title: 'Вернётся из списания', list: d.revived || [] },
+    { key: 'moved',      color: '#a855f7', title: 'С других складов', list: d.moved || [] },
+    { key: 'soldDuring', color: '#f97316', title: 'Продано во время пересчёта', list: d.soldDuring || [] },
+    { key: 'unknown',    color: '#94a3b8', title: 'Неизвестные (не в базе)', list: d.unknown || [] },
+    { key: 'matched',    color: '#22c55e', title: 'Совпало (в наличии)', list: d.matched || [] },
+  ];
+  const actSections = actCats.filter(c => c.list.length).map(c => invActSectionHtml(c)).join('');
+
   abox.innerHTML = `
     <div class="card card-pad">
       <div class="card-h-row"><h3>📋 Акт расхождений</h3></div>
@@ -8087,6 +8133,8 @@ function invRenderAct(act) {
           ${row('#94a3b8', 'Неизвестные (не в базе)', s.unknown, 'штрихкоды без карточки')}
         </tbody>
       </table></div>
+
+      <div id="invActLists" style="margin-top:8px">${actSections}</div>
 
       <div class="inv-apply">
         <div class="inv-apply-step">
@@ -8144,6 +8192,80 @@ function invRenderAct(act) {
       invState.act = null; renderInventory(true);
     } catch (e) { alert('Ошибка: ' + e.message); }
   };
+
+  // v1.2.51 — пагинация списков товаров в акте
+  invActBindPagers(d);
+}
+
+// v1.2.51 — HTML секции списка товаров одной категории акта
+function invActSectionHtml(cat) {
+  const total = cat.list.length;
+  const pages = Math.max(1, Math.ceil(total / INV_ACT_PAGE_SIZE));
+  let page = invState.actPage[cat.key] || 1;
+  if (page > pages) { page = pages; invState.actPage[cat.key] = page; }
+  const start = (page - 1) * INV_ACT_PAGE_SIZE;
+  const slice = cat.list.slice(start, start + INV_ACT_PAGE_SIZE);
+
+  const rows = slice.map(x => {
+    const extra = x.fromWarehouse ? `<span class="muted">со склада: ${esc(invWhName(x.fromWarehouse))}</span>`
+      : x.fromStatus ? `<span class="muted">был: ${x.fromStatus === 'sold' ? 'продан' : 'списан'}</span>` : '';
+    return `<tr>
+      <td class="mono">${esc(x.barcode || '—')}</td>
+      <td>${esc(x.size || '—')}</td>
+      <td class="r tnum">${x.price != null ? invMoney(x.price) : '—'}</td>
+      <td>${extra}</td></tr>`;
+  }).join('');
+
+  const pager = pages > 1 ? `
+    <div class="inv-act-pager" style="display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-ghost inv-pg-prev" data-key="${cat.key}" ${page <= 1 ? 'disabled' : ''}>‹ Назад</button>
+      <span class="muted">стр. ${page} из ${pages} · всего ${fmtInt(total)}</span>
+      <button class="btn btn-ghost inv-pg-next" data-key="${cat.key}" ${page >= pages ? 'disabled' : ''}>Вперёд ›</button>
+    </div>` : `<div class="muted" style="text-align:right;margin-top:6px">всего ${fmtInt(total)}</div>`;
+
+  return `
+    <details class="card card-pad inv-act-sec" data-key="${cat.key}" style="margin-top:12px" ${cat.key === 'missing' ? 'open' : ''}>
+      <summary style="cursor:pointer;font-weight:600;display:flex;align-items:center;gap:8px">
+        <span class="inv-dot" style="background:${cat.color}"></span>${esc(cat.title)} · ${fmtInt(total)}
+      </summary>
+      <div class="tbl-wrap" style="margin-top:10px"><table class="tbl">
+        <thead><tr><th>Штрихкод</th><th>Размер</th><th class="r">Цена</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td class="tbl-empty" colspan="4">Пусто</td></tr>'}</tbody>
+      </table></div>
+      ${pager}
+    </details>`;
+}
+
+// v1.2.51 — перенавешивание кнопок пагинации списков акта
+function invActBindPagers(detail) {
+  const wrap = $('invActLists');
+  if (!wrap) return;
+  const cats = [
+    { key: 'missing',    color: '#ef4444', title: 'Недостача (не найдено)', list: detail.missing || [] },
+    { key: 'revived',    color: '#3b82f6', title: 'Вернётся из списания', list: detail.revived || [] },
+    { key: 'moved',      color: '#a855f7', title: 'С других складов', list: detail.moved || [] },
+    { key: 'soldDuring', color: '#f97316', title: 'Продано во время пересчёта', list: detail.soldDuring || [] },
+    { key: 'unknown',    color: '#94a3b8', title: 'Неизвестные (не в базе)', list: detail.unknown || [] },
+    { key: 'matched',    color: '#22c55e', title: 'Совпало (в наличии)', list: detail.matched || [] },
+  ];
+  const byKey = {}; cats.forEach(c => byKey[c.key] = c);
+  const step = (key, dir) => {
+    const cat = byKey[key]; if (!cat) return;
+    const pages = Math.max(1, Math.ceil(cat.list.length / INV_ACT_PAGE_SIZE));
+    let p = (invState.actPage[key] || 1) + dir;
+    p = Math.min(pages, Math.max(1, p));
+    invState.actPage[key] = p;
+    const sec = wrap.querySelector(`details.inv-act-sec[data-key="${key}"]`);
+    const wasOpen = sec ? sec.open : true;
+    if (sec) {
+      sec.outerHTML = invActSectionHtml(cat);
+      const fresh = wrap.querySelector(`details.inv-act-sec[data-key="${key}"]`);
+      if (fresh) fresh.open = wasOpen;
+    }
+    invActBindPagers(detail); // перенавесить на обновлённые кнопки
+  };
+  wrap.querySelectorAll('.inv-pg-prev').forEach(b => b.onclick = () => step(b.getAttribute('data-key'), -1));
+  wrap.querySelectorAll('.inv-pg-next').forEach(b => b.onclick = () => step(b.getAttribute('data-key'), +1));
 }
 
 function invStopPoll() { if (invState.poll) { clearInterval(invState.poll); invState.poll = null; } }

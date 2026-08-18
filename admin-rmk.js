@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.51';
+const RMK_VERSION = '1.2.52';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.52', date: '18.08.2026', title: 'Инвентаризация: ручной ввод кода по последним 5 цифрам в живой ленте',
+    items: [
+      'В живой ленте сессии появилось поле ручного ввода: если штрихкод не сканируется, администратор вводит последние 5 цифр — система находит экземпляр на складе и засчитывает его.',
+      'При нескольких совпадениях показывается список для выбора нужного товара (штрихкод, наименование, размер).',
+      'Засчёт идёт тем же путём, что и скан с телефона — результат (Учтён/Дубль/Вернётся/…) сразу виден в ленте.',
+    ],
+  },
   {
     v: '1.2.51', date: '18.08.2026', title: 'Инвентаризация: удаление сканов в живой ленте + списки товаров в акте с пагинацией',
     items: [
@@ -8043,6 +8051,14 @@ async function invRenderSession(id, silent) {
     </div>
     <div class="card card-pad">
       <div class="card-h-row"><h3>Последние сканы ${canFinish ? '<span class="pill g" style="margin-left:8px">● живая лента</span>' : ''}</h3></div>
+      ${canFinish ? `<div class="inv-manual">
+        <form id="invManualForm" autocomplete="off">
+          <input type="text" id="invManualInp" inputmode="numeric" maxlength="13" placeholder="⌨ Ручной ввод: последние 5 цифр кода">
+          <button type="submit" class="btn btn-primary btn-sm">↵ Засчитать</button>
+        </form>
+        <p class="muted" style="margin:6px 0 0;font-size:12px">Если штрихкод не сканируется — введите последние 5 цифр. Найдём экземпляр на складе и засчитаем.</p>
+        <div id="invManualHit"></div>
+      </div>` : ''}
       <div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Штрихкод</th><th>Результат</th><th class="r">Время</th>${canFinish ? '<th class="r"></th>' : ''}</tr></thead>
         <tbody>${feed || `<tr><td class="tbl-empty" colspan="${canFinish ? 4 : 3}">Сканов пока нет</td></tr>`}</tbody>
@@ -8057,6 +8073,9 @@ async function invRenderSession(id, silent) {
   box.querySelectorAll('.inv-scan-del').forEach(btn => {
     btn.onclick = () => invDeleteScan(id, btn.getAttribute('data-scan-id'), btn.getAttribute('data-bc'));
   });
+  // v1.2.52 — ручной ввод по последним 5 цифрам
+  const mf = $('invManualForm');
+  if (mf) mf.onsubmit = (e) => { e.preventDefault(); invManualAdd(id); };
   // если акт уже был посчитан ранее и лежит в state — показать
   if (invState.act && invState.act.sessionId === id && !silent) invRenderAct(invState.act);
 }
@@ -8074,6 +8093,70 @@ async function invDeleteScan(sessionId, scanId, barcode) {
   } catch (e) {
     alert('Не удалось удалить скан: ' + e.message);
     await invOpenSession(sessionId);
+  }
+}
+
+// v1.2.52 — ручной ввод штрихкода по последним цифрам (обычно 5) в живую ленту
+async function invManualAdd(sessionId) {
+  const inp = $('invManualInp');
+  const hit = $('invManualHit');
+  if (!inp) return;
+  const raw = (inp.value || '').replace(/\D/g, '');
+  if (raw.length < 3) { if (hit) hit.innerHTML = '<p class="muted" style="margin:6px 0 0;color:var(--red)">Введите минимум 3 цифры (лучше 5).</p>'; return; }
+
+  // Если ввели полный 13-значный код — сканируем напрямую.
+  if (raw.length >= 13) { await invManualScan(sessionId, raw.slice(0, 13)); return; }
+
+  if (hit) hit.innerHTML = '<p class="muted" style="margin:6px 0 0">⏳ Ищу экземпляры…</p>';
+  invStopPoll();
+  try {
+    const r = await invcApi('?action=inv-lookup-tail', { method: 'POST', body: JSON.stringify({ sessionId, tail: raw }) });
+    const matches = r.matches || [];
+    if (!matches.length) {
+      if (hit) hit.innerHTML = `<p class="muted" style="margin:6px 0 0;color:var(--red)">На этом складе нет экземпляра в наличии с кодом, оканчивающимся на «${esc(raw)}». Проверьте цифры.</p>`;
+      invStartPoll(sessionId);
+      return;
+    }
+    if (matches.length === 1) {
+      await invManualScan(sessionId, matches[0].barcode);
+      return;
+    }
+    // Несколько совпадений — показываем выбор
+    const opts = matches.map(m => `<button class="inv-manual-pick" data-bc="${esc(m.barcode)}">
+      <span class="mono">${esc(m.barcode)}</span>
+      <span class="muted">${esc(m.name || 'без имени')}${m.size ? ' · разм. ' + esc(m.size) : ''}</span>
+    </button>`).join('');
+    if (hit) hit.innerHTML = `<div class="inv-manual-list"><p class="muted" style="margin:0 0 6px">Найдено ${matches.length} — выберите нужный:</p>${opts}</div>`;
+    hit.querySelectorAll('.inv-manual-pick').forEach(b => {
+      b.onclick = () => invManualScan(sessionId, b.getAttribute('data-bc'));
+    });
+  } catch (e) {
+    if (hit) hit.innerHTML = `<p class="muted" style="margin:6px 0 0;color:var(--red)">Ошибка поиска: ${esc(e.message)}</p>`;
+    invStartPoll(sessionId);
+  }
+}
+
+// v1.2.52 — засчитать выбранный полный штрихкод (тот же inv-scan, что и с телефона)
+async function invManualScan(sessionId, barcode) {
+  const inp = $('invManualInp');
+  const hit = $('invManualHit');
+  if (!barcode) return;
+  if (hit) hit.innerHTML = '<p class="muted" style="margin:6px 0 0">⏳ Засчитываю…</p>';
+  invStopPoll();
+  try {
+    const r = await invcApi('?action=inv-scan', { method: 'POST', body: JSON.stringify({ sessionId, barcode, scannedBy: 'ручной ввод' }) });
+    const map = { matched: '✓ Учтён', duplicate: '⟳ Дубль (уже был)', unknown: '? Не в базе', revived: '↺ Вернётся', moved: '⇄ С др. склада' };
+    const lbl = map[r.result] || r.result || '';
+    const nm = r.card && r.card.name ? ` · ${esc(r.card.name)}${r.card.size ? ' (разм. ' + esc(r.card.size) + ')' : ''}` : '';
+    if (inp) inp.value = '';
+    // Перерисуем сессию (обновит ленту/счётчики и возобновит поллинг), затем покажем результат
+    await invOpenSession(sessionId);
+    const hit2 = $('invManualHit');
+    if (hit2) hit2.innerHTML = `<p style="margin:6px 0 0;color:var(--green,#16a34a)">${esc(barcode)}: ${esc(lbl)}${nm}</p>`;
+    const inp2 = $('invManualInp'); if (inp2) inp2.focus();
+  } catch (e) {
+    if (hit) hit.innerHTML = `<p class="muted" style="margin:6px 0 0;color:var(--red)">Не удалось засчитать: ${esc(e.message)}</p>`;
+    invStartPoll(sessionId);
   }
 }
 
@@ -8269,6 +8352,14 @@ function invActBindPagers(detail) {
 }
 
 function invStopPoll() { if (invState.poll) { clearInterval(invState.poll); invState.poll = null; } }
+// v1.2.52 — возобновить живую ленту (не перерисовывая сразу, чтобы не стереть сообщение)
+function invStartPoll(id) {
+  invStopPoll();
+  const s = invState.session;
+  if (s && ['active', 'paused'].includes(s.status)) {
+    invState.poll = setInterval(() => invRenderSession(id, true), 5000);
+  }
+}
 
 
 // ══════════════════════════════════════════════════════════

@@ -1376,3 +1376,13 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
 .inv-act-sec summary::-webkit-details-marker{display:none}
 .inv-act-sec summary::before{content:'\25b8';display:inline-block;margin-right:4px;color:var(--tx2);transition:transform .15s}
 .inv-act-sec[open] summary::before{transform:rotate(90deg)}
+/* v1.2.52 — ручной ввод в живую ленту */
+.inv-manual{margin:6px 0 14px;padding:12px 14px;background:var(--g1,#f6f8f7);border:1px solid var(--line);border-radius:12px}
+.inv-manual form{display:flex;gap:8px;align-items:center}
+.inv-manual input{flex:1;padding:10px 12px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#fff}
+.inv-manual input:focus{outline:none;border-color:var(--g3)}
+.inv-manual button{white-space:nowrap}
+.inv-manual-list{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.inv-manual-pick{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:9px 12px;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;text-align:left;transition:border-color .15s,background .15s}
+.inv-manual-pick:hover{border-color:var(--g3);background:var(--g1,#f0f5f2)}
+.inv-manual-pick .mono{font-family:ui-monospace,monospace;font-weight:600}

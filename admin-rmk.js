@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.52';
+const RMK_VERSION = '1.2.53';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.53', date: '18.08.2026', title: 'Ручной ввод: поиск по всей базе + цифры не пропадают, страница не перезагружается',
+    items: [
+      'Ручной ввод по 5 цифрам теперь ищет экземпляр по ВСЕЙ базе (в т.ч. списанный/проданный/на другом складе) и при засчёте восстанавливает/перемещает его на склад сессии.',
+      'В списке выбора видно состояние (в наличии/списан/продан), склад и что произойдёт при засчёте.',
+      'Цифры в поле ввода больше не пропадают: автообновление ленты теперь тихое (обновляет только счётчики и таблицу, не трогает форму).',
+      'При засчёте товара страница больше не «перезагружается» — фокус остаётся в поле, можно сразу вводить следующий код.',
+    ],
+  },
   {
     v: '1.2.52', date: '18.08.2026', title: 'Инвентаризация: ручной ввод кода по последним 5 цифрам в живой ленте',
     items: [
@@ -8002,8 +8011,58 @@ async function invOpenSession(id) {
   }
 }
 
+// v1.2.53 — построить HTML тела таблицы «Последние сканы» из ответа inv-session
+function invFeedRows(r, canFinish) {
+  return (r.recentScans || []).map(x => {
+    const map = { matched: ['✓', 'Учтён', 'g'], duplicate: ['⟳', 'Дубль', 'amber'], unknown: ['?', 'Не в базе', 'red'], revived: ['↺', 'Вернётся', 'blue'], moved: ['⇄', 'С др. склада', 'violet'] };
+    const [ic, lbl, col] = map[x.result] || ['•', x.result, 'gray'];
+    const delCell = canFinish
+      ? `<td class="r"><button class="inv-scan-del" data-scan-id="${esc(x.id)}" data-bc="${esc(x.barcode)}" title="Удалить этот скан (дубль/ошибка)">✕</button></td>`
+      : '';
+    return `<tr><td class="mono">${esc(x.barcode)}</td><td><span class="pill ${col}">${ic} ${lbl}</span></td><td class="muted r">${dushTime(x.scanned_at, false)}</td>${delCell}</tr>`;
+  }).join('');
+}
+
+// v1.2.53 — ТИХОЕ обновление счётчиков и ленты БЕЗ пересоздания формы ручного ввода.
+// Возвращает true, если удалось пропатчить (карточка уже отрисована); иначе false.
+function invPatchSession(id, r) {
+  const box = $('invBody');
+  if (!box) return false;
+  const counterBig = box.querySelector('.inv-counter .big');
+  const tilesWrap = box.querySelector('.inv-tiles');
+  const feedBody = box.querySelector('.tbl tbody');
+  if (!counterBig || !tilesWrap || !feedBody) return false; // карточка ещё не в этом виде — нужен полный рендер
+  invState.session = r.session;
+  const s = r.session, c = r.counts || {};
+  const exp = r.expectedNow ?? s.expected_count ?? 0;
+  const fact = (r.products || []).reduce((a, p) => a + (p.fact || 0), 0);
+  const pct = exp ? Math.min(100, Math.round(fact / exp * 100)) : 0;
+  const canFinish = ['active', 'paused'].includes(s.status);
+  // счётчик + прогресс
+  counterBig.innerHTML = `${fmtInt(fact)} <small>/ ${fmtInt(exp)}</small>`;
+  const bar = box.querySelector('.inv-bar i'); if (bar) bar.style.width = pct + '%';
+  const sub = box.querySelector('.inv-counter .muted'); if (sub) sub.innerHTML = `${pct}% отсканировано · всего сканов: ${fmtInt(c.total || 0)}`;
+  // плитки
+  const tile = (n, l, cls) => `<div class="inv-tile ${cls}"><div class="n">${fmtInt(n)}</div><div class="l">${l}</div></div>`;
+  tilesWrap.innerHTML =
+    tile(c.matched || 0, 'Учтено', 't-g') +
+    tile(c.duplicate || 0, 'Дубли', 't-amber') +
+    tile(c.unknown || 0, 'Не в базе', 't-red') +
+    tile(c.revived || 0, 'Вернётся', 't-blue') +
+    tile(c.moved || 0, 'С др. склада', 't-violet');
+  // лента
+  feedBody.innerHTML = invFeedRows(r, canFinish) || `<tr><td class="tbl-empty" colspan="${canFinish ? 4 : 3}">Сканов пока нет</td></tr>`;
+  feedBody.querySelectorAll('.inv-scan-del').forEach(btn => {
+    btn.onclick = () => invDeleteScan(id, btn.getAttribute('data-scan-id'), btn.getAttribute('data-bc'));
+  });
+  return true;
+}
+
 async function invRenderSession(id, silent) {
   const r = await invcApi('?action=inv-session&sessionId=' + encodeURIComponent(id) + '&scanLimit=60');
+  // v1.2.53 — при тихом обновлении (поллинг) патчим только счётчики/ленту,
+  // чтобы не пересоздавать поле ручного ввода и не терять введённые цифры.
+  if (silent && invPatchSession(id, r)) return;
   invState.session = r.session;
   const s = r.session, c = r.counts || {};
   const exp = r.expectedNow ?? s.expected_count ?? 0;
@@ -8056,7 +8115,7 @@ async function invRenderSession(id, silent) {
           <input type="text" id="invManualInp" inputmode="numeric" maxlength="13" placeholder="⌨ Ручной ввод: последние 5 цифр кода">
           <button type="submit" class="btn btn-primary btn-sm">↵ Засчитать</button>
         </form>
-        <p class="muted" style="margin:6px 0 0;font-size:12px">Если штрихкод не сканируется — введите последние 5 цифр. Найдём экземпляр на складе и засчитаем.</p>
+        <p class="muted" style="margin:6px 0 0;font-size:12px">Если штрихкод не сканируется — введите последние 5 цифр. Найдём экземпляр (в т.ч. списанный/проданный/на др. складе) и засчитаем с восстановлением на склад сессии.</p>
         <div id="invManualHit"></div>
       </div>` : ''}
       <div class="tbl-wrap"><table class="tbl">
@@ -8113,7 +8172,7 @@ async function invManualAdd(sessionId) {
     const r = await invcApi('?action=inv-lookup-tail', { method: 'POST', body: JSON.stringify({ sessionId, tail: raw }) });
     const matches = r.matches || [];
     if (!matches.length) {
-      if (hit) hit.innerHTML = `<p class="muted" style="margin:6px 0 0;color:var(--red)">На этом складе нет экземпляра в наличии с кодом, оканчивающимся на «${esc(raw)}». Проверьте цифры.</p>`;
+      if (hit) hit.innerHTML = `<p class="muted" style="margin:6px 0 0;color:var(--red)">В системе нет ни одного экземпляра с кодом, оканчивающимся на «${esc(raw)}» (ни в наличии, ни списанного, ни проданного). Проверьте цифры.</p>`;
       invStartPoll(sessionId);
       return;
     }
@@ -8121,11 +8180,17 @@ async function invManualAdd(sessionId) {
       await invManualScan(sessionId, matches[0].barcode);
       return;
     }
-    // Несколько совпадений — показываем выбор
-    const opts = matches.map(m => `<button class="inv-manual-pick" data-bc="${esc(m.barcode)}">
+    // Несколько совпадений — показываем выбор с подсказкой, что произойдёт при засчёте
+    const wmap = { revived: '↺ восстановится', moved: '⇄ переместится', matched: '✓ в наличии' };
+    const opts = matches.map(m => {
+      const src = m.warehouse ? `склад: ${esc(m.warehouse)}` : '';
+      const st = m.status === 'sold' ? 'продан' : m.status === 'written_off' ? 'списан' : 'в наличии';
+      const will = wmap[m.willDo] || '';
+      return `<button class="inv-manual-pick" data-bc="${esc(m.barcode)}">
       <span class="mono">${esc(m.barcode)}</span>
-      <span class="muted">${esc(m.name || 'без имени')}${m.size ? ' · разм. ' + esc(m.size) : ''}</span>
-    </button>`).join('');
+      <span class="muted">${esc(m.name || 'без имени')}${m.size ? ' · разм. ' + esc(m.size) : ''} · ${st}${src ? ' · ' + src : ''} · ${will}</span>
+    </button>`;
+    }).join('');
     if (hit) hit.innerHTML = `<div class="inv-manual-list"><p class="muted" style="margin:0 0 6px">Найдено ${matches.length} — выберите нужный:</p>${opts}</div>`;
     hit.querySelectorAll('.inv-manual-pick').forEach(b => {
       b.onclick = () => invManualScan(sessionId, b.getAttribute('data-bc'));
@@ -8145,15 +8210,18 @@ async function invManualScan(sessionId, barcode) {
   invStopPoll();
   try {
     const r = await invcApi('?action=inv-scan', { method: 'POST', body: JSON.stringify({ sessionId, barcode, scannedBy: 'ручной ввод' }) });
-    const map = { matched: '✓ Учтён', duplicate: '⟳ Дубль (уже был)', unknown: '? Не в базе', revived: '↺ Вернётся', moved: '⇄ С др. склада' };
+    const map = { matched: '✓ Учтён', duplicate: '⟳ Дубль (уже был)', unknown: '? Не в базе', revived: '↺ Восстановлен на склад', moved: '⇄ Перемещён на склад' };
     const lbl = map[r.result] || r.result || '';
     const nm = r.card && r.card.name ? ` · ${esc(r.card.name)}${r.card.size ? ' (разм. ' + esc(r.card.size) + ')' : ''}` : '';
-    if (inp) inp.value = '';
-    // Перерисуем сессию (обновит ленту/счётчики и возобновит поллинг), затем покажем результат
-    await invOpenSession(sessionId);
-    const hit2 = $('invManualHit');
-    if (hit2) hit2.innerHTML = `<p style="margin:6px 0 0;color:var(--green,#16a34a)">${esc(barcode)}: ${esc(lbl)}${nm}</p>`;
-    const inp2 = $('invManualInp'); if (inp2) inp2.focus();
+    // v1.2.53 — ТИХО обновляем ленту/счётчики без пересоздания формы — страница не «перезагружается»
+    try {
+      const sr = await invcApi('?action=inv-session&sessionId=' + encodeURIComponent(sessionId) + '&scanLimit=60');
+      invPatchSession(sessionId, sr);
+    } catch (_) { /* патч не критичен — лента обновится поллингом */ }
+    // Очищаем поле и возвращаем фокус — готовы к следующему вводу
+    if (inp) { inp.value = ''; inp.focus(); }
+    if (hit) hit.innerHTML = `<p style="margin:6px 0 0;color:var(--green,#16a34a)">${esc(barcode)}: ${esc(lbl)}${nm}</p>`;
+    invStartPoll(sessionId);
   } catch (e) {
     if (hit) hit.innerHTML = `<p class="muted" style="margin:6px 0 0;color:var(--red)">Не удалось засчитать: ${esc(e.message)}</p>`;
     invStartPoll(sessionId);

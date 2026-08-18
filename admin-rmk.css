@@ -1386,3 +1386,8 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
 .inv-manual-pick{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:9px 12px;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;text-align:left;transition:border-color .15s,background .15s}
 .inv-manual-pick:hover{border-color:var(--g3);background:var(--g1,#f0f5f2)}
 .inv-manual-pick .mono{font-family:ui-monospace,monospace;font-weight:600}
+
+/* v1.2.54 — баннер промежуточного акта «Вернуться к сканированию» */
+.inv-resume-note{display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap;margin:10px 0 14px;padding:12px 14px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px;font-size:13px;line-height:1.5;color:#1e3a5f}
+.inv-resume-note>div{flex:1;min-width:260px}
+.inv-resume-note button{white-space:nowrap;flex-shrink:0}

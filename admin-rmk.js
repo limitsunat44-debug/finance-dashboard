@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.53';
+const RMK_VERSION = '1.2.54';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.54', date: '18.08.2026', title: 'Промежуточный акт: можно применить безопасные изменения и вернуться к сканированию',
+    items: [
+      'В экране акта появилась кнопка «↩ Вернуться к сканированию»: можно рассчитать промежуточный акт на любом проценте, применить безопасные изменения и вернуться к живой ленте, продолжив ту же сессию.',
+      'Отсканированное не дублируется: акт считается по факту (COUNT in_stock), а действия идемпотентны — повторное применение не создаёт ни числовых, ни поэкземплярных дублей.',
+      'Новый backend-action inv-resume возвращает сессию из review в active (только для незакрытых сессий; applied/done/cancelled не оживляются).',
+      'Списание недостач (Шаг 2) по-прежнему закрывает сессию — выполняйте его только после 100% сканирования.',
+    ],
+  },
   {
     v: '1.2.53', date: '18.08.2026', title: 'Ручной ввод: поиск по всей базе + цифры не пропадают, страница не перезагружается',
     items: [
@@ -8273,6 +8282,12 @@ function invRenderAct(act) {
   abox.innerHTML = `
     <div class="card card-pad">
       <div class="card-h-row"><h3>📋 Акт расхождений</h3></div>
+      <div class="inv-resume-note">
+        <div>
+          <b>Промежуточный акт.</b> Если ревизия ещё не закончена — примените только <b>Шаг 1 (безопасные изменения)</b>, потом вернитесь к сканированию и продолжайте. Отсканированное не дублируется: при следующем расчёте уже учтённые экземпляры попадут в «Совпало». <b>Списание недостач (Шаг 2) делайте только в конце</b> — оно закрывает сессию.
+        </div>
+        <button class="btn btn-primary" id="invResume">↩ Вернуться к сканированию</button>
+      </div>
       <div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>Категория</th><th class="r">Кол-во</th><th class="r">Сумма</th><th>Действие</th></tr></thead>
         <tbody>
@@ -8315,7 +8330,7 @@ function invRenderAct(act) {
       const reviveIds = reviveList.map(x => x.id).filter(Boolean);
       const moveIds = moveList.map(x => x.id).filter(Boolean);
       const rr = await invcApi('?action=inv-apply-safe', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId, reviveIds, moveIds, appliedBy: state.user || 'admin' }) });
-      alert(`Готово: возвращено ${rr.revived}, перемещено ${rr.moved}.`);
+      alert(`Готово: возвращено ${rr.revived}, перемещено ${rr.moved}.\n\nЕсли ревизия не закончена — нажмите «Вернуться к сканированию» и продолжайте. Списание недостач — только в конце.`);
       invComputeAct(act.sessionId);
     } catch (e) { alert('Ошибка: ' + e.message); bSafe.disabled = false; bSafe.textContent = 'Применить безопасные изменения'; }
   };
@@ -8332,6 +8347,16 @@ function invRenderAct(act) {
       alert(`Списано: ${rr.written} экз.`);
       invState.act = null; renderInventory(true);
     } catch (e) { alert('Ошибка: ' + e.message); bWo.disabled = false; bWo.textContent = `Списать недостачи (${fmtInt(s.missing.count)})`; }
+  };
+
+  const bResume = $('invResume');
+  if (bResume) bResume.onclick = async () => {
+    bResume.disabled = true; bResume.textContent = 'Возвращаю…';
+    try {
+      await invcApi('?action=inv-resume', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId }) });
+      invState.act = null;
+      invOpenSession(act.sessionId); // сессия снова active — живая лента и ручной ввод доступны
+    } catch (e) { alert('Ошибка: ' + e.message); bResume.disabled = false; bResume.textContent = '↩ Вернуться к сканированию'; }
   };
 
   const bRev = $('invRevert');

@@ -11198,6 +11198,8 @@ function posFloor10(x) {
 // Из-за округления фактическая скидка получается чуть больше 5% — это ожидаемо.
 function posLineNet(l) {
     const gross = l.price * l.qty;
+    // Услуга: цена фиксирована, НИКАКИЕ скидки не действуют (ни 5%, ни по карте).
+    if (posLineIsService(l)) return Math.max(0, gross);
     // Пронатор: фиксированная цена 30 с. без какой-либо скидки.
     if (l.pronation) return Math.max(0, gross);
     if ((l.discountPct || 0) > 0) {
@@ -11237,6 +11239,11 @@ function posCartHasNoStock() {
     return POS.cart.some(posLineNoStock);
 }
 
+// Услуга (диагностика/пронация/ремонт): без штрихкода/остатка, НИКАКИЕ скидки не действуют.
+function posLineIsService(l) {
+    return !!l && ((l.kind === 'service') || !!l.isService);
+}
+
 // Скидка на чек = клиентская карта (10%) + ручные 5%, ограничено 100%
 function posCartDiscPct() {
     const client = POS.client ? (Number(POS.client.discount_pct) || 0) : 0;
@@ -11244,10 +11251,16 @@ function posCartDiscPct() {
 }
 
 function posTotals() {
-    let gross = 0, lineNet = 0;
-    POS.cart.forEach(l => { gross += l.price * l.qty; lineNet += posLineNet(l); });
+    let gross = 0, discNet = 0, noDiscNet = 0;
+    // Скидка чека (карта + ручные 5%) НЕ распространяется на услуги и пронатор (фикс-цена).
+    POS.cart.forEach(l => {
+        gross += l.price * l.qty;
+        const net = posLineNet(l);
+        if (posLineIsService(l) || l.pronation) noDiscNet += net;
+        else discNet += net;
+    });
     const cartPct = posCartDiscPct();
-    const grand = Math.round(lineNet * (1 - cartPct / 100));
+    const grand = Math.round(discNet * (1 - cartPct / 100)) + Math.round(noDiscNet);
     const disc = Math.round(gross) - grand;
     return { gross: Math.round(gross), grand, disc, cartPct };
 }
@@ -11957,9 +11970,10 @@ async function posConfirmSale() {
             warehouseC1Ref: l.warehouseC1Ref || posShopWh(),
             // ВАЖНО: отправляем ФАКТИЧЕСКИй % скидки (после округления вниз до 10),
             // чтобы net в 1С совпадал с тем, что видел кассир (а не номинальные 5%).
-            qty: l.qty, price: l.price, discountPct: (l.discountPct ? posLineDiscInfo(l).pct : 0),
+            qty: l.qty, price: l.price, discountPct: ((l.discountPct && !posLineIsService(l)) ? posLineDiscInfo(l).pct : 0),
             uniqueBarcode: l.uniqueBarcode, barcode: l.barcode, name: l.name,
             pronation: !!l.pronation,   // пронатор: фикс 30 с., скидка не размазывается
+            isService: posLineIsService(l),   // услуга: фикс-цена, скидка на чек не размазывается
             // все отсканированные экземплярные штрихкоды (для экземплярного товара = каждый помечается отдельно)
             uniqueBarcodes: (l.uniqueBarcode && Array.isArray(l.scans)) ? l.scans.slice() : null,
         }));
@@ -11968,6 +11982,7 @@ async function posConfirmSale() {
         if (cartPct > 0) {
             items.forEach(it => {
                 if (it.pronation) return;   // пронатор — фикс 30 с., скидка на чек не применяется
+                if (it.isService) return;   // услуга — фикс-цена, НИКАКИЕ скидки (ни 5%, ни по карте)
                 const combined = 1 - (1 - (it.discountPct || 0) / 100) * (1 - cartPct / 100);
                 it.discountPct = Math.round(combined * 10000) / 100; // до 2 знаков
             });
@@ -11981,6 +11996,8 @@ async function posConfirmSale() {
             shiftId: sh.id,
             warehouseC1Ref: posShopWh(),
             discountCardC1Ref: (POS.client && POS.client.c1_ref) || (POS.doctor && POS.doctor.c1_ref) || null,
+            // EAN дисконтной карты клиента — нужен для начисления баллов в кабинете orto.cards
+            discountCardCode: (POS.client && POS.client.card_code) || null,
             // ВРАЧ (ВР) — отдельно от клиента, для учёта продаж/бонусов по врачам
             doctorC1Ref: (POS.doctor && POS.doctor.c1_ref) || null,
             doctorCode: (POS.doctor && POS.doctor.card_code) || null,
@@ -12011,7 +12028,7 @@ async function posConfirmSale() {
         document.getElementById('posReceiptModal').style.display = 'none';
         const num = r.data.docNumber || '';
         const posted = r.data.posted;
-        pmobCaptureSale({ docNumber: num, posted: posted, queued: false });
+        pmobCaptureSale({ docNumber: num, posted: posted, queued: false, bonus: r.data.bonus || null });
         posResetSale();
         posUpdateConnUI();
         const hint = document.getElementById('posScanHint');
@@ -12432,6 +12449,7 @@ function pmobApply() {
         }
         if (!POS.mobScreen) POS.mobScreen = 'cart';
         pmobShow(POS.mobScreen);
+        if (POS.shift) { try { pmobLoadMySales(); } catch (_) {} }   // бонус: блок «Мои продажи»
     } else {
         const scan = pmobEl('pmobScreenScan');
         if (scan) scan.style.display = 'none';
@@ -12462,16 +12480,18 @@ const PMOB_SCREENS = {
     more: 'pmobScreenMore',
     card: 'pmobScreenCard',
     doctor: 'pmobScreenDoctor',
+    service: 'pmobScreenService',
     search: 'pmobScreenSearch',
     history: 'pmobScreenHistory',
     return: 'pmobScreenReturn',
     retitem: 'pmobScreenRetItem',
     retdone: 'pmobScreenRetDone',
     saledone: 'pmobScreenSaleDone',
+    earnings: 'pmobScreenEarnings',
 };
 const PMOB_NAV_OF = {
-    cart: 'cart', card: 'cart', doctor: 'cart', pay: 'pay', more: 'more', search: 'more', history: 'more',
-    return: 'return', retitem: 'return', retdone: 'return', saledone: 'cart',
+    cart: 'cart', card: 'cart', doctor: 'cart', service: 'cart', pay: 'pay', more: 'more', search: 'more', history: 'more',
+    return: 'return', retitem: 'return', retdone: 'return', saledone: 'cart', earnings: 'more',
 };
 
 function pmobShow(screen) {
@@ -12566,9 +12586,10 @@ function pmobRenderLines() {
         const warn = l.warning || (oos ? 'Не числится на складе этой кассы' : '');
         const isGift = !!l.isGift;
         const isPron = !!l.pronation;
+        const isSvc = (l.kind === 'service') || !!l.isService;
         const isSup = posIsSupinator(l);
-        // У пронатора скидка не действует — кнопку 5% прячем
-        const hasDisc = !isGift && !isPron && (l.discountPct || 0) >= 5;
+        // У пронатора и услуги скидка позиции не действует — кнопку 5% прячем
+        const hasDisc = !isGift && !isPron && !isSvc && (l.discountPct || 0) >= 5;
         const di = posLineDiscInfo(l);
         // Фактический % скидки (после округления вниз): 1 знак, без лишнего .0
         const realPct = di.pct % 1 === 0 ? String(Math.round(di.pct)) : di.pct.toFixed(1);
@@ -12583,7 +12604,7 @@ function pmobRenderLines() {
               ${warn ? `<div class="pmob-line-warn">⚠️ ${posEsc(warn)}</div>` : ''}
               ${isGift
                 ? `<div class="pmob-line-gift" style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:6px;background:#dcfce7;color:#166534;font-size:12px;font-weight:700;">🎁 подарок · 0 с.</div>`
-                : (isPron ? '' : `<button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
+                : ((isPron || isSvc) ? '' : `<button type="button" class="pmob-line-disc${hasDisc ? ' on' : ''}"
                       title="Скидка 5% на эту позицию (с округлением вниз до 10)">${hasDisc ? '−5%' : '5%'}</button>`)
               + `${hasDisc ? `<div class="pmob-line-discinfo">Скидка: −${pmobMoney(di.amount)} · ${realPct}%</div>` : ''}`}
               ${isSup ? `<button type="button" class="pmob-line-pron${isPron ? ' on' : ''}" title="Продать как пронатор по 30 с.">${isPron ? '✅ Пронатор 30 с. · отмена' : '🔁 Пронатор — 30 с.'}</button>` : ''}
@@ -12591,10 +12612,16 @@ function pmobRenderLines() {
             <div class="pmob-line-right">
               <div class="pmob-line-price">${pmobMoney(di.net)}</div>
               ${(hasDisc || isGift) ? `<div class="pmob-line-old">${pmobMoney(di.gross)}</div>` : ''}
-              <div class="pmob-line-qty">${l.qty} шт.</div>
+              ${isSvc
+                ? `<div class="pmob-line-qtybox"><button type="button" class="pmob-qty-btn" data-svc-dec aria-label="Уменьшить">−</button><span class="pmob-qty-val">${l.qty}</span><button type="button" class="pmob-qty-btn" data-svc-inc aria-label="Увеличить">+</button></div>`
+                : `<div class="pmob-line-qty">${l.qty} шт.</div>`}
             </div>
             <button type="button" class="pmob-line-rm" aria-label="Удалить позицию">×</button>`;
         row.querySelector('.pmob-line-rm').addEventListener('click', () => posRemoveLine(l.key));
+        const svcDec = row.querySelector('[data-svc-dec]');
+        if (svcDec) svcDec.addEventListener('click', () => pmobServiceQty(l.key, -1));
+        const svcInc = row.querySelector('[data-svc-inc]');
+        if (svcInc) svcInc.addEventListener('click', () => pmobServiceQty(l.key, +1));
         const discBtn = row.querySelector('.pmob-line-disc');
         if (discBtn) discBtn.addEventListener('click', () => pmobToggleLineDisc(l.key));
         const pronBtn = row.querySelector('.pmob-line-pron');
@@ -12628,6 +12655,124 @@ function pmobToggleLineDisc(key) {
     l.discountPct = (l.discountPct || 0) >= 5 ? 0 : 5;
     POS.activeKey = key;
     posRenderCart();   // общая перерисовка: ПК-корзина + итоги + мобильный список
+}
+
+// ============================================================================
+//  УСЛУГИ (диагностика / пронация / ремонт) — v1.2.67
+//  Услуга добавляется в чек как обычная позиция, НО без штрихкода и остатка
+//  (kind:'service'). Бэкенд при проведении пропускает списание экземпляров
+//  для позиций без uniqueBarcode/barcode (marked.skipped), а сумма услуги входит
+//  в итог чека как обычный price×qty. Количество можно увеличивать.
+// ============================================================================
+const POS_SERVICES = [
+    { code: 'diag_stop', name: 'Диагностика стоп', desc: 'Фиксированная стоимость', icon: '🦶', price: 20, fixed: true },
+    { code: 'pronation', name: 'Пронация', desc: 'Цена вводится вручную', icon: '🔁', price: null, fixed: false },
+    { code: 'repair', name: 'Ремонтные работы', desc: 'Цена вводится вручную', icon: '🛠️', price: null, fixed: false },
+];
+
+// Открыть экран выбора услуги.
+function pmobOpenService() {
+    POS._svcPending = null;
+    pmobShow('service');
+    pmobRenderServiceList();
+}
+
+// Рендер списка услуг.
+function pmobRenderServiceList() {
+    const box = pmobEl('pmobSvcList');
+    if (!box) return;
+    box.innerHTML = '';
+    POS_SERVICES.forEach(s => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pmob-svc-item';
+        btn.innerHTML = `
+            <span class="pmob-svc-ico">${s.icon}</span>
+            <span class="pmob-svc-txt"><b>${posEsc(s.name)}</b><i>${posEsc(s.desc)}</i></span>
+            <span class="pmob-svc-price">${s.fixed ? pmobMoney(s.price) : '→'}</span>`;
+        btn.addEventListener('click', () => {
+            if (s.fixed) {
+                posAddService(s, s.price);
+                pmobShow('cart');
+            } else {
+                pmobShowServicePrice(s);
+            }
+        });
+        box.appendChild(btn);
+    });
+    if (POS._svcPending) pmobShowServicePrice(POS._svcPending);
+}
+
+// Показать поле ручного ввода цены для услуги без фикс. цены.
+function pmobShowServicePrice(s) {
+    POS._svcPending = s;
+    const box = pmobEl('pmobSvcList');
+    if (!box) return;
+    let panel = pmobEl('pmobSvcPriceBox');
+    if (panel) panel.remove();
+    panel = document.createElement('div');
+    panel.className = 'pmob-svc-price-box';
+    panel.id = 'pmobSvcPriceBox';
+    panel.innerHTML = `
+        <span class="pmob-svc-price-lbl">${posEsc(s.name)} — введите стоимость (с.)</span>
+        <div class="pmob-svc-price-row">
+          <input type="number" inputmode="decimal" min="0" step="1" class="pmob-svc-price-input" id="pmobSvcPriceInput" placeholder="напр.: 50" autocomplete="off">
+          <button type="button" class="pmob-svc-price-ok" id="pmobSvcPriceOk" disabled>Добавить</button>
+        </div>`;
+    box.parentNode.insertBefore(panel, box.nextSibling);
+    const inp = pmobEl('pmobSvcPriceInput');
+    const ok = pmobEl('pmobSvcPriceOk');
+    const validate = () => { const v = Number(inp.value); ok.disabled = !(v > 0); };
+    const commit = () => {
+        const v = Number(inp.value);
+        if (!(v > 0)) return;
+        posAddService(s, v);
+        POS._svcPending = null;
+        pmobShow('cart');
+    };
+    inp.addEventListener('input', validate);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); });
+    ok.addEventListener('click', commit);
+    try { inp.focus(); } catch (_) {}
+}
+
+// Добавить услугу в чек. Фикс. услуга (диагностика) группируется (qty++).
+function posAddService(s, price) {
+    const p = Math.max(0, Math.round(Number(price) || 0));
+    if (s.fixed) {
+        const line = POS.cart.find(l => l.kind === 'service' && l.serviceCode === s.code && l.price === p);
+        if (line) {
+            line.qty += 1;
+            line.scans = new Array(line.qty).fill(null);
+            POS.activeKey = line.key;
+            posRenderCart();
+            return;
+        }
+    }
+    const line = {
+        key: 'L' + (POS.keySeq++), kind: 'service',
+        serviceCode: s.code,
+        barcode: null, uniqueBarcode: null, scans: [],
+        name: s.name, sizeLabel: null,
+        price: p, qty: 1, discountPct: 0,
+        productC1Ref: null, charC1Ref: null, variantId: null,
+        warehouseC1Ref: posShopWh() || null,
+        warning: null, availableAtShop: null, status: null,
+        isService: true,
+    };
+    POS.cart.push(line);
+    POS.activeKey = line.key;
+    posRenderCart();
+}
+
+// Изменить количество услуги (+/-) в чеке.
+function pmobServiceQty(key, delta) {
+    const l = POS.cart.find(x => x.key === key);
+    if (!l || l.kind !== 'service') return;
+    l.qty = Math.max(1, (l.qty || 1) + delta);
+    l.scans = new Array(l.qty).fill(null);
+    POS.activeKey = key;
+    posRenderCart();
 }
 
 // ── Дисконтная карта покупателя ──
@@ -12697,6 +12842,35 @@ function pmobRemoveClient() {
     posRenderCart();
     pmobShow('cart');
     pmobToast('Скидка по карте снята', '');
+}
+
+// Ручной ввод последних 6 цифр дисконтной карты (когда камера не считывает).
+// Проходит ту же логику pmobCardHandleCode → posLookupClient (backend резолвит карту по ILIKE «%цифры»).
+async function pmobCardManualApply() {
+    const inp = pmobEl('pmobCardManualInp');
+    const raw = inp ? String(inp.value || '') : '';
+    const digits = raw.replace(/\D+/g, '');
+    if (digits.length < 4) {
+        pmobToast('Мало цифр', 'Введите последние 6 цифр карты (минимум 4).', true);
+        if (inp) { try { inp.focus(); } catch (_) {} }
+        return;
+    }
+    const btn = pmobEl('pmobCardManualBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Поиск…'; }
+    try {
+        // Предварительно ловим неоднозначность (несколько карт с таким окончанием) —
+        // чтобы дать кассиру понятный совет ввести больше цифр.
+        try {
+            const r = await posApi(`?action=card&type=client&q=${encodeURIComponent(digits)}`, { method: 'GET' });
+            if (r && r.data && r.data.ambiguous) {
+                pmobToast('Несколько карт', 'Найдено ' + (r.data.ambiguousCount || 'несколько') + ' карт. Введите больше цифр.', true);
+                return;
+            }
+        } catch (_) { /* если предпроверка упала — просто идём обычным путём */ }
+        await pmobCardHandleCode(digits);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
+    }
 }
 
 // ── Врач (ВР) — привязка к чеку по номеру или имени/фамилии ──
@@ -12808,6 +12982,12 @@ async function pmobOpenScan(mode) {
             ? 'Наведите камеру на штрихкод дисконтной карты'
             : 'Наведите камеру на штрихкод товара';
     }
+    // Ручной ввод последних 6 цифр карты — только в режиме дисконтной карты
+    // (запасной вариант, если камера не считывает штрихкод).
+    const man = pmobEl('pmobCardManual');
+    if (man) man.style.display = POS.mobCamMode === 'card' ? '' : 'none';
+    const manInp = pmobEl('pmobCardManualInp');
+    if (manInp) manInp.value = '';
     await pmobStartCamera();
 }
 
@@ -13135,6 +13315,7 @@ function pmobCaptureSale(meta) {
         docNumber: (meta && meta.docNumber) || '',
         posted: !!(meta && meta.posted),
         queued: !!(meta && meta.queued),
+        bonus: (meta && meta.bonus) || null,
         when: new Date(),
         grand: t.grand,
         kassaName: sh.kassa_name || (POS.chosen && POS.chosen.name) || '',
@@ -13186,7 +13367,162 @@ function pmobSaleDone() {
     }
     const rc = pmobEl('pmobSaleReceipt');
     if (rc) { rc.style.display = 'none'; rc.innerHTML = ''; }
+    // БОНУС: показать «Ваш бонус» и подтянуть «Заработано сегодня».
+    const bonusCard = pmobEl('pmobSaleBonus');
+    const bAmt = s.bonus && Number(s.bonus.amount);
+    if (bonusCard) {
+        if (bAmt && bAmt > 0) {
+            bonusCard.style.display = '';
+            const v = pmobEl('pmobSaleBonusVal'); if (v) v.textContent = '+' + pmobMoney(bAmt);
+            const td = pmobEl('pmobSaleBonusToday'); if (td) td.textContent = '…';
+            pmobRefreshBonusToday();
+        } else {
+            bonusCard.style.display = 'none';
+        }
+    }
     pmobShow('saledone');
+}
+
+// seller_ref текущей смены (продавец). Касса видит только своё.
+function pmobSellerRef() {
+    const sh = POS.shift || {};
+    return sh.seller_c1_ref || sh.seller_ref || sh.sellerC1Ref || '';
+}
+
+// Подтянуть «Заработано сегодня» (и обновить блок «Мои продажи»).
+async function pmobRefreshBonusToday() {
+    const sref = pmobSellerRef();
+    if (!sref) return;
+    try {
+        const r = await posApi('?action=bonus-my-summary&sellerRef=' + encodeURIComponent(sref), { method: 'GET' });
+        if (r.ok && r.data && r.data.ok) {
+            POS._bonusSummary = r.data;
+            const td = pmobEl('pmobSaleBonusToday');
+            if (td) td.textContent = pmobMoney((r.data.today && r.data.today.bonus) || 0);
+            pmobRenderMySales(r.data);
+        }
+    } catch (_) {}
+}
+
+// Блок «Мои продажи сегодня» на главном экране.
+function pmobRenderMySales(sum) {
+    if (!sum || !sum.today) return;
+    const t = sum.today;
+    const set = (id, v) => { const el = pmobEl(id); if (el) el.textContent = v; };
+    // Сумму продаж кассиру не показываем — только бонус и кол-во чеков.
+    set('pmobMySalesBonus', pmobMoney(t.bonus || 0));
+    set('pmobMySalesCnt', String(t.receipts || 0));
+}
+
+// Загрузить сводку для блока «Мои продажи» (при входе на главный/открытии смены).
+async function pmobLoadMySales() {
+    const sref = pmobSellerRef();
+    if (!sref) return;
+    try {
+        const r = await posApi('?action=bonus-my-summary&sellerRef=' + encodeURIComponent(sref), { method: 'GET' });
+        if (r.ok && r.data && r.data.ok) { POS._bonusSummary = r.data; pmobRenderMySales(r.data); }
+    } catch (_) {}
+}
+
+// ── Экран «Мой заработок» ────────────────────────────────────
+async function pmobOpenEarnings() {
+    const dayWrap = pmobEl('pmobEarnDay'); if (dayWrap) dayWrap.style.display = 'none';
+    pmobShow('earnings');
+    await pmobLoadEarnings();
+}
+
+async function pmobLoadEarnings() {
+    const sref = pmobSellerRef();
+    const setB = (id, v) => { const el = pmobEl(id); if (el) el.textContent = v; };
+    if (!sref) { setB('pmobEarnRateVal', '—'); return; }
+    // Скрываем суммы продаж от кассира — показываем только бонусы и статистику чеков.
+    try {
+        const rs = await posApi('?action=bonus-my-summary&sellerRef=' + encodeURIComponent(sref), { method: 'GET' });
+        if (rs.ok && rs.data && rs.data.ok) {
+            const d = rs.data;
+            setB('pmobEarnRateVal', (Number(d.ratePct) || 0).toString().replace('.', ',') + '%');
+            setB('pmobEarnTodayBonus', pmobMoney((d.today && d.today.bonus) || 0));
+            setB('pmobEarnYestBonus', pmobMoney((d.yesterday && d.yesterday.bonus) || 0));
+            setB('pmobEarnMonthBonus', pmobMoney((d.month && d.month.bonus) || 0));
+            // Статистика чеков (без сумм продаж)
+            setB('pmobEarnChkToday', (d.today && d.today.receipts) || 0);
+            setB('pmobEarnChkMonth', (d.month && d.month.receipts) || 0);
+            setB('pmobEarnRetMonth', (d.month && d.month.retReceipts) || 0);
+            pmobEarnThanksUpdate((d.month && d.month.receipts) || 0);
+        }
+    } catch (e) {
+        setB('pmobEarnChkToday', '—'); setB('pmobEarnChkMonth', '—'); setB('pmobEarnRetMonth', '—');
+    }
+}
+
+// Персональная благодарность в зависимости от активности за месяц.
+function pmobEarnThanksUpdate(monthReceipts) {
+    const el = pmobEl('pmobEarnThanksTxt');
+    if (!el) return;
+    const n = Number(monthReceipts) || 0;
+    let msg;
+    if (n <= 0) msg = 'Новый месяц — новые возможности! Каждый чек приближает вас к цели. Удачных продаж! 🚀';
+    else if (n < 30) msg = 'Спасибо за вашу работу! Хорошее начало — продолжайте в том же духе. 💪';
+    else if (n < 100) msg = 'Отличная работа! Уже ' + n + ' чеков за месяц — вы большой молодец. Так держать! 🙌';
+    else msg = 'Вы супер! ' + n + ' чеков за месяц — это выдающийся результат. Огромное спасибо за ваш труд! 🏆';
+    el.textContent = msg;
+}
+
+function pmobEarnDayLabel(ymd) {
+    try {
+        const [y, m, d] = ymd.split('-');
+        return d + '.' + m + '.' + y;
+    } catch (_) { return ymd; }
+}
+
+function pmobRenderEarnHist(days) {
+    const hist = pmobEl('pmobEarnHist');
+    if (!hist) return;
+    if (!days.length) { hist.innerHTML = '<div class="pmob-earn-empty">Начислений пока нет</div>'; return; }
+    let html = '<div class="pmob-earn-hrow pmob-earn-hhead">' +
+        '<span>Дата</span><span>Продажи</span><span>Чеков</span><span>Бонус</span></div>';
+    for (const d of days) {
+        html += '<button type="button" class="pmob-earn-hrow pmob-earn-hitem" data-day="' + posEsc(d.day) + '">' +
+            '<span>' + pmobEarnDayLabel(d.day) + '</span>' +
+            '<span>' + pmobMoney(d.sales || 0) + '</span>' +
+            '<span>' + (d.receipts || 0) + '</span>' +
+            '<span class="pmob-earn-hbonus">' + pmobMoney(d.bonus || 0) + '</span>' +
+            '</button>';
+    }
+    hist.innerHTML = html;
+    hist.querySelectorAll('.pmob-earn-hitem').forEach(btn => {
+        btn.addEventListener('click', () => pmobOpenEarnDay(btn.dataset.day));
+    });
+}
+
+async function pmobOpenEarnDay(ymd) {
+    const sref = pmobSellerRef();
+    if (!sref || !ymd) return;
+    const wrap = pmobEl('pmobEarnDay');
+    const list = pmobEl('pmobEarnDayList');
+    const title = pmobEl('pmobEarnDayTitle');
+    if (title) title.textContent = pmobEarnDayLabel(ymd);
+    if (wrap) wrap.style.display = '';
+    if (list) list.innerHTML = '<div class="pmob-earn-empty">Загрузка…</div>';
+    try {
+        const r = await posApi('?action=bonus-my-day&sellerRef=' + encodeURIComponent(sref) + '&date=' + encodeURIComponent(ymd), { method: 'GET' });
+        if (!r.ok || !r.data || !r.data.ok) { if (list) list.innerHTML = '<div class="pmob-earn-empty">Не удалось загрузить</div>'; return; }
+        const recs = r.data.receipts || [];
+        if (!recs.length) { if (list) list.innerHTML = '<div class="pmob-earn-empty">Чеков нет</div>'; return; }
+        let html = '';
+        for (const rc of recs) {
+            const isRet = rc.opType === 'return';
+            const tm = rc.at ? new Date(rc.at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) : '';
+            html += '<div class="pmob-earn-drow' + (isRet ? ' pmob-earn-drow-ret' : '') + '">' +
+                '<span class="pmob-earn-dnum">' + (isRet ? '↩️ ' : '') + posEsc(rc.number || rc.ref || '—') + '<i>' + tm + '</i></span>' +
+                '<span class="pmob-earn-dbase">' + pmobMoney(rc.base || 0) + '</span>' +
+                '<span class="pmob-earn-dbonus">' + (rc.bonus > 0 ? '+' : '') + pmobMoney(rc.bonus || 0) + '</span>' +
+                '</div>';
+        }
+        if (list) list.innerHTML = html;
+    } catch (e) {
+        if (list) list.innerHTML = '<div class="pmob-earn-empty">Ошибка</div>';
+    }
 }
 
 // Чек продажи из снимка POS._lastSale.
@@ -13851,7 +14187,7 @@ async function pmobSearchPick(p, opts) {
     try {
         const { data, error } = await ortobotClient
             .from('product_variants')
-            .select('id,warehouse_id,size_label,stock')
+            .select('id,warehouse_id,size_label,stock,price,price_old')
             .eq('product_id', p.id);
         if (error) throw error;
         variants = data || [];
@@ -13887,10 +14223,20 @@ async function pmobSearchPick(p, opts) {
             }
         } catch (_) { /* оставляем то, что успели набрать; счётчик подстрахован stock */ }
     }
+    // ---- 220-коды = количество, а не дубли ----
+    // Товары без индивидуальных штрихкодов (код на 220) лежат в stock_units одной
+    // строкой, но реальное количество = число сканов этого кода в последней
+    // ПРИМЕНЁННОЙ инвентаризации склада. Подтягиваем это количество и передаём
+    // в рендер, чтобы касса совпадала с десктоп-матрицей и панелью кодов.
+    // Никакие экземпляры НЕ создаются — только отображение.
+    let qty220 = {};   // ключ `${warehouse_id}|${unique_barcode}` -> число сканов
+    try {
+        qty220 = await pmobLoad220Qty(units);
+    } catch (_) { qty220 = {}; }
     if (opts.refresh) POS.mobWhById = null;   // при ручном обновлении — свежий справочник складов
     const whMap = await pmobLoadWh();
     const stamp = new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    res.innerHTML = pmobSearchResultHtml(p, variants, units, whMap) +
+    res.innerHTML = pmobSearchResultHtml(p, variants, units, whMap, qty220) +
         `<div class="pmob-search-stamp">Обновлено в ${posEsc(stamp)}</div>`;
     res.querySelectorAll('.pmob-size-tbl [data-codes]').forEach(el => {
         el.addEventListener('click', () => {
@@ -13901,30 +14247,86 @@ async function pmobSearchPick(p, opts) {
     if (refreshBtn) refreshBtn.classList.remove('spinning');
 }
 
-function pmobSearchResultHtml(p, variants, units, whMap) {
+// Подтягивает число сканов для 220-кодов из последней применённой
+// инвентаризации каждого склада. Возвращает карту `${wh}|${barcode}` -> N.
+// 220-код = весовой/штучный товар: один код = количество, не дубли.
+async function pmobLoad220Qty(units) {
+    const out = {};
+    const u220 = (units || []).filter(u => /^220/.test(String(u.unique_barcode || '')));
+    if (!u220.length) return out;
+    const whs = [...new Set(u220.map(u => u.warehouse_id).filter(Boolean))];
+    // Последняя applied-сессия по каждому складу.
+    const sessByWh = {};
+    for (const w of whs) {
+        try {
+            const { data } = await ortobotClient
+                .from('inventory_sessions')
+                .select('id,finished_at')
+                .eq('warehouse_id', w).eq('status', 'applied')
+                .order('finished_at', { ascending: false, nullsFirst: false })
+                .limit(1);
+            if (data && data[0]) sessByWh[w] = data[0].id;
+        } catch (_) { /* нет инвентаризации — склад останется на обычном счёте */ }
+    }
+    // Число сканов каждого 220-кода в своей applied-сессии.
+    for (const u of u220) {
+        const w = u.warehouse_id;
+        const sid = sessByWh[w];
+        if (!sid) continue;
+        const bc = String(u.unique_barcode || '');
+        const key = w + '|' + bc;
+        if (out[key] != null) continue;   // уже считали
+        try {
+            const { count } = await ortobotClient
+                .from('inventory_scans')
+                .select('id', { count: 'exact', head: true })
+                .eq('session_id', sid).eq('barcode', bc);
+            if (typeof count === 'number' && count > 0) out[key] = count;
+        } catch (_) { /* оставляем обычный счёт */ }
+    }
+    return out;
+}
+
+function pmobSearchResultHtml(p, variants, units, whMap, qty220) {
+    const q220 = qty220 || {};
     const clean = s => String(s == null ? '' : s).replace(/^размер:\s*/i, '').trim();
     const byWh = {};
     variants.forEach(v => {
         const w = v.warehouse_id || '—';
         if (!byWh[w]) byWh[w] = {};
         const sz = clean(v.size_label) || '—';
-        if (!byWh[w][sz]) byWh[w][sz] = { stock: 0, codes: [] };
+        if (!byWh[w][sz]) byWh[w][sz] = { stock: 0, codes: [], extra220: 0, price: null, priceOld: null };
         byWh[w][sz].stock += Number(v.stock) || 0;
+        // Цена размера: берём первую заданную (варианты одного размера/склада — одна цена).
+        const pr = (v.price != null && v.price !== '') ? Number(v.price) : null;
+        if (pr != null && byWh[w][sz].price == null) byWh[w][sz].price = pr;
+        const prOld = (v.price_old != null && v.price_old !== '') ? Number(v.price_old) : null;
+        if (prOld != null && byWh[w][sz].priceOld == null) byWh[w][sz].priceOld = prOld;
     });
     units.forEach(u => {
         const w = u.warehouse_id || '—';
         if (!byWh[w]) byWh[w] = {};
         const sz = clean(u.size_label) || '—';
-        if (!byWh[w][sz]) byWh[w][sz] = { stock: 0, codes: [] };
-        byWh[w][sz].codes.push(String(u.unique_barcode || '').slice(-4));
+        if (!byWh[w][sz]) byWh[w][sz] = { stock: 0, codes: [], extra220: 0, price: null, priceOld: null };
+        const bc = String(u.unique_barcode || '');
+        const n = q220[w + '|' + bc];
+        if (/^220/.test(bc) && n && n > 1) {
+            // 220-код: показываем код N раз (по числу сканов инвентаризации).
+            for (let i = 0; i < n; i++) byWh[w][sz].codes.push(bc.slice(-4));
+            byWh[w][sz].extra220 += (n - 1);   // доп. штуки сверх самого экземпляра
+        } else {
+            byWh[w][sz].codes.push(bc.slice(-4));
+        }
     });
 
     let html = `<div class="pmob-prod-head"><div class="pmob-prod-name">${posEsc(p.name_ru || '—')}</div>` +
         `<div class="pmob-prod-art">Артикул ${posEsc(pmobArt(p))}</div></div>`;
 
-    // Кол-во по размеру = max(остаток из product_variants.stock, число подтянутых штрихкодов).
-    // stock консистентен с числом экземпляров и не зависит от лимита выборки units.
-    const qtyOfSize = sz => Math.max(Number(sz.stock) || 0, sz.codes.length || 0);
+    // Кол-во по размеру = число ФАКТИЧЕСКИХ экземпляров in_stock (чипов), как на десктопе.
+    // Числовое product_variants.stock НЕ используется — оно может отставать от факта
+    // (источник истины — stock_units). Для 220-товаров codes уже размножены по числу
+    // сканов инвентаризации, поэтому codes.length сразу даёт верное физическое количество.
+    const qtyOfSize = sz => (sz.codes.length || 0);
     const whIds = Object.keys(byWh).filter(w => {
         const wh = whMap[w];
         if (wh && wh.is_active === false) return false;
@@ -13955,9 +14357,21 @@ function pmobSearchResultHtml(p, variants, units, whMap) {
             const qty = qtyOf(s);
             const miss = qty > codes.length
                 ? `<span class="pmob-code-more">…ещё ${qty - codes.length}</span>` : '';
+            // Плашка цены размера — отдельной строкой сверху, чтобы не терялась среди множества штрихкодов.
+            const pr = sizes[s].price;
+            const prOld = sizes[s].priceOld;
+            const priceBar = (pr != null && pr > 0)
+                ? `<div class="pmob-code-price"><span class="pmob-code-price-lbl">Цена</span>` +
+                  `<span class="pmob-code-price-val">${posMoney(pr)} с.</span>` +
+                  ((prOld != null && prOld > pr) ? `<span class="pmob-code-price-old">${posMoney(prOld)} с.</span>` : '') +
+                  `</div>`
+                : `<div class="pmob-code-price pmob-code-price-none"><span class="pmob-code-price-lbl">Цена</span><span class="pmob-code-price-val">не задана</span></div>`;
             html += `<div class="pmob-codes" data-codes-for="${wi}-${i}" style="display:none;">` +
+                priceBar +
+                `<div class="pmob-codes-list">` +
                 `<span class="pmob-code-cap">Размер ${posEsc(s)}:</span>` +
                 codes.map(c => `<span class="pmob-code-chip">№ ${posEsc(c)}</span>`).join('') + miss +
+                `</div>` +
                 `</div>`;
         });
         html += `<div class="pmob-codes-hint">Нажмите на размер, чтобы увидеть штрихкоды экземпляров.</div></div>`;
@@ -13977,7 +14391,7 @@ function pmobOpenSearch() {
 // ─────────────── ИСТОРИЯ ПРОДАЖ (мобильный кассир) ───────────────
 // Показывает ПОЗИЦИИ (проданные товары) за выбранный день по своей кассе.
 // Без фото: товар, код (посл.4), размер, время, способ оплаты.
-POS.hist = POS.hist || { date: null, items: [], filter: '', loading: false };
+POS.hist = POS.hist || { date: null, items: [], receipts: [], filter: '', loading: false };
 
 // бейдж способа оплаты → css-класс + иконка
 function pmobPayBadge(pay) {
@@ -14041,22 +14455,45 @@ async function pmobHistLoad(iso) {
     const rev = pmobEl('pmobHistRevenue'); if (rev) rev.textContent = '0 с.';
     try {
         const kassa = pmobHistKassa();
-        const qp = `?action=sales-items&from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}` +
+        // action=history — чеки с позициями (items) и разбивкой оплаты (payments)
+        const qp = `?action=history&from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}` +
             (kassa ? `&kassa=${encodeURIComponent(kassa)}` : '');
         const r = await posApi(qp, { method: 'GET' });
         if (!r.ok || !r.data || !r.data.ok) throw new Error((r.data && r.data.error) || `HTTP ${r.status}`);
-        POS.hist.items = Array.isArray(r.data.items) ? r.data.items : [];
-        POS.hist.count = Number(r.data.count) || 0;
-        POS.hist.revenue = Number(r.data.revenue) || 0;
+        const receipts = Array.isArray(r.data.receipts) ? r.data.receipts : [];
+        POS.hist.receipts = receipts;
+        // KPI: штук товаров = сумма qty по всем позициям; выручка = сумма чеков
+        let units = 0;
+        for (const c of receipts) for (const it of (c.items || [])) units += (Number(it.qty) || 1);
+        POS.hist.count = units;
+        POS.hist.revenue = Number(r.data.total) || receipts.reduce((s, c) => s + (Number(c.total) || 0), 0);
     } catch (e) {
         console.error('pmobHistLoad:', e);
-        POS.hist.items = [];
+        POS.hist.receipts = [];
         POS.hist.count = 0; POS.hist.revenue = 0;
         if (list) list.innerHTML = `<div class="pmob-empty">Не удалось загрузить историю. ${posEsc(e.message || '')}</div>`;
     } finally {
         POS.hist.loading = false;
     }
     pmobHistRender();
+}
+
+// иконка вида оплаты по key/label
+function pmobPayIco(p) {
+    const k = String((p && (p.key || p.label)) || '').toLowerCase();
+    if (k.includes('cash') || k.includes('нал')) return '💵';
+    if (k.includes('qr')) return '📱';
+    if (k.includes('wlt') || k.includes('кош')) return '👛';
+    return '💳';
+}
+function pmobPayCls(p) {
+    const k = String((p && (p.key || p.label)) || '').toLowerCase();
+    if (k.includes('cash') || k.includes('нал')) return 'cash';
+    if (k.includes('alif') && k.includes('qr')) return 'alifqr';
+    if (k.includes('alif')) return 'alifwlt';
+    if (k.includes('dc') && k.includes('qr')) return 'dcqr';
+    if (k.includes('wlt') || k.includes('кош') || k.includes('dc')) return 'dcwlt';
+    return 'other';
 }
 
 function pmobHistRender() {
@@ -14067,54 +14504,84 @@ function pmobHistRender() {
     const rev = pmobEl('pmobHistRevenue'); if (rev) rev.textContent = posMoney(POS.hist.revenue || 0) + ' с.';
 
     const q = (POS.hist.filter || '').trim().toLowerCase();
-    let rows = POS.hist.items || [];
+    let receipts = POS.hist.receipts || [];
     if (q) {
-        rows = rows.filter(it =>
-            String(it.name || '').toLowerCase().includes(q) ||
-            String(it.code4 || '').toLowerCase().includes(q) ||
-            String(it.barcode || '').toLowerCase().includes(q)
+        // оставляем чеки, где есть позиция под запрос (имя/код/штрихкод) либо номер чека
+        receipts = receipts.filter(c =>
+            String(c.number || '').toLowerCase().includes(q) ||
+            (c.items || []).some(it =>
+                String(it.name || '').toLowerCase().includes(q) ||
+                String(it.barcode || '').toLowerCase().includes(q) ||
+                String(it.barcodeTail || '').toLowerCase().includes(q)
+            )
         );
     }
-    if (!rows.length) {
+    if (!receipts.length) {
         list.innerHTML = q
             ? '<div class="pmob-empty">Ничего не найдено по запросу.</div>'
             : '<div class="pmob-empty">Нет продаж за этот день.</div>';
         return;
     }
-    const head =
-        '<div class="pmob-hist-thead">' +
-        '<span class="c-name">Товар</span>' +
-        '<span class="c-code">Код</span>' +
-        '<span class="c-size">Разм.</span>' +
-        '<span class="c-time">Время</span>' +
-        '<span class="c-pay">Оплата</span>' +
-        '</div>';
-    const body = rows.map((it, i) => {
-        const size = pmobHistSize(it.size);
-        const time = repDushTime(it.date, false);
-        const sum = posMoney(it.sum || 0) + ' с.';
-        return '<div class="pmob-hist-item">' +
-            `<div class="pmob-hist-row" data-histidx="${i}">` +
-            `<span class="c-name">${posEsc(it.name || 'Товар')}</span>` +
-            `<span class="c-code">${posEsc(it.code4 || '—')}</span>` +
-            `<span class="c-size">${posEsc(size)}</span>` +
-            `<span class="c-time">${posEsc(time)}</span>` +
-            `<span class="c-pay">${pmobPayBadge(it.pay)}</span>` +
-            '</div>' +
-            '<div class="pmob-hist-det">' +
-            `<div class="pmob-hist-det-name">${posEsc(it.name || 'Товар')}</div>` +
-            '<div class="pmob-hist-det-row">' +
-            `<span class="pmob-hist-det-cap">Сумма продажи</span>` +
-            `<span class="pmob-hist-det-sum">${posEsc(sum)}</span>` +
-            '</div></div>' +
-            '</div>';
-    }).join('');
-    list.innerHTML = head + body;
-    list.querySelectorAll('.pmob-hist-row').forEach(r => {
-        r.addEventListener('click', () => {
-            r.closest('.pmob-hist-item').classList.toggle('open');
+    list.innerHTML = receipts.map((c, i) => pmobReceiptHTML(c, i)).join('');
+    list.querySelectorAll('.pmob-rc-head').forEach(h => {
+        h.addEventListener('click', () => {
+            h.closest('.pmob-rc').classList.toggle('open');
         });
     });
+}
+
+// Карточка чека (кассир): шапка + раскрывающийся состав
+function pmobReceiptHTML(c, i) {
+    const pays = Array.isArray(c.payments) ? c.payments.filter(p => (Number(p.amount) || 0) > 0) : [];
+    const mixed = c.payMode === 'mixed' || pays.length > 1;
+    const time = repDushTime(c.date, false);
+    // чип оплаты в шапке
+    let payChip;
+    if (mixed) {
+        payChip = `<span class="pmob-pay-badge pmob-pay-mixed">⚖️ Смешанная</span>`;
+    } else if (pays.length === 1) {
+        const p = pays[0];
+        payChip = `<span class="pmob-pay-badge pmob-pay-${pmobPayCls(p)}">${pmobPayIco(p)} ${posEsc(p.label || p.key || 'Оплата')}</span>`;
+    } else {
+        payChip = '';
+    }
+    const items = Array.isArray(c.items) ? c.items : [];
+    const cnt = (c.itemsCount != null ? c.itemsCount : items.length);
+    // состав
+    const itemsHTML = items.length ? items.map(it => {
+        const tail = it.barcodeTail || (it.barcode ? String(it.barcode).slice(-4) : '');
+        const qty = Number(it.qty) || 1;
+        const price = Number(it.price) || 0;
+        const size = pmobHistSize(it.sizeLabel || it.size);
+        const tags = [];
+        if (size && size !== '—') tags.push(`<span class="pmob-rc-tag size">📏 ${posEsc(size)}</span>`);
+        if (tail) tags.push(`<span class="pmob-rc-tag">…${posEsc(tail)}</span>`);
+        const qtyLine = qty > 1 ? `${qty} × ${posMoney(price)} с.` : `${posMoney(price)} с.`;
+        return '<div class="pmob-rc-item">' +
+            `<div class="pmob-rc-iname">${posEsc(it.name || 'Товар')}</div>` +
+            `<div class="pmob-rc-isum">${posMoney(it.sum || 0)} с.</div>` +
+            `<div class="pmob-rc-imeta">${tags.join('')}</div>` +
+            `<div class="pmob-rc-iqty">${qtyLine}</div>` +
+            '</div>';
+    }).join('') : '<div class="pmob-empty" style="padding:12px;">Состав чека недоступен</div>';
+    // разбивка оплаты внутри
+    const paySumHTML = pays.length ? '<div class="pmob-rc-pays"><span class="lbl">Оплата:</span>' +
+        pays.map(p => `<span class="pmob-pay-badge pmob-pay-${pmobPayCls(p)}">${pmobPayIco(p)} ${posEsc(p.label || p.key || '')} <b>${posMoney(p.amount)} с.</b></span>`).join('') +
+        '</div>' : '';
+    return '<div class="pmob-rc">' +
+        '<div class="pmob-rc-head">' +
+        '<span class="pmob-rc-chev">▶</span>' +
+        '<span class="pmob-rc-main">' +
+        `<span class="pmob-rc-num">${posEsc(c.number || 'Чек')}</span>` +
+        `<span class="pmob-rc-meta"><span>🕒 ${posEsc(time)}</span><span>📦 ${cnt} тов.</span></span>` +
+        '</span>' +
+        '<span class="pmob-rc-right">' +
+        `<span class="pmob-rc-total">${posMoney(c.total || 0)} <small>с.</small></span>` +
+        `<span class="pmob-rc-pay">${payChip}</span>` +
+        '</span>' +
+        '</div>' +
+        '<div class="pmob-rc-body">' + itemsHTML + paySumHTML + '</div>' +
+        '</div>';
 }
 
 function pmobBindEvents() {
@@ -14125,6 +14592,14 @@ function pmobBindEvents() {
     on('pmobReceiptBar', () => pmobShow('cart'));
     on('pmobScanBack', pmobCloseScan);
     on('pmobScanCancel', pmobCloseScan);
+    // Ручной ввод последних 6 цифр дисконтной карты (если камера не считывает)
+    on('pmobCardManualBtn', pmobCardManualApply);
+    (function () {
+        const mi = pmobEl('pmobCardManualInp');
+        if (mi) mi.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); pmobCardManualApply(); }
+        });
+    })();
     on('pmobCamFlip', pmobFlipCamera);
     on('pmobTorch', pmobToggleTorch);
     on('pmobToPay', pmobOpenPay);
@@ -14142,6 +14617,12 @@ function pmobBindEvents() {
     on('pmobMoreSearch', pmobOpenSearch);
     on('pmobMoreHistory', pmobOpenHistory);
     on('pmobHistBack', () => pmobShow('more'));
+    // БОНУС: Мой заработок + блок «Мои продажи»
+    on('pmobMoreEarnings', pmobOpenEarnings);
+    on('pmobMySales', pmobOpenEarnings);
+    on('pmobEarnBack', () => pmobShow('more'));
+    on('pmobEarnRefresh', pmobLoadEarnings);
+    on('pmobEarnDayBack', () => { const w = pmobEl('pmobEarnDay'); if (w) w.style.display = 'none'; });
     const histDate = pmobEl('pmobHistDate');
     if (histDate) histDate.addEventListener('change', () => {
         const v = histDate.value || repToday();
@@ -14182,6 +14663,10 @@ function pmobBindEvents() {
     });
     const di = pmobEl('pmobDocInput');
     if (di) di.addEventListener('input', pmobDocInputHandler);
+
+    // услуги (диагностика / пронация / ремонт)
+    on('pmobServiceMain', pmobOpenService);
+    on('pmobSvcBack', () => pmobShow('cart'));
 
     // возврат: 4 экрана
     on('pmobRetBack', () => pmobShow('cart'));
@@ -14431,23 +14916,92 @@ async function posHistFetch() {
       <div class="rep-kpi"><div class="rep-kpi-label">Чеков</div><div class="rep-kpi-val">${list.length}</div></div>
       <div class="rep-kpi accent"><div class="rep-kpi-label">Сумма продаж</div><div class="rep-kpi-val">${repFmtNum(r.data.total)} <span style="font-size:14px;">сом</span></div></div>`;
     if (!list.length) {
-      if (rows) rows.innerHTML = `<tr><td class="rep-empty" colspan="5">За выбранный период чеков нет</td></tr>`;
+      if (rows) rows.innerHTML = `<div class="rep-empty">За выбранный период чеков нет</div>`;
     } else if (rows) {
-      rows.innerHTML = list.map(x => `
-        <tr>
-          <td class="rep-td l">${posEsc(x.number)}</td>
-          <td class="rep-td l muted">${repDushTime(x.date, false)}</td>
-          <td class="rep-td l">${posEsc(x.shop)}</td>
-          <td class="rep-td l">${posEsc(x.seller)}</td>
-          <td class="rep-td">${repFmtNum(x.total)}</td>
-        </tr>`).join('');
+      rows.innerHTML = list.map((x, i) => posHistCardHTML(x, i)).join('');
     }
     if (status) status.textContent = `${from === to ? from : from + ' — ' + to} · ${list.length} чек(ов)`;
   } catch (e) {
     repErr('posHistError', 'Ошибка: ' + (e.message || e));
     if (status) status.textContent = '';
-    if (rows) rows.innerHTML = `<tr><td class="rep-empty" colspan="5">Не удалось загрузить</td></tr>`;
+    if (rows) rows.innerHTML = `<div class="rep-empty">Не удалось загрузить</div>`;
   }
+}
+
+// Иконка вида оплаты по ключу/лейблу
+function posPayIco(p) {
+  const k = String((p && (p.key || p.label)) || '').toLowerCase();
+  if (k.includes('cash') || k.includes('нал')) return '💵';
+  if (k.includes('qr')) return '📱';
+  if (k.includes('wlt') || k.includes('кош')) return '👛';
+  return '💳';
+}
+function posIsCashPay(p) {
+  const k = String((p && (p.key || p.label)) || '').toLowerCase();
+  return k.includes('cash') || k.includes('нал');
+}
+
+// Карточка одного чека в истории продаж (раскрывается по клику)
+function posHistCardHTML(x, i) {
+  const pays = Array.isArray(x.payments) ? x.payments.filter(p => (Number(p.amount) || 0) > 0) : [];
+  const mixed = x.payMode === 'mixed' || pays.length > 1;
+  // чипы оплаты в шапке
+  let payChips;
+  if (mixed) {
+    payChips = `<span class="sh-pay sh-mixed">⚖️ Смешанная</span>`;
+  } else if (pays.length === 1) {
+    const p = pays[0];
+    payChips = `<span class="sh-pay ${posIsCashPay(p) ? 'cash' : ''}">${posPayIco(p)} ${posEsc(p.label || p.key || 'Оплата')}</span>`;
+  } else {
+    payChips = '';
+  }
+  // товары
+  const items = Array.isArray(x.items) ? x.items : [];
+  const itemsHTML = items.length ? items.map(it => {
+    const tail = it.barcodeTail || (it.barcode ? String(it.barcode).slice(-4) : '');
+    const qty = Number(it.qty) || 1;
+    const price = Number(it.price) || 0;
+    const tags = [];
+    if (it.sizeLabel) tags.push(`<span class="sh-tag size">📏 ${posEsc(it.sizeLabel)}</span>`);
+    if (tail) tags.push(`<span class="sh-tag">…${posEsc(tail)}</span>`);
+    const qtyLine = qty > 1 ? `${qty} × ${repFmtNum(price)} с.` : `${repFmtNum(price)} с.`;
+    return `
+      <div class="sh-item">
+        <div class="sh-iname">${posEsc(it.name || 'Товар')}</div>
+        <div class="sh-isum">${repFmtNum(it.sum)} с.</div>
+        <div class="sh-imeta">${tags.join('')}</div>
+        <div class="sh-iqty">${qtyLine}</div>
+      </div>`;
+  }).join('') : `<div class="rep-empty" style="padding:12px;">Состав чека недоступен</div>`;
+  // разбивка оплаты внутри (показываем всегда когда есть виды)
+  const paySumHTML = pays.length ? `
+    <div class="sh-paysum">
+      <span class="lbl">Оплата:</span>
+      ${pays.map(p => `<span class="sh-pay ${posIsCashPay(p) ? 'cash' : ''}">${posPayIco(p)} ${posEsc(p.label || p.key || '')} <span class="amt">${repFmtNum(p.amount)} с.</span></span>`).join('')}
+    </div>` : '';
+  const cnt = (x.itemsCount != null ? x.itemsCount : items.length);
+  return `
+    <div class="sh-card" id="shCard${i}">
+      <button type="button" class="sh-head" onclick="posHistToggle(${i})">
+        <span class="sh-chev">▶</span>
+        <span class="sh-hmain">
+          <span class="sh-hnum">${posEsc(x.number)}</span>
+          <span class="sh-hmeta"><span>🕒 ${repDushTime(x.date, false)}</span><span>🏪 <b>${posEsc(x.shop)}</b></span><span>👤 ${posEsc(x.seller)}</span><span>📦 ${cnt} тов.</span></span>
+        </span>
+        <span class="sh-hright">
+          <span class="sh-htotal">${repFmtNum(x.total)} <span class="cur">с.</span></span>
+          <span class="sh-pays">${payChips}</span>
+        </span>
+      </button>
+      <div class="sh-body">
+        ${itemsHTML}
+        ${paySumHTML}
+      </div>
+    </div>`;
+}
+function posHistToggle(i) {
+  const c = document.getElementById('shCard' + i);
+  if (c) c.classList.toggle('open');
 }
 
 // ─────────────── ОТЧЁТЫ И КАССЫ (админ) ───────────────

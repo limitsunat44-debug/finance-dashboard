@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260818-135712">
+    <link rel="stylesheet" href="style.css?v=20260907-0025">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -257,6 +257,38 @@
     .rep-badge.on{background:#dcfce7;color:#15803d;}
     .rep-badge.off{background:#fee2e2;color:#b91c1c;}
     .rep-empty{padding:22px;text-align:center;color:var(--pos-muted);font-size:14px;}
+
+    /* ─── История продаж: список раскрывающихся чеков ─── */
+    .sh-list{display:flex;flex-direction:column;gap:10px;}
+    .sh-card{background:var(--pos-white);border:1px solid var(--pos-line);border-radius:16px;box-shadow:0 4px 14px rgba(31,58,60,.05);overflow:hidden;}
+    .sh-head{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px 12px;width:100%;padding:14px 16px;background:none;border:0;cursor:pointer;text-align:left;font:inherit;color:inherit;}
+    .sh-head:hover{background:var(--pos-cream-2);}
+    .sh-chev{flex:0 0 auto;width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;color:var(--pos-teal-2);font-size:13px;transition:transform .18s;}
+    .sh-card.open .sh-chev{transform:rotate(90deg);}
+    .sh-hmain{min-width:0;display:flex;flex-direction:column;gap:3px;}
+    .sh-hnum{font-weight:800;color:var(--pos-teal-2);font-size:15px;font-variant-numeric:tabular-nums;}
+    .sh-hmeta{font-size:12.5px;color:var(--pos-muted);display:flex;flex-wrap:wrap;gap:4px 10px;}
+    .sh-hmeta b{color:var(--pos-ink);font-weight:600;}
+    .sh-hright{text-align:right;flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:5px;}
+    .sh-htotal{font-weight:800;color:var(--pos-orange-2);font-size:16px;font-variant-numeric:tabular-nums;white-space:nowrap;}
+    .sh-htotal .cur{font-size:12px;color:var(--pos-muted);font-weight:700;}
+    .sh-pays{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;}
+    .sh-pay{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;padding:3px 8px;border-radius:9px;background:#eef7f7;color:var(--pos-teal-2);border:1px solid #d4ebec;white-space:nowrap;}
+    .sh-pay.cash{background:#dcfce7;color:#15803d;border-color:#b6ebc5;}
+    .sh-pay .amt{font-variant-numeric:tabular-nums;}
+    .sh-mixed{background:#fff3e6;color:var(--pos-orange-2);border-color:#ffd9b0;}
+    .sh-body{display:none;border-top:1px dashed var(--pos-line);padding:6px 10px 12px;background:var(--pos-cream-2);}
+    .sh-card.open .sh-body{display:block;}
+    .sh-item{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:start;padding:10px 6px;border-bottom:1px solid var(--pos-line);}
+    .sh-item:last-child{border-bottom:0;}
+    .sh-iname{font-size:14px;font-weight:600;color:var(--pos-ink);line-height:1.35;overflow-wrap:anywhere;word-break:break-word;white-space:normal;}
+    .sh-isum{font-size:14px;font-weight:800;color:var(--pos-ink);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;}
+    .sh-imeta{grid-column:1/2;font-size:12px;color:var(--pos-muted);display:flex;flex-wrap:wrap;gap:3px 10px;margin-top:2px;}
+    .sh-tag{display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:700;padding:2px 7px;border-radius:8px;background:var(--pos-white);border:1px solid var(--pos-line);color:var(--pos-teal-2);}
+    .sh-tag.size{color:var(--pos-orange-2);border-color:#ffd9b0;background:#fff7f0;}
+    .sh-iqty{grid-column:2/3;font-size:12px;color:var(--pos-muted);text-align:right;margin-top:2px;font-variant-numeric:tabular-nums;}
+    .sh-paysum{display:flex;flex-wrap:wrap;gap:6px;padding:10px 6px 2px;margin-top:2px;border-top:1px dashed var(--pos-line);}
+    .sh-paysum .lbl{font-size:12px;font-weight:700;color:var(--pos-muted);align-self:center;margin-right:2px;}
     .rep-section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:6px 2px 12px;}
     .rep-section-head h3{margin:0;font-size:17px;font-weight:800;color:var(--pos-teal-2);}
     .rep-actions{display:flex;gap:8px;flex-wrap:wrap;}
@@ -2272,6 +2304,24 @@
                   </span>
                 </div>
 
+                <!-- МОИ ПРОДАЖИ (бонус кассира) -->
+                <button type="button" class="pmob-mysales" id="pmobMySales">
+                  <div class="pmob-mysales-head">
+                    <span class="pmob-mysales-title">Мои продажи сегодня</span>
+                    <span class="pmob-chev">›</span>
+                  </div>
+                  <div class="pmob-mysales-grid pmob-mysales-grid-2">
+                    <div class="pmob-mysales-cell">
+                      <span class="pmob-mysales-k">Мой бонус</span>
+                      <span class="pmob-mysales-v pmob-mysales-bonus" id="pmobMySalesBonus">—</span>
+                    </div>
+                    <div class="pmob-mysales-cell">
+                      <span class="pmob-mysales-k">Чеков</span>
+                      <span class="pmob-mysales-v" id="pmobMySalesCnt">—</span>
+                    </div>
+                  </div>
+                </button>
+
                 <button type="button" class="pmob-scan-card" id="pmobScanCard">
                   <span class="pmob-scan-ico" aria-hidden="true">
                     <svg viewBox="0 0 24 24" width="38" height="38" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 7.5V5.6A1.6 1.6 0 0 1 4.6 4H7"/><path d="M17 4h2.4A1.6 1.6 0 0 1 21 5.6v1.9"/><path d="M21 16.5v1.9A1.6 1.6 0 0 1 19.4 20H17"/><path d="M7 20H4.6A1.6 1.6 0 0 1 3 18.4v-1.9"/><path d="M7 8.6v6.8M10.2 8.6v6.8M13.4 8.6v6.8M17 8.6v6.8"/></svg>
@@ -2332,7 +2382,29 @@
                   <button type="button" class="pmob-client-rm" id="pmobDoctorRm" style="display:none;" aria-label="Убрать врача">×</button>
                 </div>
 
+                <div class="pmob-client-bar" id="pmobServiceBar">
+                  <button type="button" class="pmob-client-main" id="pmobServiceMain">
+                    <span class="pmob-client-ico">🩹</span>
+                    <span class="pmob-client-txt">
+                      <b>Диагностика / услуги</b>
+                      <i>Добавить услугу в чек</i>
+                    </span>
+                    <span class="pmob-chev">›</span>
+                  </button>
+                </div>
+
                 <p class="pmob-hint" id="pmobHint"></p>
+              </section>
+
+              <!-- ЭКРАН: выбор услуги (диагностика / пронация / ремонт) -->
+              <section class="pmob-screen" id="pmobScreenService" style="display:none;">
+                <div class="pmob-sub-head">
+                  <button type="button" class="pmob-back" id="pmobSvcBack" aria-label="Назад">←</button>
+                  <div class="pmob-sub-title">Услуги</div>
+                  <span class="pmob-head-gap"></span>
+                </div>
+                <div class="pmob-svc-list" id="pmobSvcList"></div>
+                <p class="pmob-hint">Услуга добавляется в чек как обычная позиция — без штрихкода и остатка. Количество можно менять в чеке.</p>
               </section>
 
               <!-- ЭКРАН 4: оплата -->
@@ -2379,6 +2451,7 @@
                   <button type="button" class="pmob-menu-item" id="pmobMoreReturn"><span class="pmob-menu-ico">↩️</span><span class="pmob-menu-txt">Возврат товара</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreSearch"><span class="pmob-menu-ico">🔎</span><span class="pmob-menu-txt">Поиск товара</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreHistory"><span class="pmob-menu-ico">🧾</span><span class="pmob-menu-txt">История продаж</span><span class="pmob-chev">›</span></button>
+                  <button type="button" class="pmob-menu-item" id="pmobMoreEarnings"><span class="pmob-menu-ico">💰</span><span class="pmob-menu-txt">Мой заработок</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreDisc"><span class="pmob-menu-ico">％</span><span class="pmob-menu-txt">Скидка −5% на чек</span><span class="pmob-menu-state" id="pmobDiscState">выкл</span></button>
                   <button type="button" class="pmob-menu-item" id="pmobMoreDesktop"><span class="pmob-menu-ico">🖥️</span><span class="pmob-menu-txt">Классический вид</span><span class="pmob-chev">›</span></button>
                   <button type="button" class="pmob-menu-item pmob-menu-danger" id="pmobMoreCloseShift"><span class="pmob-menu-ico">⏻</span><span class="pmob-menu-txt">Закрыть смену</span><span class="pmob-chev">›</span></button>
@@ -2558,6 +2631,14 @@
                   <div class="pmob-done-cap">Продажа</div>
                   <div class="pmob-done-note" id="pmobSaleDoneNote" style="display:none;"></div>
                 </div>
+                <!-- БОНУС КАССИРА -->
+                <div class="pmob-bonus-card" id="pmobSaleBonus" style="display:none;">
+                  <div class="pmob-bonus-main">
+                    <span class="pmob-bonus-cap">Ваш бонус</span>
+                    <span class="pmob-bonus-val" id="pmobSaleBonusVal">+0,00 с.</span>
+                  </div>
+                  <div class="pmob-bonus-sub">Заработано сегодня: <b id="pmobSaleBonusToday">0,00 с.</b></div>
+                </div>
                 <div class="pmob-sale-info">
                   <div class="pmob-sale-info-row"><span class="pmob-sale-info-k">Номер чека</span><span class="pmob-sale-info-v" id="pmobSaleDonNum">—</span></div>
                   <div class="pmob-sale-info-row"><span class="pmob-sale-info-k">Дата и время</span><span class="pmob-sale-info-v" id="pmobSaleDoneDt">—</span></div>
@@ -2570,6 +2651,52 @@
                 </div>
                 <div class="pmob-rcpt" id="pmobSaleReceipt" style="display:none;"></div>
                 <button type="button" class="pmob-btn-green" id="pmobSaleNewBtn" style="margin-top:18px;">Новый чек</button>
+              </section>
+
+              <!-- ЭКРАН: Мой заработок (бонус кассира) -->
+              <section class="pmob-screen" id="pmobScreenEarnings" style="display:none;">
+                <div class="pmob-sub-head">
+                  <button type="button" class="pmob-back" id="pmobEarnBack" aria-label="Назад">←</button>
+                  <div class="pmob-sub-title">Мой заработок</div>
+                  <button type="button" class="pmob-refresh" id="pmobEarnRefresh" aria-label="Обновить" title="Обновить">↻</button>
+                </div>
+                <div class="pmob-earn-rate" id="pmobEarnRate">Ставка бонуса: <b id="pmobEarnRateVal">—</b></div>
+                <!-- Карточки Сегодня / Вчера / Месяц -->
+                <div class="pmob-earn-cards">
+                  <div class="pmob-earn-card">
+                    <div class="pmob-earn-card-cap">Сегодня</div>
+                    <div class="pmob-earn-card-bonus" id="pmobEarnTodayBonus">—</div>
+                  </div>
+                  <div class="pmob-earn-card">
+                    <div class="pmob-earn-card-cap">Вчера</div>
+                    <div class="pmob-earn-card-bonus" id="pmobEarnYestBonus">—</div>
+                  </div>
+                  <div class="pmob-earn-card pmob-earn-card-month">
+                    <div class="pmob-earn-card-cap">Текущий месяц</div>
+                    <div class="pmob-earn-card-bonus" id="pmobEarnMonthBonus">—</div>
+                  </div>
+                </div>
+                <!-- Статистика чеков -->
+                <div class="pmob-earn-stats-title">Статистика чеков</div>
+                <div class="pmob-earn-stats">
+                  <div class="pmob-earn-stat">
+                    <div class="pmob-earn-stat-v" id="pmobEarnChkToday">—</div>
+                    <div class="pmob-earn-stat-k">Чеков сегодня</div>
+                  </div>
+                  <div class="pmob-earn-stat">
+                    <div class="pmob-earn-stat-v" id="pmobEarnChkMonth">—</div>
+                    <div class="pmob-earn-stat-k">Чеков за месяц</div>
+                  </div>
+                  <div class="pmob-earn-stat pmob-earn-stat-ret">
+                    <div class="pmob-earn-stat-v" id="pmobEarnRetMonth">—</div>
+                    <div class="pmob-earn-stat-k">Возвратов за месяц</div>
+                  </div>
+                </div>
+                <!-- Благодарность -->
+                <div class="pmob-earn-thanks" id="pmobEarnThanks">
+                  <span class="pmob-earn-thanks-ico">💙</span>
+                  <div class="pmob-earn-thanks-txt" id="pmobEarnThanksTxt">Спасибо за вашу работу! Каждый чек — это ваш вклад в общий успех. Так держать! 🙌</div>
+                </div>
               </section>
 
               <!-- ЭКРАН: поиск товара (справочный, остатки по складам) -->
@@ -2668,6 +2795,14 @@
                   <div class="pmob-cam-frame" aria-hidden="true"><i class="c1"></i><i class="c2"></i><i class="c3"></i><i class="c4"></i></div>
                 </div>
                 <p class="pmob-cam-cap" id="pmobCamCap">Наведите камеру на штрихкод товара</p>
+                <!-- Ручной ввод последних 6 цифр дисконтной карты (если камера не считывает). Виден только в режиме карты. -->
+                <div class="pmob-cam-manual" id="pmobCardManual" style="display:none;">
+                  <div class="pmob-cam-manual-lbl">Камера не считывает? Введите последние 6 цифр карты</div>
+                  <div class="pmob-cam-manual-row">
+                    <input type="tel" inputmode="numeric" autocomplete="off" maxlength="12" class="pmob-cam-manual-inp" id="pmobCardManualInp" placeholder="Напр. 123456">
+                    <button type="button" class="pmob-cam-manual-btn" id="pmobCardManualBtn">Применить</button>
+                  </div>
+                </div>
                 <div class="pmob-cam-foot">
                   <button type="button" class="pmob-cam-cancel" id="pmobScanCancel">Отмена</button>
                   <button type="button" class="pmob-cam-flip" id="pmobCamFlip" aria-label="Сменить камеру">
@@ -2871,21 +3006,8 @@
 
             <div class="rep-kpis" id="posHistKpis"></div>
 
-            <div class="rep-table-wrap">
-              <table class="rep-table">
-                <thead>
-                  <tr>
-                    <th class="rep-th l">№ чека</th>
-                    <th class="rep-th l">Время</th>
-                    <th class="rep-th l">Магазин</th>
-                    <th class="rep-th l">Продавец</th>
-                    <th class="rep-th">Сумма, сом</th>
-                  </tr>
-                </thead>
-                <tbody id="posHistRows">
-                  <tr><td class="rep-empty" colspan="5">⬇️ Выберите период и нажмите «Показать»</td></tr>
-                </tbody>
-              </table>
+            <div id="posHistRows" class="sh-list">
+              <div class="rep-empty">⬇️ Выберите период и нажмите «Показать»</div>
             </div>
           </div>
         </section>
@@ -3141,7 +3263,7 @@
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>window.__APP_BUILD = '20260818-135712';</script>
-    <script src="app.js?v=20260818-135712"></script>
+    <script src="app.js?v=20260907-0025"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

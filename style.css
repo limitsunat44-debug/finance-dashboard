@@ -4117,6 +4117,27 @@ body.pmob-on { overflow: hidden; }
 .pmob-cam-frame .c3 { bottom: 0; left: 0; border-right: none; border-top: none; border-radius: 0 0 0 10px; }
 .pmob-cam-frame .c4 { bottom: 0; right: 0; border-left: none; border-top: none; border-radius: 0 0 10px 0; }
 .pmob-cam-cap { margin: 14px 18px 0; text-align: center; font-size: 14px; color: rgba(255, 255, 255, .85); line-height: 1.45; }
+/* Ручной ввод последних 6 цифр карты (бело-зелёная карточка, видна только в режиме карты) */
+.pmob-cam-manual {
+    margin: 14px 18px 0; padding: 14px 14px 15px; border-radius: 16px;
+    background: #ffffff; border: 1.5px solid #22c55e;
+    box-shadow: 0 6px 20px rgba(34, 197, 94, .28);
+}
+.pmob-cam-manual-lbl { font-size: 13px; font-weight: 700; color: #15803d; text-align: center; line-height: 1.4; margin-bottom: 10px; }
+.pmob-cam-manual-row { display: flex; align-items: stretch; gap: 8px; }
+.pmob-cam-manual-inp {
+    flex: 1 1 auto; min-width: 0; padding: 12px 14px; border-radius: 12px;
+    border: 1.5px solid #bbf7d0; background: #f0fdf4; color: #14532d;
+    font-size: 18px; font-weight: 700; letter-spacing: 2px; text-align: center;
+}
+.pmob-cam-manual-inp::placeholder { color: #86c9a0; font-weight: 500; letter-spacing: 1px; }
+.pmob-cam-manual-inp:focus { outline: none; border-color: #22c55e; background: #fff; box-shadow: 0 0 0 3px rgba(34, 197, 94, .18); }
+.pmob-cam-manual-btn {
+    flex: 0 0 auto; padding: 12px 20px; border: 0; border-radius: 12px;
+    background: linear-gradient(90deg, #16a34a, #22c55e); color: #fff;
+    font-size: 15px; font-weight: 800; cursor: pointer; white-space: nowrap;
+}
+.pmob-cam-manual-btn:disabled { opacity: .6; cursor: default; }
 .pmob-cam-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 0; }
 .pmob-cam-cancel {
     padding: 13px 26px; border: 1px solid rgba(255, 255, 255, .28); border-radius: 14px;
@@ -4446,6 +4467,49 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
 }
 .pmob-client-rm:active { color: var(--pm-red); }
 
+/* — экран выбора услуги — */
+.pmob-svc-list { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
+.pmob-svc-item {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 16px 16px; border: 1px solid var(--pm-line); border-radius: 16px;
+    background: #fff; cursor: pointer; text-align: left; color: var(--pm-ink);
+}
+.pmob-svc-item:active { border-color: #a7e3c4; background: #f2fcf6; }
+.pmob-svc-ico {
+    flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+    width: 42px; height: 42px; border-radius: 12px; background: #eef2f2; color: var(--pm-green); font-size: 20px;
+}
+.pmob-svc-txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.pmob-svc-txt b { font-size: 15px; font-weight: 700; }
+.pmob-svc-txt i { font-style: normal; font-size: 12.5px; color: var(--pm-muted); margin-top: 3px; }
+.pmob-svc-price { flex: 0 0 auto; font-size: 15px; font-weight: 800; color: var(--pm-green); }
+/* поле ручного ввода цены для услуги */
+.pmob-svc-price-box { margin-top: 14px; padding: 16px; border: 1px solid #a7e3c4; border-radius: 16px; background: #f7fdf9; }
+.pmob-svc-price-box.hidden { display: none; }
+.pmob-svc-price-lbl { display: block; font-size: 13px; font-weight: 700; color: #14532d; margin-bottom: 8px; }
+.pmob-svc-price-row { display: flex; gap: 10px; align-items: stretch; }
+.pmob-svc-price-input {
+    flex: 1; min-width: 0; padding: 14px 14px; font-size: 18px; font-weight: 700;
+    border: 1px solid var(--pm-line); border-radius: 12px; background: #fff; color: var(--pm-ink);
+}
+.pmob-svc-price-ok {
+    flex: 0 0 auto; padding: 0 20px; border: none; border-radius: 12px;
+    background: var(--pm-green); color: #fff; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.pmob-svc-price-ok:disabled { opacity: .5; cursor: default; }
+/* степпер количества услуги в строке чека */
+.pmob-line-qtybox { display: inline-flex; align-items: center; gap: 8px; margin-top: 2px; }
+.pmob-line-qtybox .pmob-qty-btn {
+    width: 30px; height: 30px; border: 1px solid var(--pm-line); border-radius: 9px;
+    background: #fff; color: var(--pm-ink); font-size: 19px; font-weight: 700; line-height: 1; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; padding: 0;
+}
+.pmob-line-qtybox .pmob-qty-btn:active { background: #f2fcf6; border-color: #a7e3c4; }
+.pmob-line-qtybox .pmob-qty-val {
+    min-width: 28px; min-height: 0; padding: 0; background: none; border: none;
+    font-size: 15px; font-weight: 800; text-align: center;
+}
+
 /* — экран «Скидка по карте применена» — */
 .pmob-card-box {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
@@ -4535,8 +4599,31 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
 .pmob-size-tbl .pmob-size-cap { text-align: left; font-weight: 700; color: var(--pm-muted); white-space: nowrap; }
 .pmob-size-tbl td.zero { color: #b9c6c6; font-weight: 600; }
 .pmob-size-tbl td[data-codes] { cursor: pointer; }
-.pmob-codes { margin-top: 9px; align-items: center; flex-wrap: wrap; gap: 6px; }
+.pmob-codes { margin-top: 9px; flex-direction: column; align-items: stretch; gap: 8px; }
+.pmob-codes-list { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .pmob-code-cap { font-size: 12px; font-weight: 700; color: var(--pm-muted); }
+/* Плашка цены размера — заметная, сверху, не теряется среди штрихкодов. */
+.pmob-code-price {
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px; border-radius: 10px;
+    background: rgba(22,163,74,.10); border: 1px solid rgba(22,163,74,.30);
+}
+.pmob-code-price-lbl {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+    color: var(--pm-green);
+}
+.pmob-code-price-val {
+    font-size: 18px; font-weight: 800; color: var(--pm-green);
+    font-variant-numeric: tabular-nums;
+}
+.pmob-code-price-old {
+    font-size: 13px; font-weight: 700; color: var(--pm-muted);
+    text-decoration: line-through; font-variant-numeric: tabular-nums;
+}
+.pmob-code-price-none { background: var(--pm-soft); border-color: var(--pm-line); }
+.pmob-code-price-none .pmob-code-price-lbl,
+.pmob-code-price-none .pmob-code-price-val { color: var(--pm-muted); font-weight: 700; }
+.pmob-code-price-none .pmob-code-price-val { font-size: 14px; }
 .pmob-codes-hint { margin-top: 9px; font-size: 12px; color: var(--pm-muted); }
 .pmob-code-chip {
     padding: 5px 9px; border-radius: 8px; background: var(--pm-soft);
@@ -4677,3 +4764,144 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
 .pmob-pay-dcwlt   { background: #e6f0fd; color: #1e63c7; }
 .pmob-pay-dcqr    { background: #e7f5f6; color: #0c6f77; }
 .pmob-pay-other   { background: #eef0f2; color: #5a6572; }
+.pmob-pay-mixed   { background: #fff3e6; color: #b4600d; }
+
+/* ─── История продаж кассира: раскрывающиеся чеки ─── */
+.pmob-hist-list { display: flex; flex-direction: column; gap: 10px; }
+.pmob-rc {
+    border: 1px solid var(--pm-line); border-radius: 14px; overflow: hidden;
+    background: #fff; box-shadow: 0 2px 8px rgba(20,50,45,.04);
+}
+.pmob-rc-head {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center;
+    gap: 8px 10px; padding: 12px; cursor: pointer;
+}
+.pmob-rc-head:active { background: var(--pm-soft); }
+.pmob-rc-chev {
+    width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+    color: #059669; font-size: 12px; transition: transform .18s; flex: 0 0 auto;
+}
+.pmob-rc.open .pmob-rc-chev { transform: rotate(90deg); }
+.pmob-rc.open .pmob-rc-head { background: #f2fcf6; }
+.pmob-rc-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.pmob-rc-num { font-weight: 800; color: #0c6f77; font-size: 14px; font-variant-numeric: tabular-nums; }
+.pmob-rc-meta { font-size: 12px; color: var(--pm-muted); display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.pmob-rc-right { text-align: right; flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.pmob-rc-total { font-weight: 800; color: #b4600d; font-size: 15px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmob-rc-total small { font-size: 11px; color: var(--pm-muted); font-weight: 700; }
+.pmob-rc-pay { display: flex; }
+.pmob-rc-body { display: none; border-top: 1px dashed var(--pm-line); padding: 4px 10px 10px; background: #fafdfb; }
+.pmob-rc.open .pmob-rc-body { display: block; }
+.pmob-rc-item {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: start;
+    padding: 10px 4px; border-bottom: 1px solid #eef3f1;
+}
+.pmob-rc-item:last-child { border-bottom: 0; }
+.pmob-rc-iname {
+    font-size: 14px; font-weight: 600; color: var(--pm-ink); line-height: 1.35;
+    overflow-wrap: anywhere; word-break: break-word; white-space: normal;
+}
+.pmob-rc-isum { font-size: 14px; font-weight: 800; color: var(--pm-ink); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pmob-rc-imeta { grid-column: 1 / 2; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.pmob-rc-iqty { grid-column: 2 / 3; font-size: 12px; color: var(--pm-muted); text-align: right; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.pmob-rc-tag {
+    display: inline-flex; align-items: center; gap: 3px; font-size: 11px; font-weight: 700;
+    padding: 2px 7px; border-radius: 8px; background: #fff; border: 1px solid var(--pm-line); color: #0c6f77;
+}
+.pmob-rc-tag.size { color: #b4600d; border-color: #ffd9b0; background: #fff7f0; }
+.pmob-rc-pays {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 10px 4px 2px; margin-top: 4px; border-top: 1px dashed var(--pm-line);
+}
+.pmob-rc-pays .lbl { font-size: 12px; font-weight: 700; color: var(--pm-muted); margin-right: 2px; }
+.pmob-rc-pays .pmob-pay-badge b { font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* ============ БОНУС КАССИРА (v1.2.69) ============ */
+/* — блок «Мои продажи сегодня» на главном — */
+.pmob-mysales {
+    display: block; width: 100%; margin-top: 12px; padding: 13px 15px;
+    background: #f6fdf9; border: 1px solid #cdeede; border-radius: 16px;
+    cursor: pointer; text-align: left; color: var(--pm-ink);
+}
+.pmob-mysales:active { background: #ecfaf1; }
+.pmob-mysales-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.pmob-mysales-title { font-size: 13px; font-weight: 800; color: var(--pm-green); text-transform: uppercase; letter-spacing: .3px; }
+.pmob-mysales-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.pmob-mysales-grid-2 { grid-template-columns: 1fr 1fr; }
+.pmob-mysales-cell { display: flex; flex-direction: column; gap: 3px; }
+.pmob-mysales-k { font-size: 11px; font-weight: 600; color: var(--pm-muted); }
+.pmob-mysales-v { font-size: 15px; font-weight: 800; color: var(--pm-ink); font-variant-numeric: tabular-nums; }
+.pmob-mysales-bonus { color: var(--pm-green); }
+
+/* — карточка «Ваш бонус» на экране успешной продажи — */
+.pmob-bonus-card {
+    margin: 14px 0 4px; padding: 14px 16px;
+    background: #f6fdf9; border: 1px solid #bfe9d3; border-radius: 16px;
+}
+.pmob-bonus-main { display: flex; align-items: baseline; justify-content: space-between; }
+.pmob-bonus-cap { font-size: 13px; font-weight: 700; color: var(--pm-muted); }
+.pmob-bonus-val { font-size: 22px; font-weight: 900; color: var(--pm-green); font-variant-numeric: tabular-nums; }
+.pmob-bonus-sub { margin-top: 6px; font-size: 13px; color: var(--pm-muted); }
+.pmob-bonus-sub b { color: var(--pm-ink); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/* — экран «Мой заработок» — */
+.pmob-earn-rate { margin: 12px 0 6px; font-size: 13px; color: var(--pm-muted); }
+.pmob-earn-rate b { color: var(--pm-ink); font-weight: 800; }
+.pmob-earn-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.pmob-earn-card {
+    padding: 13px 14px; background: var(--pm-soft);
+    border: 1px solid var(--pm-line); border-radius: 14px;
+}
+.pmob-earn-card-month { grid-column: 1 / -1; background: #f6fdf9; border-color: #cdeede; }
+.pmob-earn-card-cap { font-size: 11px; font-weight: 700; color: var(--pm-muted); text-transform: uppercase; letter-spacing: .3px; }
+.pmob-earn-card-bonus { margin-top: 4px; font-size: 20px; font-weight: 900; color: var(--pm-green); font-variant-numeric: tabular-nums; }
+.pmob-earn-card-sales { margin-top: 3px; font-size: 12px; color: var(--pm-muted); font-variant-numeric: tabular-nums; }
+/* — статистика чеков — */
+.pmob-earn-stats-title { font-size: 14px; font-weight: 800; color: var(--pm-ink); margin: 4px 0 10px; }
+.pmob-earn-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+.pmob-earn-stat {
+    padding: 14px 10px; background: var(--pm-soft); border: 1px solid var(--pm-line);
+    border-radius: 14px; text-align: center;
+}
+.pmob-earn-stat-v { font-size: 24px; font-weight: 900; color: var(--pm-ink); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.pmob-earn-stat-k { margin-top: 5px; font-size: 11px; font-weight: 600; color: var(--pm-muted); }
+.pmob-earn-stat-ret .pmob-earn-stat-v { color: #b4472f; }
+/* — благодарность — */
+.pmob-earn-thanks {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 16px; background: #f6fdf9; border: 1px solid #cdeede; border-radius: 16px;
+}
+.pmob-earn-thanks-ico { font-size: 24px; line-height: 1; flex: 0 0 auto; }
+.pmob-earn-thanks-txt { font-size: 14px; line-height: 1.5; color: var(--pm-ink); font-weight: 600; }
+.pmob-earn-hist-title { font-size: 14px; font-weight: 800; color: var(--pm-ink); margin: 4px 0 8px; }
+.pmob-earn-hist { border: 1px solid var(--pm-line); border-radius: 14px; overflow: hidden; }
+.pmob-earn-empty { padding: 18px; text-align: center; color: var(--pm-muted); font-size: 13px; }
+.pmob-earn-hrow {
+    display: grid; grid-template-columns: 1.3fr 1fr .6fr 1fr; gap: 6px;
+    align-items: center; padding: 11px 13px; font-size: 13px;
+    font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--pm-line);
+}
+.pmob-earn-hrow:last-child { border-bottom: none; }
+.pmob-earn-hrow span:nth-child(n+2) { text-align: right; }
+.pmob-earn-hhead { background: var(--pm-soft); font-weight: 700; color: var(--pm-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+.pmob-earn-hitem { width: 100%; background: #fff; border-left: none; border-right: none; cursor: pointer; text-align: left; color: var(--pm-ink); }
+.pmob-earn-hitem:active { background: #f6fdf9; }
+.pmob-earn-hbonus { font-weight: 800; color: var(--pm-green); }
+/* — детализация дня — */
+.pmob-earn-day { margin-top: 16px; }
+.pmob-earn-day-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.pmob-back-sm { background: none; border: none; color: var(--pm-teal); font-weight: 700; font-size: 13px; cursor: pointer; padding: 4px 0; }
+.pmob-earn-day-title { font-size: 14px; font-weight: 800; color: var(--pm-ink); }
+.pmob-earn-day-list { border: 1px solid var(--pm-line); border-radius: 14px; overflow: hidden; }
+.pmob-earn-drow {
+    display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 6px; align-items: center;
+    padding: 11px 13px; font-size: 13px; font-variant-numeric: tabular-nums;
+    border-bottom: 1px solid var(--pm-line);
+}
+.pmob-earn-drow:last-child { border-bottom: none; }
+.pmob-earn-drow span:nth-child(n+2) { text-align: right; }
+.pmob-earn-dnum { display: flex; flex-direction: column; color: var(--pm-ink); font-weight: 700; }
+.pmob-earn-dnum i { font-style: normal; font-size: 11px; font-weight: 500; color: var(--pm-muted); }
+.pmob-earn-dbase { color: var(--pm-muted); }
+.pmob-earn-dbonus { font-weight: 800; color: var(--pm-green); }
+.pmob-earn-drow-ret .pmob-earn-dbonus { color: #b4472f; }

@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.72';
+const RMK_VERSION = '1.2.73';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.73', date: '16.09.2026', title: 'Поступление: у размера подставляется его реальная цена из базы',
+    items: [
+      'При добавлении размера уже существующему товару теперь подставляется актуальная цена именно этого размера (а не общая).',
+      'Если у разных размеров одной модели цены отличаются — каждый размер получает свою.',
+      'Цену по-прежнему можно изменить вручную; пустое поле = общая цена товара.',
+    ],
+  },
   {
     v: '1.2.72', date: '16.09.2026', title: 'Поступление: размеры больше не добавляются автоматически',
     items: [
@@ -7880,6 +7888,21 @@ function recvAddSizeToItem(it, label) {
   const k = recvSizeKeyL(lab);
   if (it.sizeGrid.some(s => recvSizeKeyL(s) === k)) return false; // уже есть
   it.sizeGrid = recvSortGrid([...it.sizeGrid, lab]);
+  // v1.2.73 — подставляем актуальную цену ИМЕННО этого размера из базы (productPrices),
+  // если пользователь ещё не задал её вручную. Сопоставляем по нормализованному ключу размера.
+  if (it.productPrices && (!it.pricesBySize || it.pricesBySize[lab] == null)) {
+    let sp = it.productPrices[lab];
+    if (sp == null) {
+      // поиск по нормализованному ключу (на случай различий в регистре/формате метки)
+      for (const key of Object.keys(it.productPrices)) {
+        if (recvSizeKeyL(key) === k) { sp = it.productPrices[key]; break; }
+      }
+    }
+    if (sp != null && sp !== '' && Number(sp) > 0) {
+      it.pricesBySize = it.pricesBySize || {};
+      it.pricesBySize[lab] = Math.round(Number(sp) * 100) / 100;
+    }
+  }
   return true;
 }
 
@@ -8490,7 +8513,10 @@ function recvAddProduct(p) {
   if (exist) { recv.activeCalcUid = exist.uid; recvPaint(); return; }
   // Размеры НЕ подставляются автоматически. Пользователь добавляет их вручную кнопкой «＋ размер».
   // Родные размеры товара сохраняем отдельно (productSizes) — панель добавления предложит их первыми.
-  const it = { uid: recvNewUid(), product_id: p.id, product_name: p.name, sku: p.sku || '', category: p.category || '', productSizes: Array.isArray(p.sizeGrid) ? p.sizeGrid.slice() : [], sizeGrid: [], sizes: {}, ...recvDefaultCalc() };
+  const it = { uid: recvNewUid(), product_id: p.id, product_name: p.name, sku: p.sku || '', category: p.category || '', productSizes: Array.isArray(p.sizeGrid) ? p.sizeGrid.slice() : [], sizeGrid: [], sizes: {},
+    // v1.2.73 — актуальные цены по размерам из базы { <размер>: цена } — подставляются при добавлении размера
+    productPrices: (p.pricesBySize && typeof p.pricesBySize === 'object') ? { ...p.pricesBySize } : {},
+    ...recvDefaultCalc() };
   // v1.2.30 — если у товара уже есть цена в базе — подставляем её как редактируемую
   if (p.basePrice != null && Number(p.basePrice) > 0) {
     it.base_price = Math.round(Number(p.basePrice) * 100) / 100;

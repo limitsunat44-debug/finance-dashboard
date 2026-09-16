@@ -7,8 +7,15 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.73';
+const RMK_VERSION = '1.2.74';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.74', date: '16.09.2026', title: 'Поступление: цена размера подставляется надёжнее (полуразмеры)',
+    items: [
+      'Цена размера теперь подтягивается даже когда метка размера записана через запятую или точку («41,5» и «41.5»).',
+      'Сопоставление размера с ценой стало устойчивым к регистру, префиксу «размер:» и незначащим нулям.',
+    ],
+  },
   {
     v: '1.2.73', date: '16.09.2026', title: 'Поступление: у размера подставляется его реальная цена из базы',
     items: [
@@ -7870,6 +7877,14 @@ function recvSizeNum(sz) {
 function recvSizeKeyL(s) {
   return String(s == null ? '' : s).replace(/^\s*размер\s*:?\s*/i, '').trim().toLowerCase();
 }
+// v1.2.74 — ключ для сопоставления ЦЕНЫ размера: как recvSizeKeyL, но для чисто числовых меток
+// приводит к единому виду запятую/точку и убирает незначащие нули («41,5»=«41.5»=«41.50»; «40»=«40.0»).
+// Это чинит случай, когда метка из справочника размеров отличается форматом от ключа в productPrices.
+function recvPriceKey(s) {
+  const k = recvSizeKeyL(s).replace(',', '.');
+  const n = Number(k);
+  return (k !== '' && Number.isFinite(n)) ? String(n) : k;
+}
 // сортировка сетки: числовые по возрастанию, нечисловые — в конец по алфавиту
 function recvSortGrid(grid) {
   return [...grid].sort((a, b) => {
@@ -7893,9 +7908,10 @@ function recvAddSizeToItem(it, label) {
   if (it.productPrices && (!it.pricesBySize || it.pricesBySize[lab] == null)) {
     let sp = it.productPrices[lab];
     if (sp == null) {
-      // поиск по нормализованному ключу (на случай различий в регистре/формате метки)
+      // поиск по нормализованному ключу (устойчив к регистру, префиксу, запятой/точке, незначащим нулям)
+      const pk = recvPriceKey(lab);
       for (const key of Object.keys(it.productPrices)) {
-        if (recvSizeKeyL(key) === k) { sp = it.productPrices[key]; break; }
+        if (recvSizeKeyL(key) === k || recvPriceKey(key) === pk) { sp = it.productPrices[key]; break; }
       }
     }
     if (sp != null && sp !== '' && Number(sp) > 0) {

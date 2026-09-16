@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20260818-135712">
+  <link rel="stylesheet" href="admin-rmk.css?v=20260916-1052">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -69,7 +69,9 @@
         <button class="sb-item soon" data-view="cashbox"><span class="sb-ic">🗄</span> Денежный ящик</button>
         <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
         <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
+        <button class="sb-item" data-view="buyers"><span class="sb-ic">👥</span> Покупатели</button>
         <button class="sb-item" data-view="doctors"><span class="sb-ic">🩺</span> Продажи по врачам</button>
+        <button class="sb-item" data-view="bonuses"><span class="sb-ic">🎁</span> Бонусы сотрудников</button>
         <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
         <button class="sb-item" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
         <button class="sb-item" data-view="productsales"><span class="sb-ic">💹</span> Продажи по товарам</button>
@@ -82,8 +84,11 @@
         <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
         <button class="sb-item" data-view="shiftreports"><span class="sb-ic">📊</span> Отчёты продаж за день</button>
         <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
+        <button class="sb-item" data-view="writeoff"><span class="sb-ic">➖</span> Списание товаров</button>
         <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
         <button class="sb-item" data-view="inventory"><span class="sb-ic">📥</span> Инвентаризация</button>
+        <button class="sb-item" data-view="warehouse"><span class="sb-ic">🏢</span> Склад</button>
+        <button class="sb-item" data-view="transit"><span class="sb-ic">✈</span> Товары в пути</button>
         <button class="sb-item" data-view="finance"><span class="sb-ic">💸</span> Выручка-Расходы</button>
         <button class="sb-item" data-view="backups"><span class="sb-ic">💾</span> Бекапы</button>
       </nav>
@@ -158,9 +163,18 @@
           <div id="cdBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <section class="view" id="view-buyers">
+          <div id="buyBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ПРОДАЖИ ПО ВРАЧАМ ═══ -->
         <section class="view" id="view-doctors">
           <div id="docBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
+        <!-- ═══ БОНУСЫ СОТРУДНИКОВ ═══ -->
+        <section class="view" id="view-bonuses">
+          <div id="bonBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
         <!-- ═══ ПОИСК ТОВАРА ═══ -->
@@ -171,6 +185,11 @@
         <!-- ═══ ИСТОРИЯ ТОВАРА ═══ -->
         <section class="view" id="view-history">
           <div id="htBody"></div>
+        </section>
+
+        <!-- ═══ ТОВАРЫ В ПУТИ ═══ -->
+        <section class="view" id="view-transit">
+          <div id="shpBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
         <!-- ═══ ПРОДАЖИ ПО ТОВАРАМ ═══ -->
@@ -235,6 +254,16 @@
           <div id="invBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ СКЛАД (Остатки и оценка) ═══ -->
+        <section class="view" id="view-warehouse">
+          <div id="whBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
+        <!-- ═══ СПИСАНИЕ ТОВАРОВ ═══ -->
+        <section class="view" id="view-writeoff">
+          <div id="woBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <section class="view" id="view-finance">
           <div id="finBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
@@ -256,6 +285,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20260818-135712"></script>
+  <script src="admin-rmk.js?v=20260916-1052"></script>
 </body>
 </html>

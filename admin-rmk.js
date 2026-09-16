@@ -7,8 +7,172 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.54';
+const RMK_VERSION = '1.2.72';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.72', date: '16.09.2026', title: 'Поступление: размеры больше не добавляются автоматически',
+    items: [
+      'При выборе товара размеры больше НЕ подставляются сами — вы добавляете только нужные кнопкой «＋ размер».',
+      'Каждый добавленный размер можно убрать крестиком ×.',
+      'В панели «＋ размер» родные размеры товара показаны первыми и выделены; ниже — весь справочник и ручной ввод.',
+    ],
+  },
+  {
+    v: '1.2.71', date: '06.09.2026', title: 'Товары в пути: количество по каждому размеру отдельно',
+    items: [
+      'В составе груза у каждого размера теперь своё поле количества.',
+      'Кол-во товара и итог по отправке считаются автоматически как сумма по размерам — ручное поле кол-ва убрано.',
+      'В карточке отправки размеры показываются с количеством (напр. 38×2, 39×3).',
+    ],
+  },
+  {
+    v: '1.2.70', date: '06.09.2026', title: 'Новый раздел «Товары в пути»: учёт отправок от поставщиков и контроль получения',
+    items: [
+      'Раздел «Товары в пути» (десктоп): вкладки Все / В пути / Частично / Получено / Архив со счётчиками.',
+      'Отправка: дата, поставщик, страна, перевозчик, № накладной, места, вес, стоимость доставки (вписывается после получения), таможня, итого расходов.',
+      'Состав груза: товар + фото, размеры из существующего списка (по отдельности, без рядов), кол-во и галочка «получено».',
+      'Галочка на товаре = получен полностью; если не у всех — отправка «частично получена» (авто-статус и прогресс-бар).',
+      'Фото товаров и документов (фишка/накладная) сжимаются на телефоне перед загрузкой — чтобы не раздувать базу.',
+      'Архив: полностью полученные отправки можно удалить целиком — фото тоже удаляются из базы.',
+      'Доступ к разделу открыт Umed. Новые таблицы Supabase (pos_transit_shipments, pos_transit_items) и bucket transit-photos — прод-данные не затронуты.',
+    ],
+  },
+  {
+    v: '1.2.69', date: '06.09.2026', title: 'Бонус кассира (по умолчанию 2%): экран после продажи, «Мой заработок» и админ-раздел',
+    items: [
+      'Касса (телефон): после продажи показывается «Ваш бонус +X» и «Заработано сегодня».',
+      'На главном экране кассы — блок «Мои продажи» (Продажи / Мой бонус / Чеков за сегодня).',
+      'Раздел «Мой заработок»: Сегодня / Вчера / Месяц, история по дням и детализация чеков дня.',
+      'Кассир видит только свои продажи и бонус — без чужих данных, себестоимости и прибыли.',
+      'Админ: раздел «Бонусы сотрудников» — свод по кассирам, фильтры (период/магазин/кассир/статус), настройка % каждому и отметка «Выплачено».',
+      'База бонуса — товары после скидок (без услуг). Возвраты автоматически уменьшают бонус по замороженному % исходного чека.',
+      'При изменении % старые начисления не пересчитываются. Новые таблицы Supabase (pos_bonus_rates, pos_bonus_ledger), прод-данные не затронуты.',
+    ],
+  },
+  {
+    v: '1.2.68', date: '05.09.2026', title: 'Услуги в чеке: отображаются как обычная позиция и не попадают под скидки',
+    items: [
+      'Исправлено: добавленная услуга теперь отображается в списке позиций чека как обычный товар (раньше строка не рисовалась из-за ошибки).',
+      'На услуги (диагностика/пронация/ремонт) НЕ действуют никакие скидки — ни позиционные 5%, ни по дисконтной карте, даже если карта отсканирована.',
+      'Скидка чека теперь считается только по товарам; услуги и пронатор (фикс-цена) из расчёта скидки исключены.',
+      'Логика продажи товаров не изменена; бэкенд не трогался.',
+    ],
+  },
+  {
+    v: '1.2.67', date: '05.09.2026', title: 'Касса (телефон): кнопка «Диагностика / услуги» — добавление услуг в чек',
+    items: [
+      'В экране чека мобильной кассы появилась кнопка «Диагностика / услуги» — рядом с «Применить скидку» и «Применить врача».',
+      'По нажатию открывается выбор услуги: «Диагностика стоп» (фикс. 20 с.), «Пронация» и «Ремонтные работы» (цена вводится вручную).',
+      'Услуга добавляется в чек как обычная позиция, но без штрихкода и без списания остатка — только сумма в чеке.',
+      'Количество услуг можно увеличивать прямо в чеке (кнопки −/+), несколько диагностик в одном чеке.',
+      'Логика продажи товаров не изменена; бэкенд не трогался — позиция без штрихкода уже корректно проводится без списания экземпляров.',
+    ],
+  },
+  {
+    v: '1.2.66', date: '04.09.2026', title: 'Перемещение: пакетное проведение — большие документы проводятся за секунды',
+    items: [
+      'Раньше проведение документа на 100+ товаров могло занимать около 2 минут: система обрабатывала экземпляры по одному.',
+      'Теперь перемещение проводится пакетно (групповые запросы к базе) — те же 100+ товаров проводятся за секунды.',
+      'Убран риск таймаута на очень больших документах (200+ позиций).',
+      'Логика перемещения не изменена: результат идентичен поштучному, остатки сходятся по факту.',
+      'Побочный эффект: быстрое проведение убирает причину дублей — кассиру больше не кажется, что «зависло».',
+    ],
+  },
+  {
+    v: '1.2.65', date: '04.09.2026', title: 'Перемещение: усилена защита от дублей-документов',
+    items: [
+      'Раньше повторный проход мастера перемещения с тем же набором товаров мог создать несколько одинаковых документов (дубли в журнале).',
+      'Добавлена проверка по состоянию: если все выбранные экземпляры уже на складе-получателе — повторное перемещение отменяется (работает независимо от времени).',
+      'Окно защиты по времени расширено с 10 до 60 минут.',
+      'Сама логика перемещения не изменена; легитимные перемещения не блокируются.',
+    ],
+  },
+  {
+    v: '1.2.64', date: '04.09.2026', title: 'Касса (телефон): остатки в «Поиске товара» считаются по факту экземпляров',
+    items: [
+      'На мобильной кассе экран «Поиск товара» показывал завышенный остаток: брал max(числовое поле stock, число экземпляров). Если числовое поле отставало от факта — касса показывала больше, чем есть.',
+      'Теперь остаток считается только по факту экземпляров in_stock — как на десктопе (админка). Касса и админка теперь всегда совпадают.',
+      'Отдельно выровнено числовое поле остатка по всей базе (2055 вариантов) по факту экземпляров.',
+      'Товары без индивидуальных штрихкодов (код на 220) по-прежнему считаются по числу сканов инвентаризации.',
+    ],
+  },
+  {
+    v: '1.2.63', date: '04.09.2026', title: 'Доступ: Umed — «Поиск товара» и «История товара»',
+    items: [
+      'Пользователю Umed добавлены вкладки «Поиск товара» (остаток, цена, статус по штрихкоду) и «История товара» (жизненный цикл экземпляра).',
+      'Ранее у Umed были только «Перемещение товаров» и «Поступление товара» — они сохранены.',
+      'Финансовый раздел (выручка/расходы, зарплаты, прибыль) Umed по-прежнему НЕ открывается.',
+      'Только frontend (ADMIN_ACCOUNTS.umed.allowedTabs).',
+    ],
+  },
+  {
+    v: '1.2.62', date: '02.09.2026', title: 'Касса (телефон): ручной ввод последних цифр дисконтной карты',
+    items: [
+      'На экране «Сканирование карты» добавлено бело-зелёное поле для ручного ввода последних 6 цифр дисконтной карты — на случай, если камера не считывает штрихкод.',
+      'Кассир вводит последние цифры → нажимает «Применить» → скидка по карте применяется (как при сканировании).',
+      'Если несколько карт заканчиваются на введённые цифры — просит ввести больше цифр (чужая скидка не применяется).',
+      'Сама логика расчёта скидки не изменилась — добавлен только запасной способ ввода.',
+    ],
+  },
+  {
+    v: '1.2.61', date: '30.08.2026', title: 'Продажи по часам: отдельная линия на каждый магазин',
+    items: [
+      'На графике «Продажи по часам» при выборе всех магазинов теперь каждый магазин — отдельная линия своим цветом (раньше была одна общая).',
+      'Под графиком — легенда с названиями магазинов; магазины отсортированы по убыванию суммы за день.',
+      'При наведении на час всплывают суммы по каждому магазину сразу.',
+      'Если выбран один магазин — график выглядит как раньше (одна зелёная линия с заливкой).',
+      'Изменено только отображение графика — данные и логика расчёта продаж не затронуты.',
+    ],
+  },
+  {
+    v: '1.2.60', date: '30.08.2026', title: 'Перемещение: товары группируются по товару (все размеры под одним товаром)',
+    items: [
+      'Сканировать товары для перемещения теперь можно вразброс (в любой очерёдности) — в документе они автоматически собираются по товару.',
+      'Один товар — одна группа, под ней все размеры по возрастанию, больше нет «каши» из одинаковых товаров в разных местах списка.',
+      'Группировка видна везде: на экране списка товаров, в карточке документа из журнала и в печатной форме документа.',
+      'Само перемещение и учёт поэкземплярно (штрихкоды) не изменились — это только удобное отображение и печать.',
+    ],
+  },
+  {
+    v: '1.2.59', date: '24.08.2026', title: 'Дисконтные карты: добавление и редактирование врачей',
+    items: [
+      'В разделе «Дисконтные карты» появилась кнопка «＋ Врач»: можно завести врача прямо из панели, без 1С.',
+      'Поля врача: ФИО, код (вводится вручную, с проверкой уникальности), место работы, тип кошелька (Алиф / ДС / Оба) и номер кошелька.',
+      'По коду (или имени) врача кассир пробивает продажу на кассе, а продажа попадает в отчёт «Продажи по врачам» — новые врачи работают точно так же, как созданные ранее.',
+      'У каждого врача в списке появилась кнопка редактирования (✎): можно поменять ФИО, код, место работы и кошелёк.',
+      'При смене кода связь с историей продаж сохраняется; место работы и кошелёк синхронны с разделом «Продажи по врачам».',
+    ],
+  },
+  {
+    v: '1.2.58', date: '23.08.2026', title: 'Лояльность: вкладка «Покупатели» — клиенты, история покупок и баллы (orto.cards)',
+    items: [
+      'В разделе лояльности появилась вкладка «👥 Покупатели»: список всех клиентов с картами, суммой покупок и балансом баллов.',
+      'Поиск по имени/телефону/номеру карты, фильтр по периоду и сортировка (по сумме покупок / баллам / кол-ву / имени / дате).',
+      'Попап карточки клиента: профиль, история покупок (чеки), движение баллов и ручное начисление/списание баллов из админки.',
+      'Данные берутся из базы orto.cards (живые клиенты и покупки), начисление/списание защищено от ухода баланса в минус.',
+    ],
+  },
+  {
+    v: '1.2.57', date: '22.08.2026', title: 'Списание: фикс — списывается именно указанный штрихкод',
+    items: [
+      'Исправлено списание по последним цифрам: теперь списывается ровно тот экземпляр, чей штрихкод введён, а не первый подходящий с другого склада.',
+      'Добор по FIFO только при нехватке количества, с дедупликацией — без случайного списания чужих экземпляров.',
+    ],
+  },
+  {
+    v: '1.2.56', date: '22.08.2026', title: 'Новая вкладка «➖ Списание товаров»',
+    items: [
+      'Добавлена вкладка «➖ Списание товаров»: создание документа списания, добавление позиций по штрихкоду/последним цифрам и проведение списания со склада.',
+      'Списанные экземпляры помечаются в базе и убираются из остатков; документы списания хранятся с позициями и историей.',
+    ],
+  },
+  {
+    v: '1.2.55', date: '22.08.2026', title: 'Перемещение: защита от дублирования документов',
+    items: [
+      'При создании документа перемещения добавлена защита от дублей: повторный тот же документ (те же склады и позиции) в течение 10 минут не создаётся повторно.',
+      'Защищает от случайного двойного клика/повторной отправки без риска задвоения остатков.',
+    ],
+  },
   {
     v: '1.2.54', date: '18.08.2026', title: 'Промежуточный акт: можно применить безопасные изменения и вернуться к сканированию',
     items: [
@@ -530,9 +694,10 @@ const ADMIN_ACCOUNTS = {
   'Sunnat':   { password: 'Sunna0909', displayName: 'Sunnat',   allowedTabs: '*' },
   'Iskandar': { password: '1111',      displayName: 'Iskandar', allowedTabs: '*' },
   'Shahida':  { password: 's2364170',  displayName: 'Shahida',  allowedTabs: '*' },
-  // Ограниченный доступ: Перемещение товаров + Поступление товара
+  // Ограниченный доступ: Перемещение товаров + Поступление товара + Поиск/История товара
   // (вкладка receiving включает: новый документ, документы поступления, поставщики — создание/редактирование)
-  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'receiving'] },
+  // search — проверка остатка/цены/статуса по штрихкоду; history — жизненный цикл экземпляра.
+  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'receiving', 'search', 'history', 'transit'] },
 };
 // true, если у аккаунта есть хоть какой-то доступ в админку
 function accHasAccess(acc) {
@@ -744,7 +909,9 @@ const VIEW_META = {
   returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
+  buyers:    { title: 'Покупатели', sub: 'Клиенты по дисконтным картам: история покупок и бонусные баллы' },
   doctors:   { title: 'Продажи по врачам', sub: 'Отчёт о продажах и бонусах врачей' },
+  bonuses:   { title: 'Бонусы сотрудников', sub: 'Бонус кассиров от продаж: свод, настройка % и отметка выплат' },
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
   productsales:{ title: 'Продажи по товарам', sub: 'Анализ продаж по конкретным товарам и штрихкодам' },
@@ -758,11 +925,14 @@ const VIEW_META = {
   shiftreports:{ title: 'Отчёты по продажам за день', sub: 'Отчёт по каждой закрытой смене: чеки, способы оплаты, нал/безнал' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
   inventory: { title: 'Инвентаризация', sub: 'Пересчёт склада: сессии, акт расхождений и применение изменений' },
+  warehouse: { title: 'Остатки и оценка складов', sub: 'Актуальная информация об остатках товаров на складах' },
+  transit:   { title: 'Товары в пути', sub: 'Учёт отправок от поставщиков и контроль получения товара' },
   receiving: { title: 'Поступление товара', sub: 'Приём товара от поставщика: калькулятор цены и генерация штрихкодов' },
+  writeoff:  { title: 'Списание товаров', sub: 'Уменьшение остатка: недостача, брак, порча — с документом и поэкземплярным учётом' },
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'doctors', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'inventory', 'finance', 'receiving', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -882,7 +1052,9 @@ function renderView(force) {
   else if (v === 'returns') renderReturns(force);
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
+  else if (v === 'buyers') renderBuyers(force);
   else if (v === 'doctors') renderDoctors(force);
+  else if (v === 'bonuses') renderBonuses(force);
   else if (v === 'search') renderSearch(force);
   else if (v === 'history') renderHistory(force);
   else if (v === 'productsales') renderProductSales(force);
@@ -896,8 +1068,11 @@ function renderView(force) {
   else if (v === 'shiftreports') renderShiftReports(force);
   else if (v === 'transfer') renderTransfer(force);
   else if (v === 'inventory') renderInventory(force);
+  else if (v === 'warehouse') renderWarehouse(force);
+  else if (v === 'transit') renderTransit(force);
   else if (v === 'finance') renderFinance(force);
   else if (v === 'receiving') renderReceiving(force);
+  else if (v === 'writeoff') renderWriteoff(force);
   else if (v === 'backups') renderBackups(force);
 }
 
@@ -1068,21 +1243,65 @@ function gotoView(v) {
 }
 
 // график продаж по часам (по Душанбе)
+// Палитра линий по магазинам (совпадает с разбивкой по магазинам в аналитике продаж).
+const HOURS_SHOP_COLORS = ['#10b981', '#22b8cf', '#845ef7', '#f59e0b', '#ff8787', '#4dabf7', '#a9e34b', '#e64980', '#3b82f6', '#f97316', '#14b8a6', '#ec4899'];
+function hexToRgba(hex, a) {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!m) return hex;
+  return `rgba(${parseInt(m[1],16)},${parseInt(m[2],16)},${parseInt(m[3],16)},${a})`;
+}
 function drawHoursChart(canvasId, receipts) {
   const el = $(canvasId); if (!el) return;
-  const buckets = new Array(24).fill(0);
-  receipts.forEach(r => {
-    const d = new Date(r.date); if (isNaN(d)) return;
-    const h = new Date(d.getTime() + 5 * 3600 * 1000).getUTCHours();
-    buckets[h] += r.total;
-  });
-  const labels = []; const data = [];
-  for (let h = 8; h <= 22; h++) { labels.push(String(h).padStart(2,'0') + ':00'); data.push(Math.round(buckets[h])); }
+  const labels = [];
+  for (let h = 8; h <= 22; h++) labels.push(String(h).padStart(2,'0') + ':00');
+  const hourOf = (r) => {
+    const d = new Date(r.date); if (isNaN(d)) return null;
+    return new Date(d.getTime() + 5 * 3600 * 1000).getUTCHours();
+  };
+  // Список магазинов в выборке (по названию чека r.shop). Если выбран один магазин
+  // (фильтр state.kassa) или физически в данных один магазин — рисуем одну линию как раньше.
+  const shops = Array.from(new Set(receipts.map(r => (r.shop || '').trim()).filter(Boolean)));
+  const multi = !state.kassa && shops.length > 1;
   destroyChart(canvasId);
+
+  if (!multi) {
+    const buckets = new Array(24).fill(0);
+    receipts.forEach(r => { const h = hourOf(r); if (h != null) buckets[h] += r.total; });
+    const data = [];
+    for (let h = 8; h <= 22; h++) data.push(Math.round(buckets[h]));
+    state.charts[canvasId] = new Chart(el, {
+      type: 'line',
+      data: { labels, datasets: [{ data, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', fill: true, tension: .35, pointRadius: 3, pointBackgroundColor: '#10b981', borderWidth: 2 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, grid: { color: '#eef2f1' }, ticks: { callback: v => v >= 1000 ? (v/1000)+'K' : v } }, x: { grid: { display: false } } } }
+    });
+    return;
+  }
+
+  // Несколько магазинов: отдельная линия на каждый, разными цветами.
+  const byShop = new Map();
+  shops.forEach(sh => byShop.set(sh, new Array(24).fill(0)));
+  receipts.forEach(r => {
+    const sh = (r.shop || '').trim(); if (!sh) return;
+    const h = hourOf(r); if (h == null) return;
+    byShop.get(sh)[h] += r.total;
+  });
+  // Порядок магазинов — по убыванию суммы за день (крупные магазины выше в легенде).
+  const ordered = shops.slice().sort((a, b) =>
+    byShop.get(b).reduce((s,x)=>s+x,0) - byShop.get(a).reduce((s,x)=>s+x,0));
+  const datasets = ordered.map((sh, i) => {
+    const color = HOURS_SHOP_COLORS[i % HOURS_SHOP_COLORS.length];
+    const data = [];
+    for (let h = 8; h <= 22; h++) data.push(Math.round(byShop.get(sh)[h]));
+    return { label: sh, data, borderColor: color, backgroundColor: hexToRgba(color, .10),
+      fill: false, tension: .35, pointRadius: 2, pointBackgroundColor: color, borderWidth: 2 };
+  });
   state.charts[canvasId] = new Chart(el, {
     type: 'line',
-    data: { labels, datasets: [{ data, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.12)', fill: true, tension: .35, pointRadius: 3, pointBackgroundColor: '#10b981', borderWidth: 2 }] },
-    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+    data: { labels, datasets },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'circle', padding: 12, font: { size: 11 } } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.dataset.label}: ${fmtNum(ctx.parsed.y)}` } } },
       scales: { y: { beginAtZero: true, grid: { color: '#eef2f1' }, ticks: { callback: v => v >= 1000 ? (v/1000)+'K' : v } }, x: { grid: { display: false } } } }
   });
 }
@@ -1443,6 +1662,121 @@ async function renderDiscounts(force) {
 // ═════════════════════════════════════════════════════
 const cdState = { q: '', type: '', page: 0, per: 50 };
 const CARD_TYPE_CLASS = { client: 'g', doctor: 'blue', employee: 'amber' };
+// Подписи типов кошелька врача.
+const WALLET_TYPE_LABEL = { alif: 'Алиф', ds: 'ДС', both: 'Алиф + ДС' };
+
+// Ячейка «Место / кошелёк» для строки врача в списке карт.
+function docProfileCell(c) {
+  const parts = [];
+  if (c.workplace) parts.push(`<div>${esc(c.workplace)}</div>`);
+  if (c.walletNumber) {
+    const wt = c.walletType ? ` <span class="badge blue" style="font-size:11px">${esc(WALLET_TYPE_LABEL[c.walletType] || c.walletType)}</span>` : '';
+    parts.push(`<div class="muted rc-bc">${esc(c.walletNumber)}${wt}</div>`);
+  } else if (c.walletType) {
+    parts.push(`<div><span class="badge blue" style="font-size:11px">${esc(WALLET_TYPE_LABEL[c.walletType] || c.walletType)}</span></div>`);
+  }
+  return parts.length ? parts.join('') : '<span class="muted">—</span>';
+}
+
+// Модалка создания/редактирования врача (нативно, card_type='doctor', скидка 0).
+// existing=null — создание; existing={id,code,name,workplace,walletNumber,walletType} — редактирование.
+function openDoctorModal(existing) {
+  const isEdit = !!(existing && existing.id);
+  let ov = document.getElementById('docCreateOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'docCreateOverlay';
+  ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+
+  const v = existing || {};
+  const wt = (v.walletType || '');
+  ov.innerHTML = `
+    <div class="rcedit-modal" role="dialog" style="max-width:480px">
+      <div class="rcedit-head">
+        <h3>${isEdit ? 'Редактирование врача' : 'Новый врач'}</h3>
+        <button class="rcedit-x" id="docCrX" title="Закрыть">✕</button>
+      </div>
+      <div class="rcedit-body">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div>
+            <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">ФИО врача *</label>
+            <input class="finput" id="docCrName" placeholder="Напр.: Назаров Джасур" autocomplete="off" value="${esc(v.name || '')}">
+          </div>
+          <div>
+            <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Код врача *</label>
+            <input class="finput" id="docCrCode" placeholder="Напр.: 909" autocomplete="off" inputmode="numeric" value="${esc(v.code || '')}">
+            <div class="muted" style="font-size:12px;margin-top:4px">По этому коду (или имени) кассир пробивает продажу на кассе РМК.</div>
+          </div>
+          <div>
+            <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Место работы</label>
+            <input class="finput" id="docCrWork" placeholder="Напр.: Городская поликлиника №1" autocomplete="off" value="${esc(v.workplace || '')}">
+          </div>
+          <div>
+            <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Тип кошелька</label>
+            <select class="fselect" id="docCrWType">
+              <option value="" ${wt===''?'selected':''}>— не указан —</option>
+              <option value="alif" ${wt==='alif'?'selected':''}>Алиф</option>
+              <option value="ds" ${wt==='ds'?'selected':''}>ДС</option>
+              <option value="both" ${wt==='both'?'selected':''}>Алиф + ДС (оба)</option>
+            </select>
+          </div>
+          <div>
+            <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Номер кошелька</label>
+            <input class="finput" id="docCrWNum" placeholder="Напр.: 992900000000" autocomplete="off" value="${esc(v.walletNumber || '')}">
+          </div>
+          <div id="docCrErr" class="errbar" style="display:none"></div>
+        </div>
+      </div>
+      <div class="rcedit-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--line)">
+        <button class="btn" id="docCrCancel">Отмена</button>
+        <button class="btn btn-primary" id="docCrSave">${isEdit ? 'Сохранить' : 'Создать врача'}</button>
+      </div>
+    </div>`;
+
+  const close = () => ov.remove();
+  ov.querySelector('#docCrX').addEventListener('click', close);
+  ov.querySelector('#docCrCancel').addEventListener('click', close);
+  setTimeout(() => { const n = ov.querySelector('#docCrName'); if (n) { n.focus(); n.select(); } }, 50);
+
+  const errBox = ov.querySelector('#docCrErr');
+  const showErr = (m) => { errBox.textContent = m; errBox.style.display = 'block'; };
+
+  const saveBtn = ov.querySelector('#docCrSave');
+  saveBtn.addEventListener('click', async () => {
+    errBox.style.display = 'none';
+    const fullName = ov.querySelector('#docCrName').value.trim();
+    const code = ov.querySelector('#docCrCode').value.trim();
+    const workplace = ov.querySelector('#docCrWork').value.trim();
+    const walletType = ov.querySelector('#docCrWType').value;
+    const walletNumber = ov.querySelector('#docCrWNum').value.trim();
+    if (!fullName) { showErr('Укажите ФИО врача.'); return; }
+    if (!code) { showErr('Укажите код врача.'); return; }
+    saveBtn.disabled = true; saveBtn.textContent = isEdit ? 'Сохраняю…' : 'Создаю…';
+    try {
+      const payload = { fullName, code, workplace, walletType, walletNumber };
+      if (isEdit) payload.id = v.id;
+      const r = await posApi(`?action=doctor-${isEdit ? 'update' : 'create'}`, {
+        method: 'POST', body: JSON.stringify(payload),
+      });
+      docToast((isEdit ? 'Врач обновлён: ' : 'Врач создан: ') + (r.doctor && r.doctor.name || fullName));
+      close();
+      if (!isEdit) cdState.page = 0;
+      renderCards(true);
+    } catch (e) {
+      saveBtn.disabled = false; saveBtn.textContent = isEdit ? 'Сохранить' : 'Создать врача';
+      showErr(e.message || String(e));
+    }
+  });
+
+  // Enter в полях — сохранить.
+  ['docCrName', 'docCrCode', 'docCrWNum'].forEach(id => {
+    const el = ov.querySelector('#' + id);
+    if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveBtn.click(); } });
+  });
+}
+
 async function renderCards(force) {
   const box = $('cdBody');
   box.innerHTML = `<div class="loading">⏳ Загружаю карты…</div>`;
@@ -1468,6 +1802,7 @@ async function renderCards(force) {
       <div class="card card-pad">
         <div class="card-h-row">
           <h3>Карты${cdState.q||cdState.type ? ` — найдено ${fmtInt(d.count||0)}` : ''}</h3>
+          <button class="btn btn-primary" id="cdAddDoctor">＋ Врач</button>
         </div>
         <div class="filters filters-row">
           <input class="finput" id="cdQ" value="${esc(cdState.q)}" placeholder="Поиск по имени или коду карты…" style="flex:2;min-width:220px">
@@ -1482,17 +1817,19 @@ async function renderCards(force) {
         </div>
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th style="width:30px">#</th><th>Код карты</th><th>Имя</th><th class="c">Тип</th><th class="c">Скидка</th><th>Создана</th></tr></thead>
+            <thead><tr><th style="width:30px">#</th><th>Код карты</th><th>Имя</th><th class="c">Тип</th><th>Место / кошелёк</th><th class="c">Скидка</th><th>Создана</th><th class="c" style="width:44px"></th></tr></thead>
             <tbody>${(d.cards||[]).length ? d.cards.map((c,i)=>`
               <tr>
                 <td class="c muted">${off+i+1}</td>
                 <td class="strong rc-bc">${esc(c.code||'—')}</td>
                 <td>${esc(c.name||'Без имени')}</td>
                 <td class="c"><span class="badge ${CARD_TYPE_CLASS[c.type]||''}">${esc(c.typeLabel)}</span></td>
+                <td>${c.type==='doctor' ? docProfileCell(c) : '<span class="muted">—</span>'}</td>
                 <td class="c tnum">${c.discountPct?c.discountPct+'%':'—'}</td>
                 <td class="muted">${c.createdAt?dushTime(c.createdAt,true):'—'}</td>
+                <td class="c">${c.type==='doctor' ? `<button class="btn-icon cd-edit-doc" data-i="${i}" title="Редактировать врача">✎</button>` : ''}</td>
               </tr>`).join('')
-              : `<tr><td class="tbl-empty" colspan="6">Карты не найдены</td></tr>`}</tbody>
+              : `<tr><td class="tbl-empty" colspan="8">Карты не найдены</td></tr>`}</tbody>
           </table>
         </div>
         <div class="pager">
@@ -1508,6 +1845,12 @@ async function renderCards(force) {
     $('cdQ').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
     $('cdType').addEventListener('change', doSearch);
     $('cdReset').addEventListener('click', () => { cdState.q=''; cdState.type=''; cdState.page=0; renderCards(); });
+    $('cdAddDoctor').addEventListener('click', () => openDoctorModal(null));
+    box.querySelectorAll('.cd-edit-doc').forEach(b => b.addEventListener('click', () => {
+      const i = Number(b.getAttribute('data-i'));
+      const c = (d.cards || [])[i];
+      if (c) openDoctorModal({ id: c.id, code: c.code || '', name: c.name || '', workplace: c.workplace || '', walletNumber: c.walletNumber || '', walletType: c.walletType || '' });
+    }));
     $('cdPrev').addEventListener('click', () => { if (cdState.page>0){ cdState.page--; renderCards(); } });
     $('cdNext').addEventListener('click', () => { if (pageNow<totalPages){ cdState.page++; renderCards(); } });
     bumpSync();
@@ -1692,9 +2035,25 @@ function doctorRowHtml(x, num) {
   const actionCell = x.paid
     ? `<button class="btn btn-sm doc-paid-btn" data-unpay="${esc(x.c1_ref)}" title="Снять отметку выплаты">✓ Выплачено</button>`
     : `<button class="btn btn-sm btn-primary doc-pay-btn" data-pay="${esc(x.c1_ref)}">Выплатить</button>`;
+  // Тип кошелька (Куда переводить бонусы): Алиф / ДС / Алиф + ДС.
+  const wt = (x.walletType || '').trim();
+  const wtBadge = wt
+    ? `<span class="doc-wtype doc-wtype-${wt.includes('+') ? 'both' : (wt.toLowerCase().includes('алиф') ? 'alif' : 'ds')}" title="Куда переводить бонусы">${esc(wt)}</span>`
+    : '';
+  // Телефон врача (клик — копировать).
+  const phone = (x.phone || '').trim();
+  const phoneHtml = phone
+    ? `<div class="doc-phone" title="Клик — скопировать" data-phone="${esc(phone)}">📞 ${esc(phone)}</div>`
+    : '';
+  const specHtml = (x.specialty || '').trim()
+    ? `<span class="doc-spec">${esc(x.specialty)}</span>` : '';
   return `<tr class="doc-row${paidCls}" data-ref="${esc(x.c1_ref)}">
     <td class="c muted">${num}</td>
-    <td><div class="strong">${esc(x.name||'Без имени')}</div><div class="muted" style="font-size:12px">${esc(x.code||'')}</div></td>
+    <td>
+      <div class="strong">${esc(x.name||'Без имени')}</div>
+      <div class="muted" style="font-size:12px">${esc(x.code||'')}${specHtml ? ' · ' + specHtml : ''}</div>
+      ${phoneHtml}
+    </td>
     <td class="r strong tnum">${fmtNum(x.salesTotal)}</td>
     <td class="r tnum">${fmtNum(x.bonus)}</td>
     <td class="c tnum">${fmtInt(x.receipts)}</td>
@@ -1705,6 +2064,7 @@ function doctorRowHtml(x, num) {
         <input class="finput doc-wallet-inp" data-wref="${esc(x.c1_ref)}" value="${esc(x.wallet||'')}" placeholder="Введите номер кошелька">
         <button class="btn btn-sm btn-ghost doc-copy-btn" data-copy="${esc(x.c1_ref)}" title="Копировать">⧉</button>
       </div>
+      ${wtBadge ? `<div class="doc-wtype-wrap">${wtBadge}</div>` : ''}
     </td>
     <td class="c">${statusCell}</td>
     <td class="c">${actionCell}</td>
@@ -1763,6 +2123,13 @@ function doctorsBindEvents() {
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); inp.blur(); } });
   });
 
+  // Клик по телефону — скопировать номер.
+  qa('.doc-phone').forEach(el => el.addEventListener('click', () => {
+    const ph = el.getAttribute('data-phone') || '';
+    if (!ph) return;
+    navigator.clipboard.writeText(ph).then(() => docToast('Скопировано: ' + ph)).catch(() => docToast('Не удалось скопировать'));
+  }));
+
   qa('.doc-pay-btn').forEach(b => b.addEventListener('click', () => doctorTogglePayout(b.getAttribute('data-pay'), true)));
   qa('.doc-paid-btn').forEach(b => b.addEventListener('click', () => doctorTogglePayout(b.getAttribute('data-unpay'), false)));
 }
@@ -1770,8 +2137,8 @@ function doctorsBindEvents() {
 async function doctorTogglePayout(ref, paid) {
   const rec = ((docState._all && docState._all.doctors) || []).find(x => x.c1_ref === ref);
   if (!rec) return;
-  if (paid && !confirm(`Отметить выплату ${fmtNum(rec.payout)} с. врачу «${rec.name||''}» за период ${docFmtDate(docState.from)} — ${docFmtDate(docState.to)}?`)) return;
-  if (!paid && !confirm(`Снять отметку выплаты у врача «${rec.name||''}»?`)) return;
+  if (paid && !confirm(`Отметить выплату ${fmtNum(rec.payout)} с. врачу «${rec.name||''}» за период ${docFmtDate(docState.from)} — ${docFmtDate(docState.to)}?\n\nСумма будет автоматически добавлена в расходы (категория «Врачи»).`)) return;
+  if (!paid && !confirm(`Снять отметку выплаты у врача «${rec.name||''}»?\n\nСвязанный расход в категории «Врачи» будет удалён.`)) return;
   try {
     const wref = document.querySelector(`.doc-wallet-inp[data-wref="${CSS.escape(ref)}"]`);
     const wallet = (wref && wref.value) || rec.wallet || '';
@@ -1780,7 +2147,7 @@ async function doctorTogglePayout(ref, paid) {
       body: JSON.stringify({
         doctorC1Ref: ref, from: docState.from, to: docState.to, paid,
         by: state.user || 'admin',
-        snapshot: { salesTotal: rec.salesTotal, perReceiptTotal: rec.perReceiptTotal, payout: rec.payout, receipts: rec.receipts, wallet },
+        snapshot: { name: rec.name || '', salesTotal: rec.salesTotal, perReceiptTotal: rec.perReceiptTotal, payout: rec.payout, receipts: rec.receipts, wallet },
       }),
     });
     rec.paid = paid;
@@ -1795,8 +2162,8 @@ function doctorsExportCsv() {
   if (docState.doctor) list = list.filter(x => x.c1_ref === docState.doctor);
   if (docState.q) { const s = docState.q.trim().toLowerCase(); list = list.filter(x => (x.name||'').toLowerCase().includes(s) || (x.code||'').toLowerCase().includes(s)); }
   if (!list.length) { docToast('Нет данных для экспорта'); return; }
-  const head = ['Врач','Код','Сумма продаж','Бонус','Кол-во чеков','За чеки','К выплате','Кошелёк','Статус'];
-  const rows = list.map(x => [x.name||'', x.code||'', x.salesTotal, x.bonus, x.receipts, x.perReceiptTotal, x.payout, x.wallet||'', x.paid?'Выплачено':'Не выплачено']);
+  const head = ['Врач','Код','Специальность','Телефон','Сумма продаж','Бонус','Кол-во чеков','За чеки','К выплате','Кошелёк','Куда (Алиф/ДС)','Статус'];
+  const rows = list.map(x => [x.name||'', x.code||'', x.specialty||'', x.phone||'', x.salesTotal, x.bonus, x.receipts, x.perReceiptTotal, x.payout, x.wallet||'', x.walletType||'', x.paid?'Выплачено':'Не выплачено']);
   const csv = '\uFEFF' + [head, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(';')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -1824,6 +2191,227 @@ const psDetail = {}; // productId -> { data, sel:{size,whId} }
 function whOptions(list, sel) {
   return `<option value="" ${!sel?'selected':''}>Все склады</option>` +
     (list || []).map(w => `<option value="${esc(w.id)}" ${sel===w.id?'selected':''}>${esc(w.name)}</option>`).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: БОНУСЫ СОТРУДНИКОВ (бонус кассира от продаж)
+// ══════════════════════════════════════════════════════════
+function bonMonthStart() { return dushToday().slice(0, 8) + '01'; }
+const bonState = {
+  from: bonMonthStart(),
+  to: dushToday(),
+  shop: '',
+  seller: '',
+  status: '',
+  _all: null,
+  _rates: {},
+};
+
+async function renderBonuses(force) {
+  const box = $('bonBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю бонусы кассиров…</div>`;
+  try {
+    const qs = `?action=bonus-admin-list&from=${encodeURIComponent(bonState.from)}&to=${encodeURIComponent(bonState.to)}`
+      + (bonState.shop ? `&shop=${encodeURIComponent(bonState.shop)}` : '')
+      + (bonState.seller ? `&sellerRef=${encodeURIComponent(bonState.seller)}` : '')
+      + (bonState.status ? `&status=${encodeURIComponent(bonState.status)}` : '');
+    const [d, rl] = await Promise.all([
+      posApi(qs, { method: 'GET' }),
+      posApi('?action=bonus-rates-list', { method: 'GET' }),
+    ]);
+    bonState._all = d;
+    bonState._rates = {};
+    if (rl && rl.ok && Array.isArray(rl.rates)) {
+      for (const r of rl.rates) bonState._rates[r.seller_ref_1c] = Number(r.rate_pct) || 0;
+    }
+    bonusesRenderBody();
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить бонусы: ' + (e.message || e));
+  }
+}
+
+function bonusesRenderBody() {
+  const box = $('bonBody');
+  const d = bonState._all || { sellers: [], total: {} };
+  const sellers = d.sellers || [];
+  const t = d.total || {};
+  const tOutstanding = sellers.reduce((s, x) => s + (x.outstanding || 0), 0);
+
+  const shopList = state.kassas || [];
+  const shopOpts = `<option value="" ${bonState.shop===''?'selected':''}>Все магазины</option>`
+    + shopList.map(s => `<option value="${esc(s.ref)}" ${bonState.shop===s.ref?'selected':''}>${esc(s.name)}</option>`).join('');
+  const sellerOpts = `<option value="" ${bonState.seller===''?'selected':''}>Все кассиры</option>`
+    + sellers.map(x => `<option value="${esc(x.sellerRef)}" ${bonState.seller===x.sellerRef?'selected':''}>${esc(x.sellerName||x.sellerRef)}</option>`).join('');
+  const statusOpts = ['', 'accrued', 'paid'].map(v => {
+    const lbl = v === '' ? 'Все статусы' : (v === 'accrued' ? 'Начислено' : 'Выплачено');
+    return `<option value="${v}" ${bonState.status===v?'selected':''}>${lbl}</option>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+      ${kpi('💵','Продажи (база)', money(t.sales||0),'g','')}
+      ${kpi('🎁','Начислено бонуса', money((t.accrued||0)+(t.paid||0)),'blue','')}
+      ${kpi('✓','Выплачено', money(t.paid||0),'gray','')}
+      ${kpi('⏳','К выплате (остаток)', money(tOutstanding),'amber','')}
+    </div>
+
+    <div class="card card-pad">
+      <div class="filters filters-row doc-filters">
+        <div class="doc-fld">
+          <label>Период</label>
+          <div class="doc-daterange">
+            <input type="date" class="finput" id="bonFrom" value="${esc(bonState.from)}">
+            <span class="doc-dash">—</span>
+            <input type="date" class="finput" id="bonTo" value="${esc(bonState.to)}">
+          </div>
+        </div>
+        <div class="doc-fld" style="min-width:170px">
+          <label>Магазин</label>
+          <select class="fselect" id="bonShop">${shopOpts}</select>
+        </div>
+        <div class="doc-fld" style="min-width:170px">
+          <label>Кассир</label>
+          <select class="fselect" id="bonSeller">${sellerOpts}</select>
+        </div>
+        <div class="doc-fld" style="min-width:150px">
+          <label>Статус</label>
+          <select class="fselect" id="bonStatus">${statusOpts}</select>
+        </div>
+        <div class="doc-fld doc-fld-btns">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="bonReset">↻ Сбросить</button>
+            <button class="btn btn-primary" id="bonApply">▽ Применить</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table class="tbl doc-tbl">
+          <thead><tr>
+            <th style="width:34px">#</th>
+            <th>Кассир</th>
+            <th class="r">Продажи</th>
+            <th class="c">Чеков</th>
+            <th class="r">Возвраты</th>
+            <th class="r">База</th>
+            <th class="c">%</th>
+            <th class="r">Начислено</th>
+            <th class="r">Выплачено</th>
+            <th class="r">Остаток</th>
+            <th class="c">Действия</th>
+          </tr></thead>
+          <tbody>${sellers.length ? sellers.map((x, i) => bonusRowHtml(x, i + 1)).join('')
+            : `<tr><td class="tbl-empty" colspan="11">Нет начислений за период</td></tr>`}</tbody>
+          <tfoot><tr class="doc-total">
+            <td></td>
+            <td class="strong">Итого</td>
+            <td class="r strong tnum">${fmtNum(t.sales||0)}</td>
+            <td class="c strong tnum">${fmtInt(t.receipts||0)}</td>
+            <td class="r strong tnum">${fmtNum(Math.abs(t.returns||0))}</td>
+            <td class="r strong tnum">${fmtNum(t.base||0)}</td>
+            <td></td>
+            <td class="r strong tnum">${fmtNum((t.accrued||0)+(t.paid||0))}</td>
+            <td class="r strong tnum">${fmtNum(t.paid||0)}</td>
+            <td class="r strong tnum">${fmtNum(tOutstanding)}</td>
+            <td></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <div class="muted" style="margin-top:10px;font-size:12px">
+        База — товары после скидок (без услуг). При изменении % старые начисления не пересчитываются (замороженный %).
+      </div>
+    </div>
+  `;
+  bonusesBindEvents();
+}
+
+function bonusRowHtml(x, num) {
+  const curRate = (bonState._rates[x.sellerRef] != null) ? bonState._rates[x.sellerRef] : (x.ratePct || 0);
+  const hasOutstanding = (x.outstanding || 0) > 0.005;
+  const payBtn = hasOutstanding
+    ? `<button class="btn btn-sm btn-primary bon-pay" data-ref="${esc(x.sellerRef)}">Выплатить</button>`
+    : (x.paid > 0.005 ? `<button class="btn btn-sm bon-unpay" data-ref="${esc(x.sellerRef)}" title="Снять отметку выплаты">✓ Выплачено</button>` : `<span class="muted">—</span>`);
+  return `<tr class="doc-row" data-ref="${esc(x.sellerRef)}">
+    <td class="c muted">${num}</td>
+    <td><div class="strong">${esc(x.sellerName||'Без имени')}</div>
+      <div class="muted" style="font-size:12px">${esc(x.shopName||'')}</div></td>
+    <td class="r strong tnum">${fmtNum(x.sales||0)}</td>
+    <td class="c tnum">${fmtInt(x.receipts||0)}</td>
+    <td class="r tnum" style="color:#b4472f">${x.returns ? '−'+fmtNum(Math.abs(x.returns)) : '—'}</td>
+    <td class="r tnum">${fmtNum(x.base||0)}</td>
+    <td class="c">
+      <div class="bon-rate">
+        <input class="finput bon-rate-inp" type="number" step="0.1" min="0" max="100"
+          data-ref="${esc(x.sellerRef)}" data-name="${esc(x.sellerName||'')}" value="${curRate}" style="width:66px;text-align:right">
+        <button class="btn btn-sm btn-ghost bon-rate-save" data-ref="${esc(x.sellerRef)}" title="Сохранить %">✓</button>
+      </div>
+    </td>
+    <td class="r tnum">${fmtNum((x.accrued||0)+(x.paid||0))}</td>
+    <td class="r tnum">${fmtNum(x.paid||0)}</td>
+    <td class="r strong tnum" style="color:${hasOutstanding?'#0a7d33':'#6b7f80'}">${fmtNum(x.outstanding||0)}</td>
+    <td class="c">${payBtn}</td>
+  </tr>`;
+}
+
+function bonusesBindEvents() {
+  const box = $('bonBody');
+  const byId = (id) => box.querySelector('#' + id);
+  const apply = () => {
+    bonState.from = (byId('bonFrom') || {}).value || bonState.from;
+    bonState.to = (byId('bonTo') || {}).value || bonState.to;
+    bonState.shop = (byId('bonShop') || {}).value || '';
+    bonState.seller = (byId('bonSeller') || {}).value || '';
+    bonState.status = (byId('bonStatus') || {}).value || '';
+    renderBonuses(true);
+  };
+  const applyBtn = byId('bonApply'); if (applyBtn) applyBtn.addEventListener('click', apply);
+  const resetBtn = byId('bonReset'); if (resetBtn) resetBtn.addEventListener('click', () => {
+    bonState.from = bonMonthStart(); bonState.to = dushToday();
+    bonState.shop = ''; bonState.seller = ''; bonState.status = '';
+    renderBonuses(true);
+  });
+  ['bonShop', 'bonSeller', 'bonStatus'].forEach(id => { const el = byId(id); if (el) el.addEventListener('change', apply); });
+
+  box.querySelectorAll('.bon-rate-save').forEach(btn => btn.addEventListener('click', async () => {
+    const ref = btn.dataset.ref;
+    const inp = box.querySelector('.bon-rate-inp[data-ref="' + cssEsc(ref) + '"]');
+    if (!inp) return;
+    const val = Number(inp.value);
+    if (!Number.isFinite(val) || val < 0 || val > 100) { docToast('Некорректный % (0..100)'); return; }
+    btn.disabled = true;
+    try {
+      const r = await posApi('?action=bonus-rate-set', {
+        method: 'POST',
+        body: JSON.stringify({ sellerRef: ref, sellerName: inp.dataset.name || null, ratePct: val, by: state.user || 'admin' }),
+      });
+      if (r && r.ok) { docToast('Ставка сохранена: ' + val + '%'); bonState._rates[ref] = val; }
+      else docToast('Ошибка: ' + ((r && r.error) || 'не сохранено'));
+    } catch (e) { docToast('Ошибка сети'); }
+    btn.disabled = false;
+  }));
+
+  const markPaid = async (ref, paid) => {
+    if (!ref) return;
+    const verb = paid ? 'отметить ВЫПЛАЧЕНО' : 'СНЯТЬ отметку выплаты';
+    if (!confirm('Кассир — ' + verb + ' за период ' + docFmtDate(bonState.from) + '–' + docFmtDate(bonState.to) + '?')) return;
+    try {
+      const r = await posApi('?action=bonus-mark-paid', {
+        method: 'POST',
+        body: JSON.stringify({ sellerRef: ref, from: bonState.from, to: bonState.to, paid, by: state.user || 'admin' }),
+      });
+      if (r && r.ok) { docToast(paid ? ('Отмечено выплачено (' + r.updated + ' чек.)') : ('Отметка снята (' + r.updated + ' чек.)')); renderBonuses(true); }
+      else docToast('Ошибка: ' + ((r && r.error) || 'не выполнено'));
+    } catch (e) { docToast('Ошибка сети'); }
+  };
+  box.querySelectorAll('.bon-pay').forEach(b => b.addEventListener('click', () => markPaid(b.dataset.ref, true)));
+  box.querySelectorAll('.bon-unpay').forEach(b => b.addEventListener('click', () => markPaid(b.dataset.ref, false)));
+}
+
+function cssEsc(s) {
+  if (window.CSS && CSS.escape) return CSS.escape(s);
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 }
 
 async function renderSearch(force) {
@@ -4166,6 +4754,603 @@ function plural(n, one, few, many) {
 //  Пошаговый мастер: 1) выбор складов → 2) сканер → 3) товар добавлен →
 //  4) список → 5) сверка → 6) подтверждение → 7) успех (+PDF)
 // ══════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: СПИСАНИЕ ТОВАРОВ
+//  Создание документа списания (склад/причина/товары) + журнал документов.
+//  После проведения экземпляры помечаются written_off, остаток (stock) минусуется.
+// ══════════════════════════════════════════════════════════
+const WO_REASONS = ['Недостача', 'Брак', 'Пересорт', 'Порча'];
+const WO = {
+  mode: 'new',            // new (создание) | journal (документы)
+  whId: '', whName: '',   // склад списания
+  reason: 'Брак',         // выбранная причина
+  reasonCustom: '',       // свой вариант (когда reason === '__custom__')
+  comment: '',
+  warehouses: [],         // [{id,name,c1Ref}]
+  items: [],              // [{key,variantId,productId,c1ProdRef,c1CharRef,sizeLabel,productName,shortCode,price,qty,avail}]
+  busy: false,
+  result: null,           // ответ проведения {doc, shortfalls}
+  // поиск товара
+  searchOpen: false, searchTab: 'name', // name | code
+  sq: '', sBusy: false, sList: null,     // результаты поиска по названию (товары)
+  sDetail: null, sDetailBusy: false,     // детализация выбранного товара (размеры×склады)
+  cq: '', cBusy: false, cList: null,     // результаты поиска по коду (экземпляры)
+  // журнал
+  jList: null, jBusy: false,
+  jWh: '', jReason: '', jFrom: '', jTo: '', jStatus: '',
+  jDoc: null,             // открытая карточка
+};
+
+async function renderWriteoff(force) {
+  const box = $('woBody');
+  if (force) { WO.mode = 'new'; WO.items = []; WO.result = null; WO.searchOpen = false; }
+  if (!WO.warehouses.length) {
+    box.innerHTML = `<div class="loading">⏳ Загружаю склады…</div>`;
+    try {
+      const d = await posApi('?action=transfer-warehouses', { method: 'GET' });
+      WO.warehouses = d.warehouses || [];
+      if (!WO.whId && WO.warehouses[0]) { WO.whId = WO.warehouses[0].id; WO.whName = WO.warehouses[0].name; }
+    } catch (e) { box.innerHTML = errBar('Не удалось загрузить склады: ' + e.message); return; }
+  }
+  woPaint();
+}
+
+function woTabsHTML() {
+  return `
+  <div class="tr-tabs">
+    <button class="tr-tab ${WO.mode==='new'?'active':''}" id="woTabNew">➖ Новое списание</button>
+    <button class="tr-tab ${WO.mode==='journal'?'active':''}" id="woTabJournal">📒 Документы списания</button>
+  </div>`;
+}
+
+function woPaint() {
+  const box = $('woBody');
+  if (!box) return;
+  if (WO.mode === 'journal') {
+    box.innerHTML = woTabsHTML() + (WO.jDoc ? woDocCardHTML() : woJournalHTML());
+    woBindTabs();
+    if (WO.jDoc) woBindDocCard(); else woBindJournal();
+    return;
+  }
+  if (WO.result) { box.innerHTML = woTabsHTML() + woDoneHTML(); woBindTabs(); woBindDone(); return; }
+  box.innerHTML = woTabsHTML() + woCreateHTML();
+  woBindTabs();
+  woBindCreate();
+}
+
+function woBindTabs() {
+  const n = $('woTabNew'), j = $('woTabJournal');
+  if (n) n.addEventListener('click', () => { WO.mode='new'; WO.result=null; woPaint(); });
+  if (j) j.addEventListener('click', () => { WO.mode='journal'; WO.jDoc=null; woLoadJournal(); });
+}
+
+// ──────────────────── СОЗДАНИЕ ДОКУМЕНТА ────────────────────
+function woReasonValue() {
+  return WO.reason === '__custom__' ? (WO.reasonCustom || '').trim() : WO.reason;
+}
+
+function woItemsRowsHTML() {
+  if (!WO.items.length) return `<tr><td colspan="6" class="tr-empty">Товары не добавлены. Найдите по названию или по коду.</td></tr>`;
+  return WO.items.map((it, i) => {
+    const sum = (Number(it.price)||0) * (Number(it.qty)||0);
+    const availWarn = (it.avail != null && it.qty > it.avail)
+      ? `<div class="wo-avail-warn">на складе ${fmtInt(it.avail)}</div>` : '';
+    return `
+    <tr>
+      <td class="tr-td-name">
+        <div class="wo-it-name">${esc(it.productName || '—')}</div>
+        <div class="wo-it-sub">${it.sizeLabel ? 'разм. '+esc(it.sizeLabel)+' · ' : ''}${it.shortCode ? '<span class="tr-code">…'+esc(String(it.shortCode).slice(-6))+'</span>' : ''}</div>
+        ${availWarn}
+      </td>
+      <td class="c wo-qty-cell">
+        <div class="wo-qty">
+          <button class="wo-qbtn" data-dec="${i}">−</button>
+          <input class="wo-qinp" type="number" min="1" value="${it.qty}" data-qty="${i}">
+          <button class="wo-qbtn" data-inc="${i}">+</button>
+        </div>
+      </td>
+      <td class="c">${fmtNum(it.price)}</td>
+      <td class="c"><b>${fmtNum(sum)}</b></td>
+      <td class="c"><button class="tr-del" data-rm="${i}" title="Убрать">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function woTotals() {
+  const positions = WO.items.length;
+  const units = WO.items.reduce((s, it) => s + (Number(it.qty)||0), 0);
+  const sum = WO.items.reduce((s, it) => s + (Number(it.price)||0)*(Number(it.qty)||0), 0);
+  return { positions, units, sum };
+}
+
+function woCreateHTML() {
+  const whOpts = WO.warehouses.map(w => `<option value="${esc(w.id)}" ${w.id===WO.whId?'selected':''}>${esc(w.name)}</option>`).join('');
+  const reasonOpts = WO_REASONS.map(r => `<option value="${esc(r)}" ${r===WO.reason?'selected':''}>${esc(r)}</option>`).join('')
+    + `<option value="__custom__" ${WO.reason==='__custom__'?'selected':''}>Другое (ввести)…</option>`;
+  const t = woTotals();
+  return `
+  <div class="tr-wrap wo-wrap">
+    <div class="tr-card">
+      <div class="tr-card-head sm"><span class="tr-ic">➖</span><div><h2>Списание товаров</h2><p>Уменьшение остатка: недостача, брак, порча</p></div></div>
+
+      <div class="wo-form-grid">
+        <label class="wo-field"><span>Склад списания</span>
+          <select class="tr-select" id="woWh">${whOpts}</select></label>
+        <label class="wo-field"><span>Причина</span>
+          <select class="tr-select" id="woReason">${reasonOpts}</select></label>
+      </div>
+      ${WO.reason==='__custom__' ? `<label class="wo-field wo-field-full"><span>Своя причина</span>
+        <input type="text" class="tr-input" id="woReasonCustom" placeholder="Например: возврат поставщику" value="${esc(WO.reasonCustom)}"></label>` : ''}
+      <label class="wo-field wo-field-full"><span>Комментарий (необязательно)</span>
+        <input type="text" class="tr-input" id="woComment" placeholder="Примечание к документу" value="${esc(WO.comment)}"></label>
+
+      <div class="wo-add-row">
+        <button class="tr-btn tr-btn-outline" id="woBtnSearchName">🔍 Поиск по названию</button>
+        <button class="tr-btn tr-btn-outline" id="woBtnSearchCode">🔢 По коду (6 цифр)</button>
+      </div>
+      <div id="woSearchArea"></div>
+      <div id="woErr"></div>
+
+      <div class="tbl-wrap">
+        <table class="tbl tr-tbl wo-tbl">
+          <thead><tr><th class="tr-td-name">Товар</th><th class="c">Кол-во</th><th class="c">Цена</th><th class="c">Сумма</th><th class="c"></th></tr></thead>
+          <tbody>${woItemsRowsHTML()}</tbody>
+        </table>
+      </div>
+
+      <div class="wo-summary">
+        <div class="wo-sum-item"><span>Позиций</span><b>${fmtInt(t.positions)}</b></div>
+        <div class="wo-sum-item"><span>Единиц</span><b>${fmtInt(t.units)}</b></div>
+        <div class="wo-sum-item wo-sum-total"><span>Итого списание</span><b>${fmtNum(t.sum)} ${CUR}</b></div>
+      </div>
+
+      <div class="tr-actions">
+        <button class="tr-btn tr-btn-ghost" id="woReset">Очистить</button>
+        <button class="tr-btn tr-btn-primary" id="woPost" ${WO.items.length?'':'disabled'}>✓ Провести списание</button>
+      </div>
+      <div class="tr-info"><span class="tr-info-ic">ℹ️</span><div>Списывает <b>${state.user?esc(state.user):'администратор'}</b>. После проведения экземпляры помечаются как списанные и остаток по товару уменьшается. Отменить можно в «Документах списания».</div></div>
+    </div>
+  </div>`;
+}
+
+function woBindCreate() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('woWh', 'change', e => { WO.whId = e.target.value; const w = WO.warehouses.find(x=>x.id===WO.whId); WO.whName = w?w.name:''; });
+  on('woReason', 'change', e => { WO.reason = e.target.value; woPaint(); });
+  on('woReasonCustom', 'input', e => { WO.reasonCustom = e.target.value; });
+  on('woComment', 'input', e => { WO.comment = e.target.value; });
+  on('woBtnSearchName', 'click', () => { WO.searchTab='name'; woOpenSearch(); });
+  on('woBtnSearchCode', 'click', () => { WO.searchTab='code'; woOpenSearch(); });
+  on('woReset', 'click', () => { WO.items=[]; WO.comment=''; woPaint(); });
+  on('woPost', 'click', woSubmit);
+  // qty controls
+  document.querySelectorAll('[data-inc]').forEach(b => b.addEventListener('click', () => { const i=+b.dataset.inc; WO.items[i].qty = (Number(WO.items[i].qty)||0)+1; woPaint(); }));
+  document.querySelectorAll('[data-dec]').forEach(b => b.addEventListener('click', () => { const i=+b.dataset.dec; WO.items[i].qty = Math.max(1,(Number(WO.items[i].qty)||1)-1); woPaint(); }));
+  document.querySelectorAll('[data-qty]').forEach(inp => inp.addEventListener('change', () => { const i=+inp.dataset.qty; WO.items[i].qty = Math.max(1, parseInt(inp.value,10)||1); woPaint(); }));
+  document.querySelectorAll('[data-rm]').forEach(b => b.addEventListener('click', () => { const i=+b.dataset.rm; WO.items.splice(i,1); woPaint(); }));
+  // область поиска
+  if (WO.searchOpen) woRenderSearch();
+}
+
+// ──────────────────── ПОИСК ТОВАРА ────────────────────
+function woOpenSearch() { WO.searchOpen = true; woPaint(); }
+
+function woRenderSearch() {
+  const area = $('woSearchArea');
+  if (!area) return;
+  const tabs = `
+    <div class="wo-srch-tabs">
+      <button class="wo-srch-tab ${WO.searchTab==='name'?'active':''}" id="woSrchTabName">По названию</button>
+      <button class="wo-srch-tab ${WO.searchTab==='code'?'active':''}" id="woSrchTabCode">По коду</button>
+      <button class="wo-srch-close" id="woSrchClose" title="Закрыть">✕</button>
+    </div>`;
+  let body = '';
+  if (WO.searchTab === 'name') {
+    if (WO.sDetail) body = woDetailHTML();
+    else body = `
+      <div class="wo-srch-inputrow">
+        <input type="text" class="tr-input" id="woSq" placeholder="Название товара…" value="${esc(WO.sq)}">
+        <button class="tr-btn tr-btn-outline" id="woSqBtn">Найти</button>
+      </div>
+      <div id="woSqList">${woNameListHTML()}</div>`;
+  } else {
+    body = `
+      <div class="wo-srch-inputrow">
+        <input type="text" class="tr-input" id="woCq" inputmode="numeric" placeholder="Последние 6 цифр кода…" value="${esc(WO.cq)}">
+        <button class="tr-btn tr-btn-outline" id="woCqBtn">Найти</button>
+      </div>
+      <div id="woCqList">${woCodeListHTML()}</div>`;
+  }
+  area.innerHTML = `<div class="wo-srch-box">${tabs}${body}</div>`;
+  woBindSearch();
+}
+
+function woNameListHTML() {
+  if (WO.sBusy) return `<div class="loading">⏳ Поиск…</div>`;
+  if (WO.sList === null) return '';
+  if (!WO.sList.length) return `<div class="tr-empty">Ничего не найдено</div>`;
+  return `<div class="wo-srch-results">` + WO.sList.map(p => `
+    <div class="wo-srch-item" data-pick-prod="${esc(p.id)}">
+      <div class="wo-srch-item-main">
+        <div class="wo-srch-item-name">${esc(p.name)}</div>
+        <div class="wo-srch-item-sub">остаток ${fmtInt(p.totalStock)} · ${p.byWarehouse.map(w=>esc(w.name)+': '+fmtInt(w.stock)).join(' · ')||'нет'}</div>
+      </div>
+      <div class="wo-srch-item-price">${p.priceMin?fmtNum(p.priceMin):'—'}${p.priceMax&&p.priceMax!==p.priceMin?'–'+fmtNum(p.priceMax):''} ${CUR}</div>
+    </div>`).join('') + `</div>`;
+}
+
+function woDetailHTML() {
+  const d = WO.sDetail;
+  if (WO.sDetailBusy) return `<div class="loading">⏳ Загрузка размеров…</div>`;
+  if (!d || !d.found) return `<div class="tr-empty">Нет данных <button class="wo-srch-back" id="woDetBack">← назад</button></div>`;
+  // матрица: строки — размеры, для склада списания показываем qty и кнопку добавить
+  const whId = WO.whId;
+  const rows = (d.sizes||[]).map(sz => {
+    const cell = (d.cells && d.cells[sz] && d.cells[sz][whId]) || null;
+    const qty = cell ? (cell.qty||0) : 0;
+    const price = cell ? (cell.price||0) : 0;
+    const vId = cell ? cell.variantId : null;
+    const dis = (!vId || qty<=0) ? 'disabled' : '';
+    return `<tr>
+      <td class="tr-td-name">разм. ${esc(sz)}</td>
+      <td class="c">${fmtInt(qty)}</td>
+      <td class="c">${price?fmtNum(price):'—'}</td>
+      <td class="c"><button class="tr-btn tr-btn-outline wo-det-add" data-add-var="${esc(vId||'')}" data-size="${esc(sz)}" data-price="${price}" ${dis}>+ добавить</button></td>
+    </tr>`;
+  }).join('');
+  const detName = (d.product && d.product.name) || d.name || 'Товар';
+  return `
+    <div class="wo-det">
+      <div class="wo-det-head"><button class="wo-srch-back" id="woDetBack">← назад</button><b>${esc(detName)}</b></div>
+      <div class="wo-det-sub">Склад: ${esc(WO.whName)}. Доступно к списанию — экземпляры in_stock на этом складе.</div>
+      <div class="tbl-wrap"><table class="tbl tr-tbl">
+        <thead><tr><th class="tr-td-name">Размер</th><th class="c">Остаток</th><th class="c">Цена</th><th class="c"></th></tr></thead>
+        <tbody>${rows||'<tr><td colspan="4" class="tr-empty">Нет остатков на этом складе</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+}
+
+function woCodeListHTML() {
+  if (WO.cBusy) return `<div class="loading">⏳ Поиск…</div>`;
+  if (WO.cList === null) return '';
+  if (!WO.cList.length) return `<div class="tr-empty">Ничего не найдено</div>`;
+  return `<div class="wo-srch-results">` + WO.cList.map((it, i) => {
+    const stBadge = it.status==='in_stock' ? '<span class="tr-badge tr-badge-ok">в наличии</span>'
+      : (it.status==='sold' ? '<span class="tr-badge tr-badge-draft">продан</span>' : '<span class="tr-badge tr-badge-draft">списан</span>');
+    const dis = it.status!=='in_stock' ? 'disabled' : '';
+    return `<div class="wo-srch-item">
+      <div class="wo-srch-item-main">
+        <div class="wo-srch-item-name">${esc(it.name)}</div>
+        <div class="wo-srch-item-sub">${it.sizeLabel?'разм. '+esc(it.sizeLabel)+' · ':''}<span class="tr-code">…${esc(it.last5||String(it.barcode).slice(-6))}</span> ${stBadge} · остаток ${fmtInt(it.availableAtShop||0)}</div>
+      </div>
+      <button class="tr-btn tr-btn-outline wo-code-add" data-add-code="${i}" ${dis}>+ добавить</button>
+    </div>`;
+  }).join('') + `</div>`;
+}
+
+function woBindSearch() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('woSrchTabName', 'click', () => { WO.searchTab='name'; woRenderSearch(); });
+  on('woSrchTabCode', 'click', () => { WO.searchTab='code'; woRenderSearch(); });
+  on('woSrchClose', 'click', () => { WO.searchOpen=false; WO.sDetail=null; woPaint(); });
+  // по названию
+  on('woSqBtn', 'click', woDoNameSearch);
+  const sq = $('woSq'); if (sq) sq.addEventListener('keydown', e => { if (e.key==='Enter') woDoNameSearch(); });
+  document.querySelectorAll('[data-pick-prod]').forEach(el => el.addEventListener('click', () => woOpenDetail(el.dataset.pickProd)));
+  on('woDetBack', 'click', () => { WO.sDetail=null; woRenderSearch(); });
+  document.querySelectorAll('[data-add-var]').forEach(b => b.addEventListener('click', () => {
+    if (b.disabled) return;
+    woAddFromDetail(b.dataset.addVar, b.dataset.size, Number(b.dataset.price)||0);
+  }));
+  // по коду
+  on('woCqBtn', 'click', woDoCodeSearch);
+  const cq = $('woCq'); if (cq) cq.addEventListener('keydown', e => { if (e.key==='Enter') woDoCodeSearch(); });
+  document.querySelectorAll('[data-add-code]').forEach(b => b.addEventListener('click', () => {
+    if (b.disabled) return;
+    woAddFromCode(+b.dataset.addCode);
+  }));
+}
+
+async function woDoNameSearch() {
+  WO.sq = ($('woSq') && $('woSq').value || '').trim();
+  if (!WO.sq) return;
+  WO.sBusy = true; WO.sList = null; WO.sDetail = null; woRenderSearch();
+  try {
+    const d = await posApi(`?action=product-search&q=${encodeURIComponent(WO.sq)}&wh=${encodeURIComponent(WO.whId)}&limit=30`, { method:'GET' });
+    WO.sList = d.products || [];
+  } catch (e) { WO.sList = []; }
+  WO.sBusy = false; woRenderSearch();
+}
+
+async function woOpenDetail(prodId) {
+  WO.sDetailBusy = true; WO.sDetail = { found:false }; woRenderSearch();
+  try {
+    const d = await posApi(`?action=product-detail&id=${encodeURIComponent(prodId)}`, { method:'GET' });
+    WO.sDetail = d;
+  } catch (e) { WO.sDetail = { found:false }; }
+  WO.sDetailBusy = false; woRenderSearch();
+}
+
+function woAddItem(row) {
+  // объединяем по variantId, если уже есть — увеличиваем qty
+  const key = row.variantId || ('bc:'+row.shortCode);
+  const ex = WO.items.find(x => (x.variantId||('bc:'+x.shortCode)) === key);
+  if (ex) { ex.qty = (Number(ex.qty)||0)+1; }
+  else WO.items.push({ ...row, key, qty: 1 });
+  WO.searchOpen = false; WO.sDetail = null;
+  woPaint();
+  const err = $('woErr'); // подсветим что добавлено
+}
+
+function woAddFromDetail(variantId, size, price) {
+  const d = WO.sDetail || {};
+  const cell = (d.cells && d.cells[size] && d.cells[size][WO.whId]) || {};
+  const detName = (d.product && d.product.name) || d.name || 'Товар';
+  const detId = (d.product && d.product.id) || d.id || null;
+  woAddItem({
+    variantId: variantId || null,
+    productId: detId,
+    c1ProdRef: null, c1CharRef: null,
+    sizeLabel: (cell.sizeRaw || size || null),
+    productName: detName,
+    shortCode: null,
+    price: price || 0,
+    avail: cell.qty != null ? cell.qty : null,
+  });
+}
+
+async function woDoCodeSearch() {
+  WO.cq = ($('woCq') && $('woCq').value || '').replace(/\D/g,'').trim();
+  if (WO.cq.length < 3) { const l=$('woCqList'); if(l) l.innerHTML='<div class="tr-empty">Нужно минимум 3 цифры</div>'; return; }
+  WO.cBusy = true; WO.cList = null; woRenderSearch();
+  try {
+    const d = await posApi(`?action=find-by-suffix&suffix=${encodeURIComponent(WO.cq)}&wh=${encodeURIComponent(WO.whId)}&limit=30`, { method:'GET' });
+    WO.cList = d.items || [];
+  } catch (e) { WO.cList = []; }
+  WO.cBusy = false; woRenderSearch();
+}
+
+function woAddFromCode(idx) {
+  const it = WO.cList[idx]; if (!it) return;
+  woAddItem({
+    variantId: it.variantId || null,
+    productId: null,
+    c1ProdRef: it.productC1Ref || null,
+    c1CharRef: it.charC1Ref || null,
+    sizeLabel: it.sizeLabel || null,
+    productName: it.name || 'Товар',
+    shortCode: it.uniqueBarcode || it.barcode || null,
+    price: Number(it.price)||0,
+    avail: it.availableAtShop != null ? it.availableAtShop : null,
+  });
+}
+
+// ──────────────────── ПРОВЕДЕНИЕ ────────────────────
+async function woSubmit() {
+  const reason = woReasonValue();
+  if (!WO.whId) { $('woErr').innerHTML = errBar('Выберите склад'); return; }
+  if (!reason) { $('woErr').innerHTML = errBar('Укажите причину списания'); return; }
+  if (!WO.items.length) { $('woErr').innerHTML = errBar('Добавьте хотя бы один товар'); return; }
+  const btn = $('woPost'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Проведение…'; }
+  try {
+    const body = {
+      warehouseId: WO.whId,
+      reason,
+      writtenBy: state.user || 'администратор',
+      comment: WO.comment || null,
+      post: true,
+      items: WO.items.map(it => ({
+        variantId: it.variantId, productId: it.productId,
+        c1ProdRef: it.c1ProdRef, c1CharRef: it.c1CharRef,
+        sizeLabel: it.sizeLabel, productName: it.productName,
+        shortCode: it.shortCode, price: it.price, qty: it.qty,
+      })),
+    };
+    const d = await posApi('?action=writeoff-doc-create', { method:'POST', body: JSON.stringify(body) });
+    WO.result = { doc: d.doc, shortfalls: d.shortfalls || [] };
+    WO.items = []; WO.comment = '';
+    state.cache = {}; // сбросить кеши остатков
+    woPaint();
+  } catch (e) {
+    $('woErr').innerHTML = errBar('Ошибка проведения: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '✓ Провести списание'; }
+  }
+}
+
+function woDoneHTML() {
+  const r = WO.result || {}; const d = r.doc || {};
+  const sf = r.shortfalls || [];
+  const sfHTML = sf.length ? `
+    <div class="tr-info warn"><span class="tr-info-ic">⚠️</span><div>По части позиций экземпляров было меньше запрошенного — списано сколько было:<ul class="wo-sf">${sf.map(s=>`<li>${esc(s.product_name||'Товар')}${s.size_label?' (разм. '+esc(s.size_label)+')':''}: запрошено ${fmtInt(s.requested)}, списано ${fmtInt(s.written)}</li>`).join('')}</ul></div></div>` : '';
+  return `
+  <div class="tr-wrap">
+    <div class="tr-card">
+      <div class="wo-done-ic">✅</div>
+      <h2 class="wo-done-title">Списание проведено</h2>
+      <div class="tr-conf-grid">
+        <div class="tr-conf-row"><span>Документ</span><b>${esc(d.doc_number||'—')}</b></div>
+        <div class="tr-conf-row"><span>Склад</span><b>${esc(d.warehouse_name||WO.whName||'—')}</b></div>
+        <div class="tr-conf-row"><span>Причина</span><b>${esc(d.reason||'—')}</b></div>
+        <div class="tr-conf-row"><span>Списал</span><b>${esc(d.written_by||state.user||'—')}</b></div>
+        <div class="tr-conf-row"><span>Позиций</span><b>${fmtInt(d.items_count||0)}</b></div>
+        <div class="tr-conf-row"><span>Единиц списано</span><b>${fmtInt(d.units_count||0)}</b></div>
+        <div class="tr-conf-row"><span>Сумма</span><b>${fmtNum(d.sum_total||0)} ${CUR}</b></div>
+      </div>
+      ${sfHTML}
+      <div class="tr-actions">
+        <button class="tr-btn tr-btn-ghost" id="woNew">➕ Новое списание</button>
+        <button class="tr-btn tr-btn-outline" id="woGoJournal">📒 К документам</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function woBindDone() {
+  const on = (id, fn) => { const el=$(id); if (el) el.addEventListener('click', fn); };
+  on('woNew', () => { WO.result=null; WO.mode='new'; woPaint(); });
+  on('woGoJournal', () => { WO.result=null; WO.mode='journal'; WO.jDoc=null; woLoadJournal(); });
+}
+
+// ──────────────────── ЖУРНАЛ ДОКУМЕНТОВ ────────────────────
+async function woLoadJournal() {
+  WO.jBusy = true; WO.jList = WO.jList; woPaint();
+  try {
+    let qs = '?action=writeoff-doc-list&limit=300';
+    if (WO.jWh) qs += '&warehouseId='+encodeURIComponent(WO.jWh);
+    if (WO.jReason) qs += '&reason='+encodeURIComponent(WO.jReason);
+    if (WO.jStatus) qs += '&status='+encodeURIComponent(WO.jStatus);
+    if (WO.jFrom) qs += '&from='+encodeURIComponent(WO.jFrom);
+    if (WO.jTo) qs += '&to='+encodeURIComponent(WO.jTo);
+    const d = await posApi(qs, { method:'GET' });
+    WO.jList = d.docs || [];
+  } catch (e) { WO.jList = []; }
+  WO.jBusy = false; woPaint();
+}
+
+function woStatusBadge(st) {
+  return st === 'posted'
+    ? '<span class="tr-badge tr-badge-ok">Проведён</span>'
+    : '<span class="tr-badge tr-badge-draft">Черновик</span>';
+}
+
+function woJournalHTML() {
+  const whOpts = `<option value="">Все склады</option>` + WO.warehouses.map(w=>`<option value="${esc(w.id)}" ${w.id===WO.jWh?'selected':''}>${esc(w.name)}</option>`).join('');
+  const reasonOpts = `<option value="">Все причины</option>` + WO_REASONS.map(r=>`<option value="${esc(r)}" ${r===WO.jReason?'selected':''}>${esc(r)}</option>`).join('');
+  const docs = WO.jList || [];
+  const rows = docs.map(d => `
+    <tr class="tr-jrow" data-open="${esc(d.id)}">
+      <td><b>${esc(d.doc_number)}</b></td>
+      <td>${esc((d.doc_date||d.created_at||'').slice(0,10).split('-').reverse().join('.'))}</td>
+      <td>${esc(d.warehouse_name||'—')}</td>
+      <td>${esc(d.reason||'—')}</td>
+      <td>${esc(d.written_by||'—')}</td>
+      <td class="c">${fmtInt(d.items_count||0)}</td>
+      <td class="c">${fmtInt(d.units_count||0)}</td>
+      <td class="c">${fmtNum(d.sum_total||0)}</td>
+      <td class="c">${woStatusBadge(d.status)}</td>
+    </tr>`).join('');
+  return `
+  <div class="tr-wrap wo-wrap-wide">
+    <div class="tr-card">
+      <div class="tr-card-head sm"><span class="tr-ic">📒</span><div><h2>Документы списания</h2><p>История списаний по складам</p></div></div>
+      <div class="wo-jfilters">
+        <select class="tr-select" id="woJWh">${whOpts}</select>
+        <select class="tr-select" id="woJReason">${reasonOpts}</select>
+        <input type="date" class="tr-input" id="woJFrom" value="${esc(WO.jFrom)}" title="С даты">
+        <input type="date" class="tr-input" id="woJTo" value="${esc(WO.jTo)}" title="По дату">
+        <button class="tr-btn tr-btn-outline" id="woJApply">Применить</button>
+        <button class="tr-btn tr-btn-ghost" id="woJReset">Сброс</button>
+      </div>
+      <div class="tr-jfilters">
+        <button class="tr-chip ${WO.jStatus===''?'active':''}" data-jflt="">Все</button>
+        <button class="tr-chip ${WO.jStatus==='posted'?'active':''}" data-jflt="posted">Проведённые</button>
+        <button class="tr-chip ${WO.jStatus==='draft'?'active':''}" data-jflt="draft">Черновики</button>
+        <button class="tr-btn tr-btn-ghost" id="woJRefresh">↻ Обновить</button>
+      </div>
+      <div class="tbl-wrap">
+        <table class="tbl tr-tbl">
+          <thead><tr><th>№</th><th>Дата</th><th>Склад</th><th>Причина</th><th>Кто списал</th><th class="c">Позиций</th><th class="c">Единиц</th><th class="c">Сумма</th><th class="c">Статус</th></tr></thead>
+          <tbody>${WO.jBusy?'<tr><td colspan="9" class="tr-empty">⏳ Загрузка…</td></tr>':(rows || '<tr><td colspan="9" class="tr-empty">Документов нет</td></tr>')}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>`;
+}
+
+function woBindJournal() {
+  const on = (id, fn) => { const el=$(id); if (el) el.addEventListener('click', fn); };
+  on('woJApply', () => {
+    WO.jWh = $('woJWh')?$('woJWh').value:''; WO.jReason = $('woJReason')?$('woJReason').value:'';
+    WO.jFrom = $('woJFrom')?$('woJFrom').value:''; WO.jTo = $('woJTo')?$('woJTo').value:'';
+    woLoadJournal();
+  });
+  on('woJReset', () => { WO.jWh=''; WO.jReason=''; WO.jFrom=''; WO.jTo=''; WO.jStatus=''; woLoadJournal(); });
+  on('woJRefresh', woLoadJournal);
+  document.querySelectorAll('[data-jflt]').forEach(b => b.addEventListener('click', () => { WO.jStatus=b.dataset.jflt; woLoadJournal(); }));
+  document.querySelectorAll('[data-open]').forEach(r => r.addEventListener('click', () => woOpenDoc(r.dataset.open)));
+}
+
+async function woOpenDoc(id) {
+  WO.jBusy = true;
+  try {
+    const d = await posApi('?action=writeoff-doc-get&id='+encodeURIComponent(id), { method:'GET' });
+    WO.jDoc = d.doc || null;
+  } catch (e) { WO.jDoc = null; }
+  WO.jBusy = false; woPaint();
+}
+
+function woDocCardHTML() {
+  const d = WO.jDoc || {};
+  const posted = d.status === 'posted';
+  const items = d.items || [];
+  const rows = items.map(it => `
+    <tr>
+      <td class="tr-td-name">${esc(it.product_name || '—')}</td>
+      <td class="c">${it.size_label?esc(it.size_label):'—'}</td>
+      <td class="c">${fmtInt(posted?(it.qty_written||0):(it.qty||0))}</td>
+      <td class="c">${fmtNum(it.price||0)}</td>
+      <td class="c"><b>${fmtNum((Number(it.price)||0)*(Number(posted?it.qty_written:it.qty)||0))}</b></td>
+    </tr>`).join('');
+  return `
+  <div class="tr-wrap wo-wrap-wide">
+    <div class="tr-card">
+      <div class="tr-doc-head">
+        <button class="tr-btn tr-btn-ghost" id="woDocBack">← К документам</button>
+        <div class="tr-doc-title">${esc(d.doc_number)} ${woStatusBadge(d.status)}</div>
+      </div>
+      <div class="tr-conf-grid">
+        <div class="tr-conf-row"><span>Склад</span><b>${esc(d.warehouse_name||'—')}</b></div>
+        <div class="tr-conf-row"><span>Причина</span><b>${esc(d.reason||'—')}</b></div>
+        <div class="tr-conf-row"><span>Дата</span><b>${esc((d.doc_date||d.created_at||'').slice(0,10).split('-').reverse().join('.'))}</b></div>
+        <div class="tr-conf-row"><span>Кто списал</span><b>${esc(d.written_by||'—')}</b></div>
+        <div class="tr-conf-row"><span>Единиц</span><b>${fmtInt(d.units_count||0)}</b></div>
+        <div class="tr-conf-row"><span>Сумма</span><b>${fmtNum(d.sum_total||0)} ${CUR}</b></div>
+        ${d.comment ? `<div class="tr-conf-row"><span>Комментарий</span><b>${esc(d.comment)}</b></div>`:''}
+      </div>
+      <div class="tr-info"><span class="tr-info-ic">ℹ️</span><div>${posted
+        ? 'Документ <b>проведён</b>. Экземпляры списаны, остаток уменьшен. «Отменить проведение» вернёт экземпляры в наличие.'
+        : 'Документ — <b>черновик</b>. Товар не списан, пока не нажмёте «Провести».'}</div></div>
+      <div class="tbl-wrap">
+        <table class="tbl tr-tbl">
+          <thead><tr><th class="tr-td-name">Товар</th><th class="c">Размер</th><th class="c">Кол-во</th><th class="c">Цена</th><th class="c">Сумма</th></tr></thead>
+          <tbody>${rows || '<tr><td colspan="5" class="tr-empty">Строк нет</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div id="woDocErr"></div>
+      <div class="tr-actions tr-doc-actions">
+        ${posted
+          ? '<button class="tr-btn tr-btn-outline" id="woUnpost">↩ Отменить проведение</button>'
+          : '<button class="tr-btn tr-btn-primary" id="woPostDoc">✓ Провести</button>'}
+        <button class="tr-btn tr-btn-danger" id="woDocDelete">🗑 Удалить документ</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function woBindDocCard() {
+  const on = (id, fn) => { const el=$(id); if (el) el.addEventListener('click', fn); };
+  const d = WO.jDoc || {};
+  on('woDocBack', () => { WO.jDoc=null; woPaint(); });
+  on('woPostDoc', () => woDocAction('writeoff-doc-post', { id: d.id }));
+  on('woUnpost', () => woDocAction('writeoff-doc-unpost', { id: d.id }));
+  on('woDocDelete', () => {
+    if (!confirm('Удалить документ '+ (d.doc_number||'') +'? Если проведён — экземпляры вернутся в наличие.')) return;
+    woDocAction('writeoff-doc-delete', { id: d.id }, true);
+  });
+}
+
+async function woDocAction(action, body, backToList) {
+  const errBox = $('woDocErr');
+  try {
+    const d = await posApi('?action='+action, { method:'POST', body: JSON.stringify(body) });
+    state.cache = {};
+    if (backToList) { WO.jDoc = null; woLoadJournal(); return; }
+    WO.jDoc = d.doc || WO.jDoc;
+    woPaint();
+  } catch (e) { if (errBox) errBox.innerHTML = errBar('Ошибка: ' + e.message); }
+}
+
+
 const TR = {
   mode: 'new',         // new (мастер создания) | journal (журнал документов)
   step: 'setup',       // setup | scan | added | list | check | confirm | done
@@ -4323,14 +5508,35 @@ function trDocCardHTML() {
   const d = TR.jDoc || {};
   const posted = d.status === 'posted';
   const items = d.items || [];
-  const rows = items.map(it => `
-    <tr>
-      <td>${esc(it.product_name || '—')}</td>
-      <td class="c"><span class="tr-code">${esc(String(it.unique_barcode||'').slice(-4))}</span></td>
-      <td class="c">${esc(it.size_label || '—')}</td>
+  // Группируем строки документа по товару (поля бэка: product_name/unique_barcode/size_label).
+  const jItems = items.map(it => ({
+    name: it.product_name || '—',
+    productCode: it.product_code || it.productCode || '',
+    productC1Ref: it.product_c1_ref || it.c1_prod_ref || null,
+    barcode: it.unique_barcode || '',
+    sizeLabel: it.size_label || '',
+    moved: it.moved,
+    id: it.id,
+    qty: 1,
+  }));
+  const jGroups = trGroupItems(jItems);
+  const rows = jGroups.map(g => {
+    const head = `
+    <tr class="tr-grp-head">
+      <td colspan="3"><div class="tr-nm">${esc(g.name)}</div>${g.productCode ? `<div class="tr-nm-sub">${esc(g.productCode)}</div>` : ''}</td>
+      <td class="c tr-grp-qty">${fmtInt(g.rows.length)} шт.</td>
+      <td class="c"></td>
+    </tr>`;
+    const sizeRows = g.rows.map(it => `
+    <tr class="tr-grp-row">
+      <td class="tr-td-size"><span class="tr-size-dot">•</span> Размер ${esc(it.sizeLabel || '—')}</td>
+      <td class="c"><span class="tr-code">${esc(String(it.barcode||'').slice(-4))}</span></td>
+      <td class="c">${esc(it.sizeLabel || '—')}</td>
       <td class="c">${it.moved ? '<span class="tr-badge tr-badge-ok">✓</span>' : '<span class="tr-badge tr-badge-draft">—</span>'}</td>
       <td class="c"><button class="tr-del" data-rm="${esc(it.id)}" title="Убрать из документа">✕</button></td>
     </tr>`).join('');
+    return head + sizeRows;
+  }).join('');
   return `
   <div class="tr-wrap">
     <div class="tr-card">
@@ -4358,8 +5564,8 @@ function trDocCardHTML() {
       <div id="trDocErr"></div>
 
       <div class="tbl-wrap">
-        <table class="tbl tr-tbl">
-          <thead><tr><th>Товар</th><th class="c">Код</th><th class="c">Размер</th><th class="c">Перем.</th><th class="c"></th></tr></thead>
+        <table class="tbl tr-tbl tr-tbl-grouped">
+          <thead><tr><th>Товар / размер</th><th class="c">Код</th><th class="c">Размер</th><th class="c">Перем.</th><th class="c"></th></tr></thead>
           <tbody>${rows || '<tr><td colspan="5" class="tr-empty">Строк нет</td></tr>'}</tbody>
         </table>
       </div>
@@ -4457,14 +5663,32 @@ function trPrintDocData(d) {
   const P = (s) => String(s == null ? '' : s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  const rowsHtml = items.length
-    ? items.map((it, i) => `
-      <tr>
-        <td class="n">${i + 1}</td>
-        <td>${P(it.product_name || '—')}</td>
-        <td class="c">${P(it.size_label || '—')}</td>
-        <td class="c mono">${P(it.unique_barcode || '—')}</td>
-      </tr>`).join('')
+  // Группируем печатные строки по товару: товар — заголовок, под ним его размеры.
+  const pItems = items.map(it => ({
+    name: it.product_name || '—',
+    productCode: it.product_code || it.productCode || '',
+    productC1Ref: it.product_c1_ref || it.c1_prod_ref || null,
+    barcode: it.unique_barcode || '',
+    sizeLabel: it.size_label || '',
+    qty: 1,
+  }));
+  const pGroups = trGroupItems(pItems);
+  const rowsHtml = pGroups.length
+    ? pGroups.map((g, gi) => {
+        const head = `
+      <tr class="grp">
+        <td class="n">${gi + 1}</td>
+        <td colspan="3"><b>${P(g.name)}</b>${g.productCode ? ` <span class="pcode">(${P(g.productCode)})</span>` : ''} <span class="gqty">— ${g.rows.length} шт.</span></td>
+      </tr>`;
+        const sizeRows = g.rows.map(it => `
+      <tr class="sz">
+        <td class="n"></td>
+        <td class="sizecell">Размер ${P(it.sizeLabel || '—')}</td>
+        <td class="c">${P(it.sizeLabel || '—')}</td>
+        <td class="c mono">${P(it.barcode || '—')}</td>
+      </tr>`).join('');
+        return head + sizeRows;
+      }).join('')
     : `<tr><td colspan="4" class="empty">Строк нет</td></tr>`;
 
   const html = `<!doctype html>
@@ -4492,6 +5716,11 @@ function trPrintDocData(d) {
   td.c, th.c { text-align:center; }
   td.mono { font-family:'Consolas','Courier New',monospace; font-size:11px; letter-spacing:.3px; }
   td.empty { text-align:center; color:#888; padding:18px; }
+  tr.grp td { background:#eef2f5; font-size:12.5px; padding-top:7px; padding-bottom:7px; }
+  tr.grp .pcode { color:#666; font-weight:400; font-size:11px; }
+  tr.grp .gqty { color:#555; font-weight:600; font-size:11px; }
+  tr.sz td.sizecell { padding-left:22px; color:#333; }
+  tr.sz td { font-size:11.5px; }
   .total { margin-top:10px; font-size:13px; font-weight:700; text-align:right; }
   .signs { display:flex; justify-content:space-between; margin-top:42px; gap:40px; }
   .signs div { flex:1; }
@@ -4545,6 +5774,45 @@ function trPrintDocData(d) {
 const trUnits = () => TR.items.reduce((s, it) => s + (Number(it.qty) || 1), 0);
 const trUniqCodes = () => new Set(TR.items.map(i => i.barcode)).size;
 const last4 = (bc) => String(bc || '').slice(-4);
+
+// ── Группировка позиций по ТОВАРУ (для отображения) ──
+// Сканировать можно вразброс — в списке/документе один товар и все его размеры под ним.
+// Ключ группы: productC1Ref (1С) → productCode → name. Внутри группы размеры
+// сортируются по возрастанию. Каждая строка хранит origIdx — реальный индекс в TR.items
+// (нужен для удаления). Порядок групп — по первому появлению при сканировании.
+// Универсальный сорт размеров: число как число, иначе как строка (33 < 36 < XL и т.п.).
+function trSizeKey(s) {
+  const t = String(s == null ? '' : s).trim();
+  const n = parseFloat(t.replace(',', '.'));
+  return { num: isNaN(n) ? null : n, str: t.toLowerCase() };
+}
+function trSortSizes(a, b) {
+  const ka = trSizeKey(a.sizeLabel), kb = trSizeKey(b.sizeLabel);
+  if (ka.num != null && kb.num != null) return ka.num - kb.num;
+  if (ka.num != null) return -1;   // числовые размеры выше буквенных
+  if (kb.num != null) return 1;
+  return ka.str.localeCompare(kb.str, 'ru');
+}
+// items: массив вида TR.items. Возвращает [{ key, name, productCode, productC1Ref, order, rows:[{...it, origIdx}] }]
+function trGroupItems(items) {
+  const arr = Array.isArray(items) ? items : [];
+  const map = new Map();
+  arr.forEach((it, idx) => {
+    const key = it.productC1Ref || it.productCode || it.name || ('__' + idx);
+    let g = map.get(key);
+    if (!g) {
+      g = { key, name: it.name || '—', productCode: it.productCode || '', productC1Ref: it.productC1Ref || null, order: map.size, rows: [] };
+      map.set(key, g);
+    }
+    g.rows.push(Object.assign({}, it, { origIdx: idx }));
+  });
+  const groups = Array.from(map.values());
+  groups.forEach(g => g.rows.sort(trSortSizes));
+  groups.sort((a, b) => a.order - b.order);
+  return groups;
+}
+// Кол-во единиц в группе (сумма qty, native/1С — по 1 на экземпляр)
+function trGroupUnits(g) { return g.rows.reduce((s, r) => s + (Number(r.qty) || 1), 0); }
 
 // ── Экран 1: выбор складов ──
 function trSetupHTML() {
@@ -4617,25 +5885,37 @@ function trAddedHTML() {
 
 // ── Экран 4: список товаров ──
 function trListHTML() {
-  const rows = TR.items.map((it, i) => `
-    <tr>
-      <td class="tr-td-name"><div class="tr-nm">${esc(it.name || '—')}</div><div class="tr-nm-sub">${esc(it.productCode || '')}</div></td>
+  // Группируем по товару: один товар — заголовок группы, под ним все его размеры.
+  const groups = trGroupItems(TR.items);
+  const rows = groups.map(g => {
+    const head = `
+    <tr class="tr-grp-head">
+      <td class="tr-td-name" colspan="3"><div class="tr-nm">${esc(g.name)}</div>${g.productCode ? `<div class="tr-nm-sub">${esc(g.productCode)}</div>` : ''}</td>
+      <td class="c tr-grp-qty">${fmtInt(trGroupUnits(g))} ед.</td>
+      <td class="c"></td>
+    </tr>`;
+    const sizeRows = g.rows.map(it => `
+    <tr class="tr-grp-row">
+      <td class="tr-td-size"><span class="tr-size-dot">•</span> Размер ${esc(it.sizeLabel || '—')}</td>
       <td class="c"><span class="tr-code">${esc(last4(it.barcode))}</span></td>
       <td class="c">${esc(it.sizeLabel || '—')}</td>
       <td class="c">${fmtInt(it.qty || 1)}</td>
-      <td class="c"><button class="tr-del" data-del="${i}" title="Убрать">✕</button></td>
+      <td class="c"><button class="tr-del" data-del="${it.origIdx}" title="Убрать">✕</button></td>
     </tr>`).join('');
+    return head + sizeRows;
+  }).join('');
   return `
   <div class="tr-wrap">
-    <div class="tr-kpis">
-      <div class="tr-kpi"><span>Товаров</span><b>${fmtInt(TR.items.length)}</b></div>
+    <div class="tr-kpis three">
+      <div class="tr-kpi"><span>Товаров</span><b>${fmtInt(groups.length)}</b></div>
+      <div class="tr-kpi"><span>Позиций (размеров)</span><b>${fmtInt(TR.items.length)}</b></div>
       <div class="tr-kpi"><span>Всего единиц</span><b>${fmtInt(trUnits())}</b></div>
     </div>
     <div class="tr-card">
-      <div class="tr-card-head sm"><span class="tr-ic">📋</span><div><h2>Список товаров</h2><p>${esc(TR.fromName)} → ${esc(TR.toName)}</p></div></div>
+      <div class="tr-card-head sm"><span class="tr-ic">📋</span><div><h2>Список товаров</h2><p>${esc(TR.fromName)} → ${esc(TR.toName)} · сгруппировано по товару</p></div></div>
       <div class="tbl-wrap">
-        <table class="tbl tr-tbl">
-          <thead><tr><th>Товар</th><th class="c">Код</th><th class="c">Размер</th><th class="c">Кол-во</th><th class="c"></th></tr></thead>
+        <table class="tbl tr-tbl tr-tbl-grouped">
+          <thead><tr><th>Товар / размер</th><th class="c">Код</th><th class="c">Размер</th><th class="c">Кол-во</th><th class="c"></th></tr></thead>
           <tbody>${rows || '<tr><td colspan="5" class="tr-empty">Список пуст</td></tr>'}</tbody>
         </table>
       </div>
@@ -6610,9 +7890,16 @@ async function recvRenderAddSizePanel(it, panel) {
   let groups = {};
   try { groups = await recvLoadSizeCatalog(); } catch (e) { groups = {}; }
   const have = new Set((it.sizeGrid || []).map(recvSizeKeyL));
-  // собираем все метки из справочника в порядке групп, без уже имеющихся
+  // Сначала — родные размеры товара (productSizes), которых ещё нет в сетке; потом — весь справочник.
   const missing = [];
   const seen = new Set();
+  for (const lab of (Array.isArray(it.productSizes) ? it.productSizes : [])) {
+    const k = recvSizeKeyL(lab);
+    if (have.has(k) || seen.has(k)) continue;
+    seen.add(k); missing.push(lab);
+  }
+  const ownCount = missing.length; // сколько из них — родные размеры товара
+  // затем все метки из справочника в порядке групп, без уже имеющихся
   for (const g of RECV_SIZE_GROUP_ORDER) {
     const arr = groups[g]; if (!arr || !arr.length) continue;
     for (const s of arr) {
@@ -6622,10 +7909,10 @@ async function recvRenderAddSizePanel(it, panel) {
     }
   }
   const chips = missing.length
-    ? missing.map(lab => `<button type="button" class="recv-as-chip" data-uid="${it.uid}" data-size="${esc(lab)}">＋ ${esc(lab)}</button>`).join('')
+    ? missing.map((lab, i) => `<button type="button" class="recv-as-chip${i < ownCount ? ' recv-as-own' : ''}" data-uid="${it.uid}" data-size="${esc(lab)}" title="${i < ownCount ? 'Родной размер товара' : 'Из справочника'}">＋ ${esc(lab)}</button>`).join('')
     : `<span class="recv-as-empty">Все размеры из справочника уже в сетке. Добавьте свой ниже.</span>`;
   panel.innerHTML = `
-    <div class="recv-as-title">Добавить размер из справочника</div>
+    <div class="recv-as-title">Добавить размер${ownCount ? ' (родные размеры товара — выделены)' : ' из справочника'}</div>
     <div class="recv-as-chips">${chips}</div>
     <div class="recv-as-manual">
       <input class="finput recv-as-input" data-uid="${it.uid}" placeholder="свой размер (напр. 21, M, стандарт) и Enter">
@@ -6848,7 +8135,7 @@ function recvRowHTML(it) {
     const pv = ov ? esc(String(it.pricesBySize[sz])) : '';
     return `
         <div class="recv-size-cell">
-          <div class="recv-size-lbl">${esc(sz)}</div>
+          <div class="recv-size-lbl">${esc(sz)}<button type="button" class="recv-size-del" data-uid="${it.uid}" data-size="${esc(sz)}" title="Убрать размер">×</button></div>
           <input class="recv-size-inp" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" inputmode="numeric"
                  value="${it.sizes && it.sizes[sz] ? esc(String(it.sizes[sz])) : ''}" placeholder="–">
           <input class="recv-size-price ${ov ? 'recv-size-price-set' : ''}" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" step="0.01" inputmode="decimal"
@@ -6861,14 +8148,23 @@ function recvRowHTML(it) {
         <button type="button" class="recv-addsize-btn" data-uid="${it.uid}">＋ размер</button>
         <div class="recv-addsize-panel" data-uid="${it.uid}" style="display:none"></div>
       </div>`;
-  const sizesHTML = grid.length
-    ? `<div class="recv-sizes">${grid.map(sizeCell).join('')}</div>
+  // Товар без размеров (у номенклатуры нет размерной сетки) — одно поле количества.
+  const noSizesProduct = !(Array.isArray(it.productSizes) && it.productSizes.length);
+  let sizesHTML;
+  if (grid.length) {
+    sizesHTML = `<div class="recv-sizes">${grid.map(sizeCell).join('')}</div>
        ${addSizeUI}
-       <div class="recv-sizes-hint">Цена под размером — отдельная (пусто = общая ${fmtNum(effP)} ${CUR}). Нет нужного размера — кнопка «＋ размер». Диапазоны и «применить всем» — в калькуляторе (🧮).</div>`
-    : `<div class="recv-nosize"><label class="recv-lbl">Количество (шт.)</label>
+       <div class="recv-sizes-hint">Цена под размером — отдельная (пусто = общая ${fmtNum(effP)} ${CUR}). Размер можно убрать кнопкой ×, добавить — «＋ размер». Диапазоны и «применить всем» — в калькуляторе (🧮).</div>`;
+  } else if (noSizesProduct) {
+    sizesHTML = `<div class="recv-nosize"><label class="recv-lbl">Количество (шт.)</label>
         <input class="recv-size-inp recv-qty-solo" data-uid="${it.uid}" data-size="_" type="number" min="0" inputmode="numeric"
                value="${it.sizes && it.sizes['_'] ? esc(String(it.sizes['_'])) : ''}" placeholder="0"></div>
        ${addSizeUI}`;
+  } else {
+    // У товара есть размеры, но ни один ещё не добавлен — просим добавить вручную.
+    sizesHTML = `<div class="recv-sizes-empty">Размеры не добавлены. Нажмите «＋ размер» и выберите нужные.</div>
+       ${addSizeUI}`;
+  }
   const active = it.uid === recv.activeCalcUid ? 'recv-row-active' : '';
   return `
     <div class="recv-row ${active}" data-uid="${it.uid}">
@@ -7192,7 +8488,9 @@ function recvAddProduct(p) {
   // не дублируем: если товар уже в документе — просто подсветим
   const exist = recv.items.find(x => x.product_id === p.id);
   if (exist) { recv.activeCalcUid = exist.uid; recvPaint(); return; }
-  const it = { uid: recvNewUid(), product_id: p.id, product_name: p.name, sku: p.sku || '', category: p.category || '', sizeGrid: p.sizeGrid || [], sizes: {}, ...recvDefaultCalc() };
+  // Размеры НЕ подставляются автоматически. Пользователь добавляет их вручную кнопкой «＋ размер».
+  // Родные размеры товара сохраняем отдельно (productSizes) — панель добавления предложит их первыми.
+  const it = { uid: recvNewUid(), product_id: p.id, product_name: p.name, sku: p.sku || '', category: p.category || '', productSizes: Array.isArray(p.sizeGrid) ? p.sizeGrid.slice() : [], sizeGrid: [], sizes: {}, ...recvDefaultCalc() };
   // v1.2.30 — если у товара уже есть цена в базе — подставляем её как редактируемую
   if (p.basePrice != null && Number(p.basePrice) > 0) {
     it.base_price = Math.round(Number(p.basePrice) * 100) / 100;
@@ -7226,6 +8524,19 @@ function recvBindItems() {
       if (v === '' || Number(v) <= 0) { delete it.pricesBySize[sz]; inp.classList.remove('recv-size-price-set'); }
       else { it.pricesBySize[sz] = Math.round(Number(v) * 100) / 100; inp.classList.add('recv-size-price-set'); }
       recvPersist();
+    };
+  });
+  // Кнопка × у размера: убрать размер из сетки позиции
+  document.querySelectorAll('.recv-size-del').forEach(btn => {
+    btn.onclick = () => {
+      const it = recv.items.find(x => x.uid === btn.dataset.uid); if (!it) return;
+      const sz = btn.dataset.size;
+      const k = recvSizeKeyL(sz);
+      it.sizeGrid = (it.sizeGrid || []).filter(s => recvSizeKeyL(s) !== k);
+      if (it.sizes) delete it.sizes[sz];
+      if (it.pricesBySize) delete it.pricesBySize[sz];
+      recvPersist();
+      recvPaint();
     };
   });
   // v1.2.49 — кнопка «＋ размер»: раскрыть/свернуть панель добавления
@@ -8263,7 +9574,9 @@ function invRenderAct(act) {
     <td class="r tnum">${invMoney(o.sum)}</td>
     <td class="muted">${note || ''}</td></tr>`;
 
-  const missingList = (d.missing || []).slice(0, 500);
+  // v2: список недостач больше НЕ используется для списания (backend сам
+  // вычисляет все missing по allMissing:true). Оставляем только для превью.
+  const missingList = (d.missing || []);
   const reviveList = (d.revived || []);
   const moveList = (d.moved || []);
 
@@ -8339,12 +9652,13 @@ function invRenderAct(act) {
   if (bWo) bWo.onclick = async () => {
     const reason = ($('invWoReason').value || '').trim();
     if (!reason) { alert('Укажите причину списания.'); return; }
-    if (!confirm(`СПИСАТЬ ${s.missing.count} экз. на ${fmtNum(s.missing.sum)} ${CUR}? Причина: ${reason}`)) return;
+    if (!confirm(`СПИСАТЬ ВСЕ недостачи (${s.missing.count} экз. на ${fmtNum(s.missing.sum)} ${CUR})? Причина: ${reason}`)) return;
     bWo.disabled = true; bWo.textContent = 'Списываю…';
     try {
-      const missingIds = missingList.map(x => x.id).filter(Boolean);
-      const rr = await invcApi('?action=inv-writeoff', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId, reason, missingIds, appliedBy: state.user || 'admin' }) });
-      alert(`Списано: ${rr.written} экз.`);
+      // v2 (надёжный): backend сам вычисляет и списывает ВСЕ недостачи сессии.
+      // Не передаём missingIds — устраняет прежний лимит 500 и устаревшие данные.
+      const rr = await invcApi('?action=inv-writeoff', { method: 'POST', body: JSON.stringify({ sessionId: act.sessionId, reason, allMissing: true, appliedBy: state.user || 'admin' }) });
+      alert(`Списано: ${rr.written} экз.` + (rr.requested && rr.written !== rr.requested ? ` (из ${rr.requested} кандидатов; часть уже была не в наличии)` : ''));
       invState.act = null; renderInventory(true);
     } catch (e) { alert('Ошибка: ' + e.message); bWo.disabled = false; bWo.textContent = `Списать недостачи (${fmtInt(s.missing.count)})`; }
   };
@@ -8456,7 +9770,1590 @@ function invStartPoll(id) {
 
 
 // ══════════════════════════════════════════════════════════
+//  РАЗДЕЛ: СКЛАД — Остатки и оценка складов
+//  Данные из /api/pos?action=wh-* (модуль _warehouse.js).
+//  Дизайн по макету: зелёный акцент, суб-табы, KPI, шкала движения,
+//  график по дням, таблицы остатков/оценки, залежавшиеся, онлайн-журнал.
+// ══════════════════════════════════════════════════════════
+
+const whState = {
+  tab: 'overview',                 // overview|bywh|byprod|movement|stale
+  from: '', to: '',                // период (YYYY-MM-DD)
+  wh: '',                          // склад ('' = все)
+  category: '',                    // категория ('' = все)
+  productId: '',                   // товар ('' = все)
+  valMode: 'cost',                 // 'qty' | 'cost' — переключатель в «Оценка складов»
+  filters: null,                   // справочники (склады/категории/товары)
+  booted: false,
+};
+
+function whQS() {
+  const p = new URLSearchParams();
+  if (whState.from) p.set('from', whState.from);
+  if (whState.to) p.set('to', whState.to);
+  if (whState.wh) p.set('wh', whState.wh);
+  if (whState.category) p.set('category', whState.category);
+  if (whState.productId) p.set('product', whState.productId);
+  return p.toString();
+}
+
+async function whApi(action, extra) {
+  const qs = whQS();
+  const path = `?action=${action}${qs ? '&' + qs : ''}${extra ? '&' + extra : ''}`;
+  return posApi(path, { method: 'GET' });
+}
+
+// Пресеты периода (Душанбе +05)
+function whPreset(kind) {
+  const now = new Date(Date.now() + 5 * 3600 * 1000);
+  const ymd = (d) => d.toISOString().slice(0, 10);
+  let from, to;
+  const today = ymd(now);
+  if (kind === 'today') { from = to = today; }
+  else if (kind === 'yesterday') { const y = new Date(now.getTime() - 86400000); from = to = ymd(y); }
+  else if (kind === '7') { const s = new Date(now.getTime() - 6 * 86400000); from = ymd(s); to = today; }
+  else if (kind === '30') { const s = new Date(now.getTime() - 29 * 86400000); from = ymd(s); to = today; }
+  else if (kind === 'month') { const s = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); from = ymd(s); to = today; }
+  whState.from = from; whState.to = to;
+}
+
+async function renderWarehouse(force) {
+  const box = $('whBody');
+  if (!whState.booted || force) {
+    // дефолтный период — сегодня
+    if (!whState.from) whPreset('today');
+    box.innerHTML = `<div class="loading">⏳ Загружаю раздел склада…</div>`;
+    try {
+      whState.filters = await whApi('wh-filters');
+    } catch (e) {
+      box.innerHTML = errBar('Не удалось загрузить справочники: ' + e.message);
+      return;
+    }
+    whState.booted = true;
+  }
+  whRenderShell();
+  whRenderTab();
+}
+
+// ── Каркас: суб-табы + панель фильтров ────────────────────────────────────────
+function whRenderShell() {
+  const box = $('whBody');
+  const f = whState.filters || { warehouses: [], categories: [], products: [], brandsAvailable: false };
+  const tabs = [
+    ['overview', 'Обзор'],
+    ['bywh', 'По складам'],
+    ['byprod', 'По товарам'],
+    ['movement', 'Движение'],
+    ['stale', 'Залежавшиеся товары'],
+  ];
+  const tabsHtml = tabs.map(([k, l]) =>
+    `<button class="wh-subtab ${whState.tab === k ? 'active' : ''}" data-whtab="${k}">${l}</button>`).join('');
+
+  const whOpts = ['<option value="">Все склады</option>']
+    .concat((f.warehouses || []).map(w => `<option value="${w.id}" ${whState.wh === w.id ? 'selected' : ''}>${esc(w.name)}</option>`)).join('');
+  const catOpts = ['<option value="">Все категории</option>']
+    .concat((f.categories || []).map(c => `<option value="${esc(c)}" ${whState.category === c ? 'selected' : ''}>${esc(c)}</option>`)).join('');
+  const brandDisabled = f.brandsAvailable ? '' : 'disabled';
+  const prodOpts = ['<option value="">Все товары</option>']
+    .concat((f.products || []).slice(0, 1000).map(p => `<option value="${p.id}" ${whState.productId === p.id ? 'selected' : ''}>${esc(p.name)}</option>`)).join('');
+
+  const presets = [['today', 'Сегодня'], ['yesterday', 'Вчера'], ['7', '7 дней'], ['30', '30 дней'], ['month', 'Месяц']];
+  const presetHtml = presets.map(([k, l]) => `<button class="wh-preset" data-whpreset="${k}">${l}</button>`).join('');
+
+  box.innerHTML = `
+    <div class="wh-subtabs">${tabsHtml}</div>
+    <div class="wh-filters">
+      <div class="wh-fgroup">
+        <label class="flabel">Период</label>
+        <div class="wh-period">
+          <input type="date" id="whFrom" class="tool-date" value="${whState.from}">
+          <span class="date-sep">—</span>
+          <input type="date" id="whTo" class="tool-date" value="${whState.to}">
+        </div>
+        <div class="wh-presets">${presetHtml}</div>
+      </div>
+      <div class="wh-fgroup">
+        <label class="flabel">Склад</label>
+        <select id="whWh" class="tool-select">${whOpts}</select>
+      </div>
+      <div class="wh-fgroup">
+        <label class="flabel">Категория</label>
+        <select id="whCat" class="tool-select">${catOpts}</select>
+      </div>
+      <div class="wh-fgroup">
+        <label class="flabel">Бренд</label>
+        <select id="whBrand" class="tool-select" ${brandDisabled}><option value="">${f.brandsAvailable ? 'Все бренды' : 'Бренды не заведены'}</option></select>
+      </div>
+      <div class="wh-fgroup wh-fgroup-grow">
+        <label class="flabel">Товар</label>
+        <select id="whProd" class="tool-select">${prodOpts}</select>
+      </div>
+      <div class="wh-fgroup wh-fbtns">
+        <button class="btn-primary" id="whApply">Применить</button>
+        <button class="btn-ghost" id="whReset">Сбросить</button>
+      </div>
+    </div>
+    <div id="whTabBody"><div class="loading">⏳ Загрузка…</div></div>
+  `;
+
+  // события
+  box.querySelectorAll('[data-whtab]').forEach(b => b.addEventListener('click', () => {
+    whState.tab = b.dataset.whtab; whRenderShell(); whRenderTab();
+  }));
+  box.querySelectorAll('[data-whpreset]').forEach(b => b.addEventListener('click', () => {
+    whPreset(b.dataset.whpreset);
+    $('whFrom').value = whState.from; $('whTo').value = whState.to;
+    whRenderTab();
+  }));
+  $('whApply').addEventListener('click', () => {
+    whState.from = $('whFrom').value; whState.to = $('whTo').value;
+    whState.wh = $('whWh').value; whState.category = $('whCat').value; whState.productId = $('whProd').value;
+    whRenderTab();
+  });
+  $('whReset').addEventListener('click', () => {
+    whState.wh = ''; whState.category = ''; whState.productId = ''; whPreset('today');
+    whRenderShell(); whRenderTab();
+  });
+}
+
+function whRenderTab() {
+  if (whState.tab === 'overview') whTabOverview();
+  else if (whState.tab === 'bywh') whTabByWarehouse();
+  else if (whState.tab === 'byprod') whTabByProduct();
+  else if (whState.tab === 'movement') whTabMovement();
+  else if (whState.tab === 'stale') whTabStale();
+}
+
+// Деньги для склада (2 знака + сомони)
+function whMoney(n) { return `${fmtNum(n || 0)} <span class="cur">${CUR}</span>`; }
+function whInt(n) { const v = Number(n) || 0; return (v > 0 ? '+' : '') + fmtInt(v); }
+function whIntPlain(n) { return fmtInt(Number(n) || 0); }
+
+// ══════════════════════════════════════════════════════════
+//  ТАБ: ОБЗОР — KPI + шкала движения + график + оценка/склады
+// ══════════════════════════════════════════════════════════
+async function whTabOverview() {
+  const box = $('whTabBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю показатели…</div>`;
+  try {
+    const [ov, bw, mv] = await Promise.all([
+      whApi('wh-overview'),
+      whApi('wh-by-warehouse'),
+      whApi('wh-movement'),
+    ]);
+    const k = ov.kpi;
+    // 6 KPI
+    const kpis = [
+      whKpiCard('🟢', 'Остаток сейчас', k.stockNow.qty, k.stockNow.cost, '', 'На сумму (себестоимость)', k.stockNow.costCovered, k.stockNow.qty),
+      whKpiCard('🕐', 'Было на начало периода', k.startStock.qty, null, 'gray', 'На сумму (себестоимость)', 0, 0, true),
+      whKpiCard('⬇️', 'Поступило', k.received.qty, k.received.cost, 'green', 'На сумму (себестоимость)', null, null, false, true),
+      whKpiCard('🛒', 'Продано', -Math.abs(k.sold.qty), k.sold.retail, 'red', 'На сумму (розница)', k.sold.retailCovered, k.sold.qty, false, false, true),
+      whKpiCard('🗑', 'Списано', -Math.abs(k.writtenOff.qty), k.writtenOff.cost, 'amber', 'На сумму (себестоимость)', k.writtenOff.costCovered, k.writtenOff.qty),
+      whKpiMoveNet(k.moveNet),
+    ].join('');
+
+    // Шкала движения
+    const ladder = whLadder(ov.ladder, ov.movesBar);
+    // Оценка складов + таблица складов
+    const bwTable = whBuildByWhTable(bw);
+    const valTable = whBuildValTable(bw);
+
+    box.innerHTML = `
+      <div class="wh-kpis">${kpis}</div>
+      ${ov.coverage && ov.coverage.stockCostCoveragePct < 50 ?
+        `<div class="wh-note">ℹ Себестоимость доступна для ${ov.coverage.stockCostCoveragePct}% остатка (только товары нового модуля поступлений). Розница покрывает ${ov.coverage.stockRetailCoveragePct}%.</div>` : ''}
+      <div class="wh-grid2">
+        <div class="wh-panel">
+          <div class="wh-panel-h">Движение остатков за период: ${whState.from} — ${whState.to}</div>
+          ${ladder}
+        </div>
+        <div class="wh-panel">
+          <div class="wh-panel-h">Остатки и стоимость по дням</div>
+          <div class="wh-chart-legend">
+            <span><i class="dot" style="background:#10b981"></i> Количество (ед.)</span>
+            <span><i class="dot" style="background:#3b82f6"></i> Стоимость (себестоимость)</span>
+          </div>
+          <div class="wh-chart-wrap"><canvas id="whDaysChart"></canvas></div>
+        </div>
+      </div>
+      <div class="wh-grid2">
+        <div class="wh-panel">
+          <div class="wh-panel-h">Остатки по складам</div>
+          ${bwTable}
+        </div>
+        <div class="wh-panel">
+          <div class="wh-panel-h wh-panel-h-row">
+            <span>Оценка складов</span>
+            <div class="wh-seg">
+              <button class="wh-seg-btn ${whState.valMode === 'qty' ? 'active' : ''}" data-valmode="qty">Количество</button>
+              <button class="wh-seg-btn ${whState.valMode === 'cost' ? 'active' : ''}" data-valmode="cost">Стоимость</button>
+            </div>
+          </div>
+          <div id="whValTable">${valTable}</div>
+        </div>
+      </div>
+      <div class="wh-grid2">
+        <div class="wh-panel" id="whStalePanel"><div class="loading">⏳ Залежавшиеся…</div></div>
+        <div class="wh-panel" id="whScanPanel"><div class="loading">⏳ Журнал…</div></div>
+      </div>
+    `;
+
+    // График по дням
+    whDrawDaysChart('whDaysChart', mv.days || []);
+    // Переключатель оценки
+    box.querySelectorAll('[data-valmode]').forEach(b => b.addEventListener('click', () => {
+      whState.valMode = b.dataset.valmode;
+      $('whValTable').innerHTML = whBuildValTable(bw);
+      whBindValSeg(bw);
+    }));
+    // drill по KPI/строкам шкалы
+    whBindDrill(box);
+    // Залежавшиеся (мини) + журнал сканов
+    whLoadStaleMini();
+    whLoadScanFeed();
+  } catch (e) {
+    box.innerHTML = errBar('Ошибка обзора склада: ' + e.message);
+  }
+}
+
+function whBindValSeg(bw) {
+  const box = $('whTabBody');
+  box.querySelectorAll('[data-valmode]').forEach(b => b.addEventListener('click', () => {
+    whState.valMode = b.dataset.valmode;
+    $('whValTable').innerHTML = whBuildValTable(bw);
+    whBindValSeg(bw);
+  }));
+}
+
+// KPI-карточка: кол-во + сумма
+function whKpiCard(ic, label, qty, sum, tone, sumLabel, covered, total, noSum, isPlus, isMinus) {
+  let qtyHtml;
+  const q = Number(qty) || 0;
+  if (isPlus) qtyHtml = `<span class="wh-pos">${whInt(q)} ед.</span>`;
+  else if (isMinus) qtyHtml = `<span class="wh-neg">${whInt(q)} ед.</span>`;
+  else qtyHtml = `${fmtInt(Math.abs(q))} ед.`;
+  const sumHtml = noSum ? '<span class="wh-muted">—</span>'
+    : (sum == null ? '<span class="wh-muted">нет данных</span>' : whMoney(sum));
+  const cov = (covered != null && total != null && total > 0 && covered < total)
+    ? `<span class="wh-cov" title="Покрытие суммой">${covered}/${total}</span>` : '';
+  return `<div class="wh-kpi" data-drill="${label}">
+    <div class="wh-kpi-top"><span class="wh-kpi-ic ${tone || ''}">${ic}</span><span class="wh-kpi-label">${label}</span></div>
+    <div class="wh-kpi-qty">${qtyHtml}</div>
+    <div class="wh-kpi-sumlabel">${sumLabel}</div>
+    <div class="wh-kpi-sum">${sumHtml} ${cov}</div>
+  </div>`;
+}
+
+function whKpiMoveNet(mn) {
+  const net = Number(mn.qty) || 0;
+  const sign = net > 0 ? '+' : (net < 0 ? '' : '± ');
+  const cls = net > 0 ? 'wh-pos' : (net < 0 ? 'wh-neg' : '');
+  return `<div class="wh-kpi" data-drill="Перемещения (нетто)">
+    <div class="wh-kpi-top"><span class="wh-kpi-ic violet">⇄</span><span class="wh-kpi-label">Перемещения (нетто)</span></div>
+    <div class="wh-kpi-qty"><span class="${cls}">${sign}${fmtInt(net)} ед.</span></div>
+    <div class="wh-kpi-sumlabel">приход ${mn.in} · уход ${mn.out}</div>
+    <div class="wh-kpi-sum"><span class="wh-muted">между складами</span></div>
+  </div>`;
+}
+
+// Шкала движения (stepper) + полоса положительные/отрицательные
+function whLadder(l, bar) {
+  const step = (val, label, sub, tone, drill) => `
+    <div class="wh-step ${tone || ''}" ${drill ? `data-drill="${drill}"` : ''}>
+      <div class="wh-step-val">${val}</div>
+      <div class="wh-step-label">${label}</div>
+      ${sub ? `<div class="wh-step-sub">${sub}</div>` : ''}
+    </div>`;
+  const arrow = '<div class="wh-step-arrow">→</div>';
+  const steps = [
+    step(`${fmtInt(l.startQty)} ед.`, 'Было на начало', l.startCost != null ? whMoney(l.startCost) : '', 'neutral', 'Было на начало периода'),
+    step(`+${fmtInt(l.received)}`, 'Поступило', '', 'pos', 'Поступило'),
+    step(`+${fmtInt(l.movedIn)}`, 'Из других складов', '', 'pos', 'Перемещения (нетто)'),
+    step(`−${fmtInt(l.sold)}`, 'Продажи', '', 'neg', 'Продано'),
+    step(`−${fmtInt(l.writtenOff)}`, 'Списано', '', 'neg', 'Списано'),
+    step(`${l.moveNet >= 0 ? '+' : '−'}${fmtInt(Math.abs(l.moveNet))}`, 'Перемещения', '', l.moveNet >= 0 ? 'pos' : 'neg', 'Перемещения (нетто)'),
+    step(`${fmtInt(l.endQty)} ед.`, 'Осталось сейчас', l.endCost != null ? whMoney(l.endCost) : '', 'neutral', 'Остаток сейчас'),
+  ].join(arrow);
+
+  const pos = bar.positivePct || 0, neg = bar.negativePct || 0;
+  return `
+    <div class="wh-ladder">${steps}</div>
+    <div class="wh-movebar">
+      <div class="wh-movebar-track">
+        <div class="wh-movebar-pos" style="width:${pos}%"></div>
+        <div class="wh-movebar-neg" style="width:${neg}%"></div>
+      </div>
+      <div class="wh-movebar-legend">
+        <span><b class="wh-pos">${pos}%</b> Положительные движения · ${fmtInt(bar.positive)} ед.</span>
+        <span><b class="wh-neg">${neg}%</b> Отрицательные движения · ${fmtInt(bar.negative)} ед.</span>
+      </div>
+    </div>`;
+}
+
+// Таблица «Остатки по складам»
+function whBuildByWhTable(bw) {
+  const rows = (bw.rows || []).map(r => `
+    <tr>
+      <td>${esc(r.name)}</td>
+      <td class="r">${fmtInt(r.startQty)}</td>
+      <td class="r muted">${fmtInt(Math.max(r.startQty, 0))}</td>
+      <td class="r wh-pos">${r.received ? '+' + fmtInt(r.received) : '0'}</td>
+      <td class="r wh-neg">${r.sold ? '−' + fmtInt(r.sold) : '0'}</td>
+      <td class="r wh-neg">${r.writtenOff ? '−' + fmtInt(r.writtenOff) : '0'}</td>
+      <td class="r ${r.moveNet > 0 ? 'wh-pos' : (r.moveNet < 0 ? 'wh-neg' : '')}">${r.moveNet > 0 ? '+' : (r.moveNet < 0 ? '−' : '')}${fmtInt(Math.abs(r.moveNet))}</td>
+      <td class="r strong">${fmtInt(r.endQty)}</td>
+      <td class="r">${fmtNum(r.endCost)}</td>
+    </tr>`).join('');
+  const t = bw.total || {};
+  return `<div class="tbl-wrap"><table class="tbl wh-tbl">
+    <thead><tr>
+      <th>Склад</th><th class="r">Было на начало</th><th class="r">Кол-во</th>
+      <th class="r">Поступ.</th><th class="r">Продано</th><th class="r">Списано</th>
+      <th class="r">Перем.</th><th class="r">Остаток</th><th class="r">Сумма (с.)</th>
+    </tr></thead>
+    <tbody>${rows || '<tr><td colspan="9" class="tbl-empty">Нет данных</td></tr>'}</tbody>
+    <tfoot><tr class="tbl-total">
+      <td>Итого</td><td class="r">${fmtInt(t.startQty)}</td><td class="r"></td>
+      <td class="r wh-pos">+${fmtInt(t.received)}</td><td class="r wh-neg">−${fmtInt(t.sold)}</td>
+      <td class="r wh-neg">−${fmtInt(t.writtenOff)}</td><td class="r">${fmtInt(t.moveNet)}</td>
+      <td class="r strong">${fmtInt(t.endQty)}</td><td class="r strong">${fmtNum(t.endCost)}</td>
+    </tr></tfoot>
+  </table></div>`;
+}
+
+// Таблица «Оценка складов» с переключателем qty/cost
+function whBuildValTable(bw) {
+  const isCost = whState.valMode === 'cost';
+  const rows = (bw.valuation || []).map(r => `
+    <tr>
+      <td>${esc(r.name)}</td>
+      <td class="r">${fmtInt(r.qty)}</td>
+      <td class="r">${fmtNum(r.cost)}</td>
+      <td class="r">${fmtNum(r.retail)}</td>
+      <td class="r wh-pos">${fmtNum(r.margin)}</td>
+    </tr>`).join('');
+  const t = bw.total || {};
+  const totMargin = (Number(t.endRetail) || 0) - (Number(t.endCost) || 0);
+  return `<div class="tbl-wrap"><table class="tbl wh-tbl">
+    <thead><tr>
+      <th>Склад</th><th class="r">Кол-во (ед.)</th><th class="r">Себестоимость (с.)</th>
+      <th class="r">Розничная стоимость (с.)</th><th class="r">Потенц. маржа (с.)</th>
+    </tr></thead>
+    <tbody>${rows || '<tr><td colspan="5" class="tbl-empty">Нет данных</td></tr>'}</tbody>
+    <tfoot><tr class="tbl-total">
+      <td>Итого</td><td class="r">${fmtInt(t.endQty)}</td><td class="r">${fmtNum(t.endCost)}</td>
+      <td class="r">${fmtNum(t.endRetail)}</td><td class="r wh-pos">${fmtNum(totMargin)}</td>
+    </tr></tfoot>
+  </table></div>`;
+}
+
+// График «Остатки и стоимость по дням» (2 оси)
+function whDrawDaysChart(canvasId, days) {
+  const el = $(canvasId); if (!el) return;
+  destroyChart(canvasId);
+  if (!days.length) { el.parentElement.innerHTML = '<div class="tbl-empty">Выберите период для графика по дням</div>'; return; }
+  const labels = days.map(d => d.date.slice(5).replace('-', '.'));
+  const qty = days.map(d => d.qty);
+  const cost = days.map(d => d.cost);
+  state.charts[canvasId] = new Chart(el, {
+    data: {
+      labels,
+      datasets: [
+        { type: 'line', label: 'Количество (ед.)', data: qty, yAxisID: 'y', borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,.10)', fill: true, tension: .35, pointRadius: 3, pointBackgroundColor: '#10b981', borderWidth: 2 },
+        { type: 'line', label: 'Стоимость (себестоимость)', data: cost, yAxisID: 'y1', borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,.06)', fill: false, tension: .35, pointRadius: 3, pointBackgroundColor: '#3b82f6', borderWidth: 2 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: (c) => c.dataset.yAxisID === 'y1' ? `Стоимость: ${fmtNum(c.parsed.y)} с.` : `Количество: ${fmtInt(c.parsed.y)} ед.` } } },
+      scales: {
+        y: { position: 'left', beginAtZero: true, grid: { color: '#eef2f1' }, ticks: { callback: v => v >= 1000 ? (v / 1000) + 'K' : v } },
+        y1: { position: 'right', beginAtZero: true, grid: { display: false }, ticks: { callback: v => v >= 1000 ? (v / 1000) + 'K' : v } },
+        x: { grid: { display: false } },
+      },
+    },
+  });
+}
+
+// Мини-блок залежавшихся (в обзоре)
+async function whLoadStaleMini() {
+  const panel = $('whStalePanel'); if (!panel) return;
+  try {
+    const d = await whApi('wh-stale');
+    const b = d.buckets || {};
+    const fr = d.frozen90 || { qty: 0, retail: 0 };
+    panel.innerHTML = `
+      <div class="wh-panel-h">Залежавшиеся товары</div>
+      <div class="wh-stale-cards">
+        ${whStaleCard('> 30 дней', b.d30)}
+        ${whStaleCard('> 60 дней', b.d60)}
+        ${whStaleCard('> 90 дней', b.d90)}
+        ${whStaleCard('> 180 дней', b.d180)}
+        <div class="wh-stale-frozen">
+          <div class="wh-stale-frozen-label">💰 Заморожено в товарах &gt; 90 дней</div>
+          <div class="wh-stale-frozen-val">${fmtInt(fr.qty)} ед.</div>
+          <div class="wh-stale-frozen-sum">${whMoney(fr.retail)}</div>
+        </div>
+      </div>`;
+  } catch (e) { panel.innerHTML = errBar('Залежавшиеся: ' + e.message); }
+}
+function whStaleCard(label, b) {
+  b = b || { qty: 0, cost: 0 };
+  return `<div class="wh-stale-card">
+    <div class="wh-stale-label">${label}</div>
+    <div class="wh-stale-qty">${fmtInt(b.qty)} ед.</div>
+    <div class="wh-stale-sum">${b.cost ? whMoney(b.cost) : '<span class="wh-muted">себест. н/д</span>'}</div>
+  </div>`;
+}
+
+// Онлайн-журнал сканирования
+async function whLoadScanFeed() {
+  const panel = $('whScanPanel'); if (!panel) return;
+  try {
+    const d = await whApi('wh-scan-feed', 'limit=15');
+    const rows = (d.rows || []).map(r => {
+      const t = r.time ? new Date(r.time) : null;
+      const hhmmss = t ? new Date(t.getTime() + 5 * 3600000).toISOString().slice(11, 19) : '';
+      const resCls = /продан|списан|нет в баз|излиш/i.test(r.result) ? 'wh-neg' : (/учт/i.test(r.result) ? 'wh-pos' : '');
+      return `<tr><td class="muted">${hhmmss}</td><td>${esc(r.by) || '<span class="wh-muted">—</span>'}</td>
+        <td>${esc(r.warehouse) || '<span class="wh-muted">—</span>'}</td>
+        <td>${esc(r.product) || '<span class="wh-muted">—</span>'}</td>
+        <td class="muted">${esc(r.size) || '—'}</td>
+        <td class="r">…${esc(String(r.barcode)).slice(-4)}</td><td class="${resCls}">${esc(r.result)}</td></tr>`;
+    }).join('');
+    panel.innerHTML = `
+      <div class="wh-panel-h wh-panel-h-row"><span>Онлайн: отсканированные товары</span><span class="wh-live">● В реальном времени</span></div>
+      <div class="tbl-wrap"><table class="tbl wh-tbl">
+        <thead><tr><th>Время</th><th>Инвентаризатор</th><th>Склад</th><th>Товар</th><th>Размер</th><th class="r">Штрихкод</th><th>Результат</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="tbl-empty">Пока нет сканов</td></tr>'}</tbody>
+      </table></div>`;
+  } catch (e) { panel.innerHTML = errBar('Журнал: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════
+//  ТАБ: ПО СКЛАДАМ (полная таблица + оценка)
+// ══════════════════════════════════════════════════════════
+async function whTabByWarehouse() {
+  const box = $('whTabBody');
+  box.innerHTML = `<div class="loading">⏳ Считаю по складам…</div>`;
+  try {
+    const bw = await whApi('wh-by-warehouse');
+    box.innerHTML = `
+      <div class="wh-panel">
+        <div class="wh-panel-h">Сравнение складов за период: ${whState.from} — ${whState.to}</div>
+        ${whBuildByWhTable(bw)}
+      </div>
+      <div class="wh-panel">
+        <div class="wh-panel-h wh-panel-h-row"><span>Оценка складов</span>
+          <div class="wh-seg">
+            <button class="wh-seg-btn ${whState.valMode === 'qty' ? 'active' : ''}" data-valmode="qty">Количество</button>
+            <button class="wh-seg-btn ${whState.valMode === 'cost' ? 'active' : ''}" data-valmode="cost">Стоимость</button>
+          </div>
+        </div>
+        <div id="whValTable">${whBuildValTable(bw)}</div>
+      </div>`;
+    whBindValSeg(bw);
+  } catch (e) { box.innerHTML = errBar('По складам: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════
+//  ТАБ: ПО ТОВАРАМ (номенклатура, размеры, кол-во по складам, продажи)
+// ══════════════════════════════════════════════════════════
+async function whTabByProduct() {
+  const box = $('whTabBody');
+  box.innerHTML = `<div class="loading">⏳ Собираю остатки по товарам…</div>`;
+  try {
+    const d = await whApi('wh-by-product');
+    const whs = d.warehouses || [];
+    const whCols = whs.map(w => `<th class="r" title="${esc(w.name)}">${esc(whShort(w.name))}</th>`).join('');
+    const rows = (d.rows || []).slice(0, 500).map(r => {
+      const cells = whs.map(w => `<td class="r ${r.byWh[w.id] ? '' : 'muted'}">${r.byWh[w.id] || 0}</td>`).join('');
+      // Нормализуем размеры: убираем префикс "размер:", дедуп, ограничиваем
+      const sizeSet = [...new Set((r.sizes || []).map(s => String(s).replace(/^размер:\s*/i, '').trim()).filter(Boolean))];
+      const sizesShown = sizeSet.slice(0, 12).join(', ');
+      const sizesMore = sizeSet.length > 12 ? ` <span class="wh-muted">+${sizeSet.length - 12}</span>` : '';
+      return `<tr>
+        <td>${esc(r.name)}</td>
+        <td class="muted wh-sizes" title="${esc(sizeSet.join(', '))}">${esc(sizesShown) || '—'}${sizesMore}</td>
+        ${cells}
+        <td class="r strong">${fmtInt(r.totalQty)}</td>
+        <td class="r">${fmtNum(r.retail)}</td>
+        <td class="r wh-pos">${r.salesQty || 0}</td>
+      </tr>`;
+    }).join('');
+    const t = d.total || {};
+    box.innerHTML = `
+      <div class="wh-panel">
+        <div class="wh-panel-h wh-panel-h-row">
+          <span>Остатки по товарам</span>
+          <span class="wh-muted">${fmtInt(t.products)} позиций · ${fmtInt(t.qty)} ед. · продажи ${fmtInt(t.salesQty)}</span>
+        </div>
+        <div class="tbl-wrap"><table class="tbl wh-tbl">
+          <thead><tr>
+            <th>Номенклатура</th><th>Размеры</th>${whCols}
+            <th class="r">Всего</th><th class="r">Розница (с.)</th><th class="r">Продаж</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="99" class="tbl-empty">Нет данных</td></tr>'}</tbody>
+        </table></div>
+        ${(d.rows || []).length > 500 ? '<div class="wh-note">Показаны первые 500 позиций. Уточните фильтры.</div>' : ''}
+      </div>`;
+  } catch (e) { box.innerHTML = errBar('По товарам: ' + e.message); }
+}
+function whShort(name) {
+  return String(name).replace(/Ортосалон\s*/i, '').replace(/["«»]/g, '').replace('Интернет магазин', 'Интернет').replace('Основной склад', 'Основной').trim();
+}
+
+// ══════════════════════════════════════════════════════════
+//  ТАБ: ДВИЖЕНИЕ (график по дням + история остатков на дату)
+// ══════════════════════════════════════════════════════════
+async function whTabMovement() {
+  const box = $('whTabBody');
+  box.innerHTML = `<div class="loading">⏳ Строю движение…</div>`;
+  try {
+    const mv = await whApi('wh-movement');
+    box.innerHTML = `
+      <div class="wh-panel">
+        <div class="wh-panel-h">Остатки и стоимость по дням: ${whState.from} — ${whState.to}</div>
+        <div class="wh-chart-legend">
+          <span><i class="dot" style="background:#10b981"></i> Количество (ед.)</span>
+          <span><i class="dot" style="background:#3b82f6"></i> Стоимость (себестоимость)</span>
+        </div>
+        <div class="wh-chart-wrap wh-chart-wrap-lg"><canvas id="whDaysChart2"></canvas></div>
+        ${mv.costNote ? `<div class="wh-note">ℹ ${mv.costNote}</div>` : ''}
+      </div>
+      <div class="wh-panel">
+        <div class="wh-panel-h">История остатков — остаток на выбранную дату</div>
+        <div class="wh-asof-row">
+          <label class="flabel">Дата</label>
+          <input type="date" id="whAsofDate" class="tool-date" value="${whState.to}">
+          <button class="btn-primary" id="whAsofBtn">Показать остаток</button>
+        </div>
+        <div id="whAsofResult"></div>
+      </div>`;
+    whDrawDaysChart('whDaysChart2', mv.days || []);
+    $('whAsofBtn').addEventListener('click', whLoadAsOf);
+  } catch (e) { box.innerHTML = errBar('Движение: ' + e.message); }
+}
+
+async function whLoadAsOf() {
+  const res = $('whAsofResult');
+  const date = $('whAsofDate').value;
+  if (!date) { res.innerHTML = errBar('Укажите дату'); return; }
+  res.innerHTML = `<div class="loading">⏳ Считаю остаток на ${date}…</div>`;
+  try {
+    const d = await whApi('wh-as-of', `date=${date}`);
+    const rows = (d.rows || []).map(r => `<tr><td>${esc(r.name)}</td><td class="r strong">${fmtInt(r.qty)}</td></tr>`).join('');
+    const badge = d.exact
+      ? `<span class="pill g">Точно · ${d.source === 'snapshot' ? 'снимок' : 'текущий'}</span>`
+      : `<span class="pill amber">Оценка</span>`;
+    res.innerHTML = `
+      <div class="wh-asof-head">Остаток на <b>${date}</b> ${badge} <span class="wh-muted">всего ${fmtInt(d.total)} ед.</span></div>
+      <div class="tbl-wrap"><table class="tbl wh-tbl">
+        <thead><tr><th>Склад</th><th class="r">Остаток (ед.)</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+      ${d.note ? `<div class="wh-note">ℹ ${esc(d.note)}</div>` : ''}`;
+  } catch (e) { res.innerHTML = errBar('Остаток на дату: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════
+//  ТАБ: ЗАЛЕЖАВШИЕСЯ ТОВАРЫ
+// ══════════════════════════════════════════════════════════
+async function whTabStale() {
+  const box = $('whTabBody');
+  box.innerHTML = `<div class="loading">⏳ Ищу залежавшиеся…</div>`;
+  try {
+    const d = await whApi('wh-stale');
+    const b = d.buckets || {};
+    const fr = d.frozen90 || { qty: 0, retail: 0, cost: 0 };
+    const top = (d.topStale || []).map(r => `<tr>
+      <td>${esc(r.name)}</td><td class="muted">${esc(r.category)}</td>
+      <td class="r">${fmtInt(r.qty)}</td><td class="r">${r.maxIdle}</td>
+      <td class="r">${fmtNum(r.retail)}</td>
+      <td class="r">${r.cost ? fmtNum(r.cost) : '<span class="wh-muted">н/д</span>'}</td>
+    </tr>`).join('');
+    box.innerHTML = `
+      <div class="wh-panel">
+        <div class="wh-panel-h">Залежавшиеся товары без продаж</div>
+        <div class="wh-stale-cards">
+          ${whStaleCard('> 30 дней', b.d30)}
+          ${whStaleCard('> 60 дней', b.d60)}
+          ${whStaleCard('> 90 дней', b.d90)}
+          ${whStaleCard('> 180 дней', b.d180)}
+          <div class="wh-stale-frozen">
+            <div class="wh-stale-frozen-label">💰 Заморожено &gt; 90 дней</div>
+            <div class="wh-stale-frozen-val">${fmtInt(fr.qty)} ед.</div>
+            <div class="wh-stale-frozen-sum">${whMoney(fr.retail)}</div>
+          </div>
+        </div>
+        ${d.note ? `<div class="wh-note">ℹ ${esc(d.note)}</div>` : ''}
+      </div>
+      <div class="wh-panel">
+        <div class="wh-panel-h">Топ залежавшихся позиций</div>
+        <div class="tbl-wrap"><table class="tbl wh-tbl">
+          <thead><tr><th>Товар</th><th>Категория</th><th class="r">Кол-во</th><th class="r">Дней без движения</th><th class="r">Розница (с.)</th><th class="r">Себест. (с.)</th></tr></thead>
+          <tbody>${top || '<tr><td colspan="6" class="tbl-empty">Нет залежавшихся товаров</td></tr>'}</tbody>
+        </table></div>
+      </div>`;
+  } catch (e) { box.innerHTML = errBar('Залежавшиеся: ' + e.message); }
+}
+
+// ══════════════════════════════════════════════════════════
+//  DRILL-DOWN — детализация по показателю (модалка)
+// ══════════════════════════════════════════════════════════
+const WH_DRILL_MAP = {
+  'Остаток сейчас': 'stock',
+  'Поступило': 'received',
+  'Продано': 'sold',
+  'Списано': 'written_off',
+  'Перемещения (нетто)': 'moved',
+  'Было на начало периода': 'stock',
+};
+
+function whBindDrill(box) {
+  box.querySelectorAll('[data-drill]').forEach(el => {
+    const label = el.dataset.drill;
+    const metric = WH_DRILL_MAP[label];
+    if (!metric) return;
+    el.classList.add('wh-clickable');
+    el.addEventListener('click', () => whOpenDrill(metric, label));
+  });
+}
+
+async function whOpenDrill(metric, label) {
+  let modal = $('whDrillModal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'whDrillModal';
+    modal.className = 'wh-modal';
+    document.body.appendChild(modal);
+  }
+  modal.style.display = 'flex';
+  modal.innerHTML = `<div class="wh-modal-box"><div class="wh-modal-h">
+      <span>Детализация: ${esc(label)}</span>
+      <button class="wh-modal-x" id="whDrillX">✕</button></div>
+    <div class="wh-modal-body"><div class="loading">⏳ Загружаю детализацию…</div></div></div>`;
+  $('whDrillX').addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+  try {
+    const d = await whApi('wh-drill', `metric=${metric}`);
+    const isRecv = metric === 'received';
+    const rows = (d.rows || []).slice(0, 500).map(r => `<tr>
+      <td>${esc(r.name)}</td>
+      <td class="muted">${esc(r.category || '')}</td>
+      ${isRecv ? '' : `<td class="muted">${esc(r.size || '')}</td>`}
+      <td class="r strong">${fmtInt(r.qty)}</td>
+      <td class="r">${isRecv ? fmtNum(r.cost) : fmtNum(r.retail)}</td>
+    </tr>`).join('');
+    const t = d.total || {};
+    modal.querySelector('.wh-modal-body').innerHTML = `
+      <div class="wh-muted" style="margin-bottom:8px">Всего: <b>${fmtInt(t.qty)} ед.</b> · ${isRecv ? 'себестоимость' : 'розница'} ${fmtNum(isRecv ? t.cost : t.retail)} с.</div>
+      <div class="tbl-wrap"><table class="tbl wh-tbl">
+        <thead><tr><th>Товар</th><th>Категория</th>${isRecv ? '' : '<th>Размер</th>'}<th class="r">Кол-во</th><th class="r">${isRecv ? 'Себест. (с.)' : 'Розница (с.)'}</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="5" class="tbl-empty">Нет данных</td></tr>'}</tbody>
+      </table></div>
+      ${(d.rows || []).length > 500 ? '<div class="wh-note">Показаны первые 500 строк.</div>' : ''}`;
+  } catch (e) {
+    modal.querySelector('.wh-modal-body').innerHTML = errBar('Детализация: ' + e.message);
+  }
+}
+
+
+// ══════════════════════════════════════════════════════════
 //  СТАРТ
+// ════════════════════════════════════════════════════════════════════════
+// ПОКУПАТЕЛИ ПО ДИСКОНТНЫМ КАРТАМ (orto.cards loyalty)
+// Список клиентов с историей покупок, фильтр по дате, сортировка по чеку.
+// Попап карточки клиента: история покупок / информация / начисление+списание баллов.
+// Данные: BE-роуты buyers-list, buyer-detail, points-adjust.
+// ════════════════════════════════════════════════════════════════════════
+const BUY = {
+  q: '', from: '', to: '', sort: 'sum',
+  page: 0, per: 30,
+  list: [], count: 0, stats: null,
+};
+
+const BUY_REASONS_EARN = ['Бонус от компании', 'Акция', 'День рождения', 'Компенсация', 'Возврат баллов'];
+const BUY_REASONS_SPEND = ['Оплата покупки', 'Частичная оплата', 'Обмен на подарок', 'Корректировка'];
+
+async function renderBuyers(force) {
+  const box = $('buyBody');
+  if (!box) return;
+  box.innerHTML = `<div class="loading">⏳ Загружаю покупателей…</div>`;
+  try {
+    const off = BUY.page * BUY.per;
+    let qs = `?action=buyers-list&sort=${encodeURIComponent(BUY.sort)}&limit=${BUY.per}&offset=${off}`;
+    if (BUY.q) qs += `&q=${encodeURIComponent(BUY.q)}`;
+    if (BUY.from) qs += `&from=${encodeURIComponent(BUY.from)}`;
+    if (BUY.to) qs += `&to=${encodeURIComponent(BUY.to)}`;
+    const d = await posApi(qs, { method: 'GET' });
+    if (!d || d.ok === false) throw new Error((d && d.error) || 'Ошибка загрузки');
+    BUY.list = d.buyers || [];
+    BUY.count = d.count || 0;
+    BUY.stats = d.stats || null;
+    buyPaint();
+    bumpSync && bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить покупателей: ' + (e.message || e));
+  }
+}
+
+function buyPaint() {
+  const box = $('buyBody');
+  const s = BUY.stats || { totalBuyers: 0, totalSum: 0, totalPurchases: 0, totalPoints: 0 };
+  const totalPages = Math.max(1, Math.ceil((BUY.count || 0) / BUY.per));
+  const pageNow = BUY.page + 1;
+
+  box.innerHTML = `
+    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
+      ${kpi('👥', 'Покупателей', fmtInt(s.totalBuyers || 0), 'g', 'с картой лояльности')}
+      ${kpi('🧾', 'Покупок', fmtInt(s.totalPurchases || 0), 'blue', 'всего по картам')}
+      ${kpi('💰', 'Сумма покупок', money(s.totalSum || 0), 'amber', 'оборот по картам')}
+      ${kpi('⭐', 'Баллов начислено', fmtInt(s.totalPoints || 0), 'gray', 'текущие балансы')}
+    </div>
+
+    <div class="card card-pad">
+      <div class="card-h-row">
+        <h3>Список покупателей${BUY.q || BUY.from || BUY.to ? ` — найдено ${fmtInt(BUY.count || 0)}` : ''}</h3>
+      </div>
+
+      <div class="buy-toolbar">
+        <input class="finput buy-search" id="buyQ" value="${esc(BUY.q)}" placeholder="🔍 Поиск по имени, телефону или номеру карты…">
+        <div class="buy-filters">
+          <label class="buy-fl">
+            <span>Сортировка</span>
+            <select class="fselect" id="buySort">
+              <option value="sum" ${BUY.sort === 'sum' ? 'selected' : ''}>По сумме покупок</option>
+              <option value="count" ${BUY.sort === 'count' ? 'selected' : ''}>По кол-ву покупок</option>
+              <option value="points" ${BUY.sort === 'points' ? 'selected' : ''}>По балансу баллов</option>
+              <option value="recent" ${BUY.sort === 'recent' ? 'selected' : ''}>По последней покупке</option>
+              <option value="name" ${BUY.sort === 'name' ? 'selected' : ''}>По имени (А-Я)</option>
+            </select>
+          </label>
+          <label class="buy-fl">
+            <span>Период с</span>
+            <input type="date" class="finput" id="buyFrom" value="${esc(BUY.from)}">
+          </label>
+          <label class="buy-fl">
+            <span>по</span>
+            <input type="date" class="finput" id="buyTo" value="${esc(BUY.to)}">
+          </label>
+          <button class="btn btn-primary" id="buyApply">Применить</button>
+          <button class="btn" id="buyReset">Сброс</button>
+        </div>
+      </div>
+
+      <div class="tbl-wrap">
+        <table class="tbl buy-tbl">
+          <thead><tr>
+            <th style="width:30px">#</th>
+            <th>Клиент</th>
+            <th>Карта / Телефон</th>
+            <th class="c">Покупок</th>
+            <th class="r">Сумма покупок</th>
+            <th class="r">Баланс баллов</th>
+            <th style="width:40px"></th>
+          </tr></thead>
+          <tbody>${BUY.list.length ? BUY.list.map((b, i) => `
+            <tr class="buy-row" data-id="${esc(b.id)}">
+              <td class="c muted">${BUY.page * BUY.per + i + 1}</td>
+              <td>
+                <div class="buy-name">${esc(b.name)}</div>
+                ${b.lastPurchase ? `<div class="buy-sub">посл. покупка ${dushTime(b.lastPurchase, true)}</div>` : ''}
+              </td>
+              <td>
+                <div class="buy-card">${b.cardNumber ? esc(b.cardNumber) : (b.cardBarcode ? esc(b.cardBarcode) : '—')}</div>
+                <div class="buy-sub">${b.phone ? esc(b.phone) : '—'}</div>
+              </td>
+              <td class="c tnum">${fmtInt(b.purchaseCount)}</td>
+              <td class="r tnum buy-sum">${money(b.purchaseSum)}</td>
+              <td class="r tnum buy-pts">${fmtInt(b.points)}</td>
+              <td class="c"><span class="buy-chev">›</span></td>
+            </tr>`).join('')
+            : `<tr><td class="tbl-empty" colspan="7">Покупатели не найдены</td></tr>`}</tbody>
+        </table>
+      </div>
+
+      <div class="pager">
+        <button class="btn" id="buyPrev" ${BUY.page <= 0 ? 'disabled' : ''}>← Назад</button>
+        <span class="pager-info">Стр. ${pageNow} из ${totalPages} · ${fmtInt(BUY.count)} клиентов</span>
+        <button class="btn" id="buyNext" ${pageNow >= totalPages ? 'disabled' : ''}>Вперёд →</button>
+      </div>
+    </div>
+  `;
+
+  const apply = () => {
+    BUY.q = $('buyQ').value.trim();
+    BUY.sort = $('buySort').value;
+    BUY.from = $('buyFrom').value;
+    BUY.to = $('buyTo').value;
+    BUY.page = 0;
+    renderBuyers();
+  };
+  $('buyApply').addEventListener('click', apply);
+  $('buyQ').addEventListener('keydown', e => { if (e.key === 'Enter') apply(); });
+  $('buySort').addEventListener('change', apply);
+  $('buyReset').addEventListener('click', () => {
+    BUY.q = ''; BUY.from = ''; BUY.to = ''; BUY.sort = 'sum'; BUY.page = 0; renderBuyers();
+  });
+  $('buyPrev').addEventListener('click', () => { if (BUY.page > 0) { BUY.page--; renderBuyers(); } });
+  $('buyNext').addEventListener('click', () => { if (pageNow < totalPages) { BUY.page++; renderBuyers(); } });
+  box.querySelectorAll('.buy-row').forEach(tr => {
+    tr.addEventListener('click', () => buyOpenCard(tr.getAttribute('data-id')));
+  });
+}
+
+// ─────────────────────────── ПОПАП КАРТОЧКИ КЛИЕНТА ───────────────────────────
+async function buyOpenCard(id) {
+  let ov = document.getElementById('buyOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'buyOverlay';
+  ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', ev => { if (ev.target === ov) ov.remove(); });
+  ov.innerHTML = `<div class="rcedit-modal buy-modal"><div class="rcedit-body"><div class="loading">⏳ Загружаю карточку…</div></div></div>`;
+  document.body.appendChild(ov);
+
+  try {
+    const d = await posApi(`?action=buyer-detail&id=${encodeURIComponent(id)}`, { method: 'GET' });
+    if (!d || d.ok === false) throw new Error((d && d.error) || 'Ошибка');
+    buyRenderCard(ov, d);
+  } catch (e) {
+    ov.querySelector('.rcedit-body').innerHTML = errBar('Не удалось загрузить карточку: ' + (e.message || e));
+  }
+}
+
+function buyRenderCard(ov, d) {
+  const b = d.buyer || {};
+  const st = { tab: 'history', buyer: b, purchases: d.purchases || [], ledger: d.ledger || [] };
+  const modal = ov.querySelector('.buy-modal');
+
+  function paint() {
+    modal.innerHTML = `
+      <div class="rcedit-head buy-head">
+        <div class="buy-head-main">
+          <div class="buy-ava">${esc((b.name || '?').trim().charAt(0).toUpperCase())}</div>
+          <div>
+            <h3>${esc(b.name)}</h3>
+            <div class="buy-head-sub">${b.phone ? esc(b.phone) : 'телефон не указан'}</div>
+          </div>
+        </div>
+        <button class="rcedit-x" id="buyClose">✕</button>
+      </div>
+
+      <div class="buy-hero">
+        <div class="buy-hero-card">
+          <span class="buy-hero-lbl">Номер карты</span>
+          <span class="buy-hero-val">${b.cardNumber ? esc(b.cardNumber) : (b.cardBarcode ? esc(b.cardBarcode) : '—')}</span>
+        </div>
+        <div class="buy-hero-stats">
+          <div class="buy-hs"><span class="buy-hs-lbl">Всего покупок</span><span class="buy-hs-val">${fmtInt(b.purchaseCount)}</span></div>
+          <div class="buy-hs"><span class="buy-hs-lbl">Сумма покупок</span><span class="buy-hs-val">${money(b.purchaseSum)}</span></div>
+          <div class="buy-hs buy-hs-pts"><span class="buy-hs-lbl">Баланс баллов</span><span class="buy-hs-val">${fmtInt(b.points)}</span></div>
+        </div>
+      </div>
+
+      <div class="buy-actions">
+        <button class="btn btn-primary buy-act-earn" id="buyEarn">＋ Начислить баллы</button>
+        <button class="btn buy-act-spend" id="buySpend">− Списать баллы</button>
+      </div>
+
+      <div class="buy-tabs">
+        <button class="buy-tab ${st.tab === 'history' ? 'active' : ''}" data-tab="history">История покупок</button>
+        <button class="buy-tab ${st.tab === 'points' ? 'active' : ''}" data-tab="points">Движение баллов</button>
+        <button class="buy-tab ${st.tab === 'info' ? 'active' : ''}" data-tab="info">Информация</button>
+      </div>
+
+      <div class="rcedit-body buy-tabbody">${
+        st.tab === 'history' ? historyHTML() :
+        st.tab === 'points' ? pointsHTML() : infoHTML()
+      }</div>
+    `;
+    modal.querySelector('#buyClose').addEventListener('click', () => ov.remove());
+    modal.querySelectorAll('.buy-tab').forEach(t => t.addEventListener('click', () => { st.tab = t.getAttribute('data-tab'); paint(); }));
+    modal.querySelector('#buyEarn').addEventListener('click', () => buyAdjustModal(ov, st, +1, paint));
+    modal.querySelector('#buySpend').addEventListener('click', () => buyAdjustModal(ov, st, -1, paint));
+  }
+
+  function historyHTML() {
+    if (!st.purchases.length) return `<div class="buy-empty">Покупок пока нет</div>`;
+    return `
+      <table class="tbl buy-htbl">
+        <thead><tr><th>Дата и время</th><th>Товар</th><th class="r">Сумма</th><th class="c">Начислено</th><th class="c">Баланс</th></tr></thead>
+        <tbody>${st.purchases.map(p => `
+          <tr>
+            <td class="muted">${dushTime(p.purchased_at, true)}</td>
+            <td>${esc(p.item_name || 'Покупка')}${p.receipt_no ? `<div class="buy-sub">чек ${esc(p.receipt_no)}</div>` : ''}</td>
+            <td class="r tnum">${money(p.amount)}</td>
+            <td class="c tnum buy-earn">${p.points_earned ? '+' + fmtInt(p.points_earned) : '—'}</td>
+            <td class="c tnum">${p.balance_after != null ? fmtInt(p.balance_after) : '—'}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+  }
+
+  function pointsHTML() {
+    if (!st.ledger.length) return `<div class="buy-empty">Движений по баллам нет</div>`;
+    const kindLabel = { earn: 'Начисление (чек)', spend: 'Списание', admin_earn: 'Начисление (админ)', admin_spend: 'Списание (админ)', reward: 'Награда', expire: 'Сгорание' };
+    return `
+      <table class="tbl buy-htbl">
+        <thead><tr><th>Дата</th><th>Операция</th><th class="c">Баллы</th><th class="c">Баланс</th><th>Комментарий</th></tr></thead>
+        <tbody>${st.ledger.map(l => `
+          <tr>
+            <td class="muted">${dushTime(l.created_at, true)}</td>
+            <td>${esc(kindLabel[l.kind] || l.kind)}</td>
+            <td class="c tnum ${l.points >= 0 ? 'buy-earn' : 'buy-spend'}">${l.points >= 0 ? '+' : ''}${fmtInt(l.points)}</td>
+            <td class="c tnum">${l.balance_after != null ? fmtInt(l.balance_after) : '—'}</td>
+            <td class="muted buy-note">${esc(l.note || '')}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+  }
+
+  function infoHTML() {
+    const rows = [
+      ['Номер карты', b.cardNumber || b.cardBarcode || '—'],
+      ['Последние 5 цифр', b.cardLast5 || '—'],
+      ['Телефон', b.phone || '—'],
+      ['Дата регистрации', b.createdAt ? dushTime(b.createdAt, true) : '—'],
+      ['Постоянная скидка', b.discountPct ? b.discountPct + '%' : '—'],
+      ['Общее количество покупок', fmtInt(b.purchaseCount)],
+      ['Общая сумма покупок', money(b.purchaseSum)],
+      ['Средний чек', money(b.avgCheck)],
+      ['Баланс баллов', fmtInt(b.points)],
+    ];
+    if (b.familyNote) rows.push(['Заметка о семье', b.familyNote]);
+    if (b.interests && b.interests.length) rows.push(['Интересы', b.interests.join(', ')]);
+    return `<div class="buy-info">${rows.map(([k, v]) => `
+      <div class="buy-info-row"><span class="buy-info-k">${esc(k)}</span><span class="buy-info-v">${v}</span></div>`).join('')}</div>`;
+  }
+
+  paint();
+}
+
+// ─────────────── ПОДмодалка: начисление / списание баллов ───────────────
+function buyAdjustModal(ov, st, sign, repaintParent) {
+  const b = st.buyer;
+  const isEarn = sign > 0;
+  const reasons = isEarn ? BUY_REASONS_EARN : BUY_REASONS_SPEND;
+
+  let sub = document.getElementById('buyAdjOverlay');
+  if (sub) sub.remove();
+  sub = document.createElement('div');
+  sub.id = 'buyAdjOverlay';
+  sub.className = 'rcedit-overlay';
+  sub.style.zIndex = '10000';
+  sub.addEventListener('click', ev => { if (ev.target === sub) sub.remove(); });
+  document.body.appendChild(sub);
+
+  function paintForm() {
+    sub.innerHTML = `
+      <div class="rcedit-modal buy-adj-modal">
+        <div class="rcedit-head">
+          <h3>${isEarn ? '＋ Начислить бонусные баллы' : '− Списать бонусные баллы'}</h3>
+          <button class="rcedit-x" id="buyAdjClose">✕</button>
+        </div>
+        <div class="rcedit-body">
+          <div class="buy-adj-bal">Текущий баланс <b>${fmtInt(b.points)} баллов</b></div>
+          <label class="buy-adj-fl">
+            <span>Сумма ${isEarn ? 'к начислению' : 'к списанию'}</span>
+            <div class="buy-adj-inrow">
+              <input type="number" min="1" step="1" class="finput" id="buyAdjAmt" placeholder="0" autofocus>
+              <span class="buy-adj-unit">баллов</span>
+            </div>
+          </label>
+          ${!isEarn ? `<div class="buy-adj-hint">Нельзя списать больше текущего баланса (${fmtInt(b.points)}).</div>` : ''}
+          <label class="buy-adj-fl">
+            <span>Причина (необязательно)</span>
+            <select class="fselect" id="buyAdjReason">
+              ${reasons.map(r => `<option value="${esc(r)}">${esc(r)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="buy-adj-fl">
+            <span>Комментарий</span>
+            <textarea class="finput" id="buyAdjNote" rows="2" placeholder="${isEarn ? 'За лояльность и постоянные покупки' : 'Частичная оплата товара'}"></textarea>
+          </label>
+          <div id="buyAdjErr"></div>
+        </div>
+        <div class="rcedit-foot">
+          <button class="btn" id="buyAdjCancel">Отмена</button>
+          <button class="btn ${isEarn ? 'btn-primary buy-adj-ok-earn' : 'buy-adj-ok-spend'}" id="buyAdjSubmit">
+            ${isEarn ? '＋ Начислить баллы' : '− Списать баллы'}
+          </button>
+        </div>
+      </div>`;
+    sub.querySelector('#buyAdjClose').addEventListener('click', () => sub.remove());
+    sub.querySelector('#buyAdjCancel').addEventListener('click', () => sub.remove());
+    setTimeout(() => { const a = sub.querySelector('#buyAdjAmt'); if (a) a.focus(); }, 40);
+    sub.querySelector('#buyAdjSubmit').addEventListener('click', doSubmit);
+  }
+
+  async function doSubmit() {
+    const amt = Math.abs(parseInt(sub.querySelector('#buyAdjAmt').value, 10) || 0);
+    const errBox = sub.querySelector('#buyAdjErr');
+    errBox.innerHTML = '';
+    if (!amt) { errBox.innerHTML = errBar('Введите количество баллов'); return; }
+    if (!isEarn && amt > b.points) { errBox.innerHTML = errBar('Нельзя списать больше баланса (' + fmtInt(b.points) + ')'); return; }
+    const reason = sub.querySelector('#buyAdjReason').value;
+    const note = (sub.querySelector('#buyAdjNote').value || '').trim();
+    const fullNote = [reason, note].filter(Boolean).join(': ');
+    const btn = sub.querySelector('#buyAdjSubmit');
+    btn.disabled = true; btn.textContent = '⏳ Сохраняю…';
+    try {
+      const r = await posApi('?action=points-adjust', {
+        method: 'POST',
+        body: JSON.stringify({
+          clientId: b.id,
+          delta: isEarn ? amt : -amt,
+          note: fullNote,
+          actor: state.user || 'админ',
+        }),
+      });
+      const newBal = r.balance_after != null ? r.balance_after : b.points + (isEarn ? amt : -amt);
+      b.points = newBal;
+      buyAdjDone(sub, isEarn, amt, newBal, b.name);
+      // обновим карточку и список под ней
+      buyReloadCardData(st, repaintParent);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = isEarn ? '＋ Начислить баллы' : '− Списать баллы';
+      let msg = e.message || String(e);
+      if (/insufficient_points/.test(msg)) msg = 'Недостаточно баллов на балансе';
+      errBox.innerHTML = errBar(msg);
+    }
+  }
+
+  paintForm();
+}
+
+function buyAdjDone(sub, isEarn, amt, newBal, name) {
+  sub.innerHTML = `
+    <div class="rcedit-modal buy-adj-modal">
+      <div class="rcedit-body buy-done">
+        <div class="buy-done-ic ${isEarn ? 'ok' : 'sp'}">${isEarn ? '✓' : '−'}</div>
+        <h3 class="buy-done-title">${isEarn ? 'Баллы начислены!' : 'Баллы списаны!'}</h3>
+        <p class="buy-done-txt">Клиенту <b>${esc(name)}</b> ${isEarn ? 'начислено' : 'списано'} <b>${fmtInt(amt)}</b> ${isEarn ? 'баллов' : 'баллов'}.</p>
+        <div class="buy-done-bal"><span>Новый баланс</span><b>${fmtInt(newBal)} баллов</b></div>
+      </div>
+      <div class="rcedit-foot">
+        <button class="btn btn-primary" id="buyDoneClose" style="width:100%">Закрыть</button>
+      </div>
+    </div>`;
+  sub.querySelector('#buyDoneClose').addEventListener('click', () => sub.remove());
+}
+
+// перезагрузить данные карточки (история/леджер/баланс) после операции
+async function buyReloadCardData(st, repaintParent) {
+  try {
+    const d = await posApi(`?action=buyer-detail&id=${encodeURIComponent(st.buyer.id)}`, { method: 'GET' });
+    if (d && d.ok !== false) {
+      st.buyer = d.buyer || st.buyer;
+      st.purchases = d.purchases || st.purchases;
+      st.ledger = d.ledger || st.ledger;
+      repaintParent();
+    }
+  } catch (e) { /* тихо */ }
+}
+
+
+
+// ═══════════════════════════════════════════════════════════════════
+// ТОВАРЫ В ПУТИ (v1.2.70) — учёт отправок от поставщиков
+// ═══════════════════════════════════════════════════════════════════
+const trState = {
+  booted: false,
+  tab: 'all',
+  rows: [],
+  counts: { all: 0, in_transit: 0, partial: 0, received: 0 },
+  sizes: [],
+  form: null,
+  q: '',
+};
+
+const TR_STATUS = {
+  in_transit: { label: 'В пути',     cls: 'shp-badge-transit' },
+  partial:    { label: 'Частично',   cls: 'shp-badge-partial' },
+  received:   { label: 'Получено',   cls: 'shp-badge-received' },
+  archived:   { label: 'Архив',      cls: 'shp-badge-archived' },
+};
+
+// Размеры товара в форме — единый формат [{size, qty}].
+// Принимает новый формат [{size, qty}] и старый ["38","39"].
+function trNormSizes(sizes) {
+  if (!Array.isArray(sizes)) return [];
+  return sizes.map(s => {
+    if (s && typeof s === 'object') return { size: String(s.size == null ? '' : s.size), qty: (s.qty == null || s.qty === '') ? '' : s.qty };
+    return { size: String(s == null ? '' : s), qty: '' };
+  }).filter(x => x.size !== '');
+}
+// Кол-во товара = сумма по размерам.
+function trItemQty(it) {
+  return (it.sizes || []).reduce((s, x) => s + (parseInt(x.qty, 10) || 0), 0);
+}
+
+function trNewForm() {
+  return {
+    id: null, ship_date: dushToday(), supplier: '', country: '', carrier: '',
+    sender_company: '', waybill_no: '', places: '', weight_kg: '', delivery_cost: '',
+    goods_cost: '', customs_cost: '', note: '', docPhotos: [], items: [],
+  };
+}
+
+function trCompress(file, kind) {
+  const maxSide = kind === 'doc' ? 1100 : 640;
+  const quality = kind === 'doc' ? 0.6 : 0.55;
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    fr.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Неверное изображение'));
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > h && w > maxSide) { h = Math.round(h * maxSide / w); w = maxSide; }
+        else if (h >= w && h > maxSide) { w = Math.round(w * maxSide / h); h = maxSide; }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        const cx = cv.getContext('2d');
+        cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h);
+        cx.drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL('image/jpeg', quality));
+      };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
+async function trUploadPhoto(dataUrl, kind) {
+  const r = await posApi('?action=transit-photo-upload', {
+    method: 'POST', body: JSON.stringify({ dataUrl, kind }),
+  });
+  return r.url;
+}
+
+async function renderTransit(force) {
+  const box = $('shpBody');
+  if (!trState.booted || force) {
+    box.innerHTML = `<div class="loading">⏳ Загружаю «Товары в пути»…</div>`;
+    try {
+      const [list, sz] = await Promise.all([
+        posApi(`?action=transit-list&status=${encodeURIComponent(trState.tab)}`, { method: 'GET' }),
+        trState.sizes.length ? Promise.resolve({ sizes: trState.sizes }) : posApi('?action=transit-sizes', { method: 'GET' }),
+      ]);
+      trState.rows = list.rows || [];
+      trState.counts = list.counts || trState.counts;
+      trState.sizes = sz.sizes || trState.sizes;
+    } catch (e) {
+      box.innerHTML = errBar('Не удалось загрузить: ' + e.message);
+      return;
+    }
+    trState.booted = true;
+  }
+  trRender();
+}
+
+async function trReload() {
+  try {
+    const list = await posApi(`?action=transit-list&status=${encodeURIComponent(trState.tab)}`, { method: 'GET' });
+    trState.rows = list.rows || [];
+    trState.counts = list.counts || trState.counts;
+  } catch (e) { docToast('Ошибка: ' + e.message); }
+  trRender();
+}
+
+function trRender() {
+  const box = $('shpBody');
+  const c = trState.counts;
+  const badge = (n) => n > 0 ? `<span class="shp-tab-badge">${n}</span>` : '';
+  const tabBtn = (key, label, n) =>
+    `<button class="shp-tab ${trState.tab === key ? 'active' : ''}" data-trtab="${key}">${label}${n != null ? badge(n) : ''}</button>`;
+  box.innerHTML = `
+    <div class="shp-head">
+      <div class="shp-tabs">
+        ${tabBtn('all', 'Все отправки', c.all)}
+        ${tabBtn('in_transit', 'В пути', c.in_transit)}
+        ${tabBtn('partial', 'Частично получено', c.partial)}
+        ${tabBtn('received', 'Получено', c.received)}
+        ${tabBtn('archived', 'Архив', null)}
+      </div>
+      <button class="btn btn-primary" id="trNew">+ Новая отправка</button>
+    </div>
+    ${trState.form ? trFormHtml() : ''}
+    <div id="trListWrap">${trListHtml()}</div>
+  `;
+  trxBind();
+}
+
+function trListHtml() {
+  const rows = trState.rows;
+  if (!rows.length) return `<div class="shp-empty">Нет отправок в этом разделе.</div>`;
+  return `<div class="shp-cards">` + rows.map(trCardHtml).join('') + `</div>`;
+}
+
+function trCardHtml(s) {
+  const st = TR_STATUS[s.status] || TR_STATUS.in_transit;
+  const pct = s.tot_qty > 0 ? Math.round(s.tot_received * 100 / s.tot_qty) : 0;
+  const isArch = s.status === 'archived';
+  return `
+  <div class="shp-card" data-ship="${s.id}">
+    <div class="shp-card-top">
+      <div class="shp-card-main">
+        <div class="shp-card-title">${esc(s.supplier || 'Без поставщика')}
+          <span class="shp-badge ${st.cls}">${st.label}</span></div>
+        <div class="shp-card-sub">
+          ${s.waybill_no ? '№ ' + esc(s.waybill_no) + ' · ' : ''}
+          ${s.carrier ? esc(s.carrier) + ' · ' : ''}
+          ${s.country ? esc(s.country) + ' · ' : ''}
+          отпр. ${s.ship_date ? docFmtDate(s.ship_date) : '—'}
+        </div>
+      </div>
+      <div class="shp-card-progress">
+        <div class="shp-prog-num">${fmtInt(s.tot_received)} / ${fmtInt(s.tot_qty)} <span class="shp-prog-pct">${pct}%</span></div>
+        <div class="shp-prog-bar"><div class="shp-prog-fill" style="width:${pct}%"></div></div>
+      </div>
+    </div>
+    <div class="shp-card-actions">
+      <button class="btn btn-sm" data-tredit="${s.id}">✒️ Открыть / редактировать</button>
+      ${!isArch && s.status === 'received' ? `<button class="btn btn-sm" data-trarch="${s.id}">📦 В архив</button>` : ''}
+      ${isArch ? `<button class="btn btn-sm" data-trunarch="${s.id}">↩ Вернуть из архива</button>
+                  <button class="btn btn-sm btn-danger" data-trdel="${s.id}">🗑 Удалить полностью</button>` : ''}
+    </div>
+    ${s.items && s.items.length ? trItemsMiniTable(s) : ''}
+  </div>`;
+}
+
+function trItemsMiniTable(s) {
+  const isArch = s.status === 'archived';
+  const rows = s.items.map(it => {
+    const stKey = it.received ? 'received' : (it.qty_received > 0 ? 'partial' : 'in_transit');
+    const st = TR_STATUS[stKey];
+    const sizes = Array.isArray(it.sizes)
+      ? it.sizes.map(x => (x && typeof x === 'object')
+          ? esc(String(x.size)) + (x.qty != null && x.qty !== '' ? ` <span class="shp-size-q">×${fmtInt(x.qty)}</span>` : '')
+          : esc(String(x))).join(', ')
+      : '';
+    return `<tr>
+      <td class="shp-mini-photo">${it.photo_url ? `<img src="${esc(it.photo_url)}" alt="" loading="lazy" data-trzoom="${esc(it.photo_url)}">` : '<div class="shp-nophoto">—</div>'}</td>
+      <td><div class="shp-it-name">${esc(it.name || '—')}</div>${it.subtitle ? `<div class="shp-it-sub">${esc(it.subtitle)}</div>` : ''}</td>
+      <td>${esc(it.article || '—')}</td>
+      <td class="shp-it-sizes">${sizes || '—'}</td>
+      <td class="shp-num">${fmtInt(it.qty)}</td>
+      <td class="shp-num shp-rec">${fmtInt(it.qty_received)}</td>
+      <td><span class="shp-badge ${st.cls} shp-badge-sm">${st.label}</span></td>
+      <td class="shp-chk-cell">
+        <input type="checkbox" class="shp-chk" data-tritem="${it.id}" ${it.received ? 'checked' : ''} ${isArch ? 'disabled' : ''} title="Отметить как получено">
+      </td>
+    </tr>`;
+  }).join('');
+  return `<div class="shp-mini-wrap"><table class="shp-mini">
+    <thead><tr><th></th><th>Товар</th><th>Артикул</th><th>Размеры</th><th>Кол-во</th><th>Получено</th><th>Статус</th><th>✓</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    <div class="shp-mini-hint">Галочка = товар получен полностью. Если не у всех — отправка «частично получена».</div>
+  </div>`;
+}
+
+function trFormHtml() {
+  const f = trState.form;
+  const totQty = f.items.reduce((s, it) => s + trItemQty(it), 0);
+  const totRec = f.items.reduce((s, it) => s + (parseInt(it.qty_received, 10) || 0), 0);
+  const goods = Number(f.goods_cost) || 0, deliv = Number(f.delivery_cost) || 0, customs = Number(f.customs_cost) || 0;
+  const total = goods + deliv + customs;
+  const docs = (f.docPhotos || []).map((u, i) =>
+    `<div class="shp-doc-thumb"><img src="${esc(u)}" data-trzoom="${esc(u)}"><button class="shp-doc-x" data-trdocdel="${i}" title="Удалить">×</button></div>`).join('');
+  return `
+  <div class="shp-form-grid">
+    <div class="card card-pad shp-form-main">
+      <div class="shp-form-h">${f.id ? 'Редактирование отправки' : 'Создание новой отправки'}
+        <button class="shp-form-close" id="trFormClose" title="Закрыть">×</button></div>
+      <div class="shp-fields">
+        <label class="shp-fld"><span>Дата отправки <b>*</b></span><input type="date" class="finput" id="trF_date" value="${esc(f.ship_date || '')}"></label>
+        <label class="shp-fld shp-fld-wide"><span>Поставщик <b>*</b></span><input class="finput" id="trF_supplier" placeholder="Название поставщика" value="${esc(f.supplier || '')}"></label>
+        <label class="shp-fld"><span>Страна отправления</span><input class="finput" id="trF_country" placeholder="напр. Китай" value="${esc(f.country || '')}"></label>
+        <label class="shp-fld"><span>Перевозчик (ТК)</span><input class="finput" id="trF_carrier" placeholder="напр. SinoTrans" value="${esc(f.carrier || '')}"></label>
+        <label class="shp-fld"><span>Компания-отправитель</span><input class="finput" id="trF_sender" value="${esc(f.sender_company || '')}"></label>
+        <label class="shp-fld"><span>№ накладной / трек-номер</span><input class="finput" id="trF_waybill" value="${esc(f.waybill_no || '')}"></label>
+        <label class="shp-fld"><span>Количество мест</span><input type="number" min="0" class="finput" id="trF_places" value="${esc(f.places)}"></label>
+        <label class="shp-fld"><span>Вес (кг)</span><input type="number" min="0" step="0.01" class="finput" id="trF_weight" value="${esc(f.weight_kg)}"></label>
+        <label class="shp-fld"><span>Стоимость доставки (${CUR})<i class="shp-hint">вписывается после получения</i></span><input type="number" min="0" step="0.01" class="finput" id="trF_deliv" placeholder="Введите сумму" value="${esc(f.delivery_cost)}"></label>
+      </div>
+      <label class="shp-fld shp-fld-full"><span>Примечание</span><textarea class="finput" id="trF_note" rows="2" placeholder="Добавьте примечание к отправке…">${esc(f.note || '')}</textarea></label>
+      <div class="shp-docs-sec">
+        <div class="shp-docs-h">Фото документов отправки <span class="shp-hint">(фишка / накладная)</span></div>
+        <div class="shp-docs-row">
+          ${docs}
+          <label class="shp-doc-add"><input type="file" accept="image/*" id="trF_docfile" hidden multiple>+ Загрузить фото<i>JPG, PNG</i></label>
+        </div>
+      </div>
+      <div class="shp-cargo-sec">
+        <div class="shp-cargo-h"><span>Состав груза</span>
+          <button class="btn btn-sm btn-primary" id="trAddItem">+ Добавить товар</button></div>
+        <div class="shp-items-wrap">${trFormItemsHtml()}</div>
+        <div class="shp-items-total">Итого: <b>${fmtInt(totRec)}</b> / <b>${fmtInt(totQty)}</b> шт.</div>
+      </div>
+    </div>
+    <div class="shp-form-side">
+      <div class="card card-pad">
+        <div class="shp-side-h">Финансовая информация</div>
+        <label class="shp-side-fld"><span>Стоимость товаров (инвойс)</span><input type="number" min="0" step="0.01" class="finput" id="trF_goods" placeholder="Введите сумму" value="${esc(f.goods_cost)}"></label>
+        <label class="shp-side-fld"><span>Стоимость доставки</span><input type="number" min="0" step="0.01" class="finput" id="trF_deliv2" placeholder="Введите сумму" value="${esc(f.delivery_cost)}"></label>
+        <label class="shp-side-fld"><span>Таможенные расходы</span><input type="number" min="0" step="0.01" class="finput" id="trF_customs" placeholder="Введите сумму" value="${esc(f.customs_cost)}"></label>
+        <div class="shp-side-total">Итого расходов <b id="trTotalCost">${money(total)}</b></div>
+      </div>
+      <div class="shp-form-buttons">
+        <button class="btn btn-primary shp-save" id="trSave">${f.id ? 'Сохранить изменения' : 'Создать отправку'}</button>
+        <button class="btn shp-cancel" id="trCancel">Отмена</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function trFormItemsHtml() {
+  const f = trState.form;
+  if (!f.items.length) return `<div class="shp-items-empty">Нет товаров. Нажмите «Добавить товар».</div>`;
+  return f.items.map((it, i) => {
+    const usedSizes = (it.sizes || []).map(x => x.size);
+    const sizeRows = (it.sizes || []).map((s, si) =>
+      `<div class="shp-size-line">
+        <span class="shp-size-name">${esc(s.size)}</span>
+        <input type="number" min="0" inputmode="numeric" class="finput shp-size-qty" placeholder="0" value="${esc(s.qty)}" data-trsizeqty="${i}:${si}" title="Количество для размера ${esc(s.size)}">
+        <span class="shp-size-unit">шт.</span>
+        <button class="shp-size-x" data-trsizedel="${i}:${si}" title="Убрать размер">×</button>
+      </div>`).join('');
+    const sizeOpts = `<option value="">+ добавить размер</option>` +
+      trState.sizes.filter(s => !usedSizes.includes(s)).map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+    const itemQty = trItemQty(it);
+    return `
+    <div class="shp-item-row" data-tridx="${i}">
+      <div class="shp-item-photo">
+        ${it.photo_url
+          ? `<img src="${esc(it.photo_url)}" data-trzoom="${esc(it.photo_url)}"><button class="shp-item-photo-x" data-trphotodel="${i}">×</button>`
+          : `<label class="shp-item-photo-add"><input type="file" accept="image/*" hidden data-trphotofile="${i}">📷<i>Фото</i></label>`}
+      </div>
+      <div class="shp-item-body">
+        <div class="shp-item-line">
+          <input class="finput shp-item-name" placeholder="Название товара" value="${esc(it.name || '')}" data-trf="name:${i}">
+          <input class="finput shp-item-art" placeholder="Артикул" value="${esc(it.article || '')}" data-trf="article:${i}">
+        </div>
+        <input class="finput shp-item-sub" placeholder="Описание (напр. Зимние ботинки)" value="${esc(it.subtitle || '')}" data-trf="subtitle:${i}">
+        <div class="shp-sizes-block">
+          <div class="shp-sizes-head"><span>Размеры и количество</span></div>
+          ${sizeRows ? `<div class="shp-size-lines">${sizeRows}</div>` : `<div class="shp-sizes-empty">Добавьте размеры и укажите количество по каждому.</div>`}
+          <select class="fselect shp-size-sel" data-trsizeadd="${i}">${sizeOpts}</select>
+        </div>
+        <div class="shp-item-qtys">
+          <span class="shp-item-qty-auto">Кол-во товара: <b data-trqty="${i}">${fmtInt(itemQty)}</b> шт. <i class="shp-hint">(сумма по размерам)</i></span>
+          <label>Получено <input type="number" min="0" class="finput shp-item-rec" value="${esc(it.qty_received)}" data-trf="qty_received:${i}"></label>
+          <label class="shp-item-chk"><input type="checkbox" ${it.received ? 'checked' : ''} data-trf="received:${i}"> Получен полностью</label>
+        </div>
+      </div>
+      <button class="shp-item-del" data-tritemdel="${i}" title="Удалить товар">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+function trRepaintItems() {
+  const wrap = document.querySelector('.shp-items-wrap');
+  if (wrap) wrap.innerHTML = trFormItemsHtml();
+  trBindItems();
+  trRecalcTotals();
+}
+
+function trRecalcTotals() {
+  const f = trState.form; if (!f) return;
+  // обновить авто-сумму каждого товара (без перерендера, чтобы не терять фокус)
+  f.items.forEach((it, i) => {
+    const el = document.querySelector(`[data-trqty="${i}"]`);
+    if (el) el.textContent = fmtInt(trItemQty(it));
+  });
+  const totQty = f.items.reduce((s, it) => s + trItemQty(it), 0);
+  const totRec = f.items.reduce((s, it) => s + (parseInt(it.qty_received, 10) || 0), 0);
+  const el = document.querySelector('.shp-items-total');
+  if (el) el.innerHTML = `Итого: <b>${fmtInt(totRec)}</b> / <b>${fmtInt(totQty)}</b> шт.`;
+  const goods = Number(f.goods_cost) || 0, deliv = Number(f.delivery_cost) || 0, customs = Number(f.customs_cost) || 0;
+  const tc = $('trTotalCost'); if (tc) tc.innerHTML = money(goods + deliv + customs);
+}
+
+function trxBind() {
+  document.querySelectorAll('[data-trtab]').forEach(b => b.addEventListener('click', () => { trState.tab = b.dataset.trtab; trReload(); }));
+  const nb = $('trNew'); if (nb) nb.addEventListener('click', () => { trState.form = trNewForm(); trRender(); });
+  document.querySelectorAll('[data-trzoom]').forEach(img => img.addEventListener('click', () => trZoom(img.dataset.trzoom)));
+  document.querySelectorAll('.shp-chk[data-tritem]').forEach(chk => chk.addEventListener('change', async () => {
+    chk.disabled = true;
+    try {
+      await posApi('?action=transit-item-receive', { method: 'POST', body: JSON.stringify({ itemId: chk.dataset.tritem, received: chk.checked }) });
+      await trReload();
+    } catch (e) { docToast('Ошибка: ' + e.message); chk.disabled = false; chk.checked = !chk.checked; }
+  }));
+  document.querySelectorAll('[data-tredit]').forEach(b => b.addEventListener('click', () => trOpenEdit(b.dataset.tredit)));
+  document.querySelectorAll('[data-trarch]').forEach(b => b.addEventListener('click', () => trSetStatus(b.dataset.trarch, 'archived')));
+  document.querySelectorAll('[data-trunarch]').forEach(b => b.addEventListener('click', () => trSetStatus(b.dataset.trunarch, 'received')));
+  document.querySelectorAll('[data-trdel]').forEach(b => b.addEventListener('click', () => trDelete(b.dataset.trdel)));
+  if (trState.form) trBindForm();
+}
+
+function trBindForm() {
+  const f = trState.form;
+  const close = () => { trState.form = null; trRender(); };
+  const cl = $('trFormClose'); if (cl) cl.addEventListener('click', close);
+  const cn = $('trCancel'); if (cn) cn.addEventListener('click', close);
+  const bindF = (id, key) => { const el = $(id); if (el) el.addEventListener('input', () => { f[key] = el.value; }); };
+  bindF('trF_date', 'ship_date'); bindF('trF_supplier', 'supplier'); bindF('trF_country', 'country');
+  bindF('trF_carrier', 'carrier'); bindF('trF_sender', 'sender_company'); bindF('trF_waybill', 'waybill_no');
+  bindF('trF_places', 'places'); bindF('trF_weight', 'weight_kg'); bindF('trF_note', 'note');
+  const deliv1 = $('trF_deliv'), deliv2 = $('trF_deliv2');
+  const syncDeliv = (val) => { f.delivery_cost = val; if (deliv1 && deliv1.value !== val) deliv1.value = val; if (deliv2 && deliv2.value !== val) deliv2.value = val; trRecalcTotals(); };
+  if (deliv1) deliv1.addEventListener('input', () => syncDeliv(deliv1.value));
+  if (deliv2) deliv2.addEventListener('input', () => syncDeliv(deliv2.value));
+  const bindCost = (id, key) => { const el = $(id); if (el) el.addEventListener('input', () => { f[key] = el.value; trRecalcTotals(); }); };
+  bindCost('trF_goods', 'goods_cost'); bindCost('trF_customs', 'customs_cost');
+  const df = $('trF_docfile');
+  if (df) df.addEventListener('change', async () => {
+    const files = [...(df.files || [])]; if (!files.length) return;
+    const lbl = df.closest('.shp-doc-add'); const old = lbl ? lbl.innerHTML : '';
+    if (lbl) lbl.innerHTML = '⏳…';
+    try {
+      for (const file of files) {
+        const dataUrl = await trCompress(file, 'doc');
+        const url = await trUploadPhoto(dataUrl, 'doc');
+        f.docPhotos.push(url);
+      }
+      trRender();
+    } catch (e) { docToast('Фото: ' + e.message); if (lbl) lbl.innerHTML = old; }
+  });
+  document.querySelectorAll('[data-trdocdel]').forEach(b => b.addEventListener('click', () => { f.docPhotos.splice(parseInt(b.dataset.trdocdel, 10), 1); trRender(); }));
+  const ai = $('trAddItem'); if (ai) ai.addEventListener('click', () => {
+    f.items.push({ name: '', subtitle: '', article: '', sizes: [], qty_received: '', photo_url: '', received: false });
+    trRepaintItems();
+  });
+  trBindItems();
+  const sv = $('trSave'); if (sv) sv.addEventListener('click', trSave);
+}
+
+function trBindItems() {
+  const f = trState.form; if (!f) return;
+  document.querySelectorAll('[data-trf]').forEach(el => {
+    const [key, idx] = el.dataset.trf.split(':'); const i = parseInt(idx, 10);
+    const ev = el.type === 'checkbox' ? 'change' : 'input';
+    el.addEventListener(ev, () => {
+      if (el.type === 'checkbox') {
+        f.items[i][key] = el.checked;
+        if (key === 'received' && el.checked) { f.items[i].qty_received = String(trItemQty(f.items[i])); trRepaintItems(); return; }
+      } else { f.items[i][key] = el.value; }
+      if (key === 'qty_received') trRecalcTotals();
+    });
+  });
+  document.querySelectorAll('[data-trsizeadd]').forEach(sel => sel.addEventListener('change', () => {
+    const i = parseInt(sel.dataset.trsizeadd, 10); const v = sel.value;
+    if (v && !f.items[i].sizes.some(x => x.size === v)) f.items[i].sizes.push({ size: v, qty: '' });
+    trRepaintItems();
+  }));
+  document.querySelectorAll('[data-trsizeqty]').forEach(inp => inp.addEventListener('input', () => {
+    const [i, si] = inp.dataset.trsizeqty.split(':').map(x => parseInt(x, 10));
+    if (f.items[i] && f.items[i].sizes[si]) { f.items[i].sizes[si].qty = inp.value; trRecalcTotals(); }
+  }));
+  document.querySelectorAll('[data-trsizedel]').forEach(b => b.addEventListener('click', () => {
+    const [i, si] = b.dataset.trsizedel.split(':').map(x => parseInt(x, 10));
+    f.items[i].sizes.splice(si, 1); trRepaintItems();
+  }));
+  document.querySelectorAll('[data-trphotofile]').forEach(inp => inp.addEventListener('change', async () => {
+    const i = parseInt(inp.dataset.trphotofile, 10); const file = inp.files && inp.files[0]; if (!file) return;
+    const lbl = inp.closest('.shp-item-photo-add'); const old = lbl ? lbl.innerHTML : '';
+    if (lbl) lbl.innerHTML = '⏳';
+    try {
+      const dataUrl = await trCompress(file, 'item');
+      const url = await trUploadPhoto(dataUrl, 'item');
+      f.items[i].photo_url = url; trRepaintItems();
+    } catch (e) { docToast('Фото: ' + e.message); if (lbl) lbl.innerHTML = old; }
+  }));
+  document.querySelectorAll('[data-trphotodel]').forEach(b => b.addEventListener('click', () => {
+    const i = parseInt(b.dataset.trphotodel, 10); f.items[i].photo_url = ''; trRepaintItems();
+  }));
+  document.querySelectorAll('[data-tritemdel]').forEach(b => b.addEventListener('click', () => {
+    const i = parseInt(b.dataset.tritemdel, 10); f.items.splice(i, 1); trRepaintItems();
+  }));
+  document.querySelectorAll('.shp-item-photo [data-trzoom]').forEach(img => img.addEventListener('click', () => trZoom(img.dataset.trzoom)));
+}
+
+async function trOpenEdit(id) {
+  const s = trState.rows.find(r => r.id === id);
+  if (!s) { docToast('Отправка не найдена'); return; }
+  trState.form = {
+    id: s.id, ship_date: s.ship_date || '', supplier: s.supplier || '', country: s.country || '',
+    carrier: s.carrier || '', sender_company: s.sender_company || '', waybill_no: s.waybill_no || '',
+    places: s.places == null ? '' : s.places, weight_kg: s.weight_kg == null ? '' : s.weight_kg,
+    delivery_cost: s.delivery_cost == null ? '' : s.delivery_cost, goods_cost: s.goods_cost == null ? '' : s.goods_cost,
+    customs_cost: s.customs_cost == null ? '' : s.customs_cost, note: s.note || '',
+    docPhotos: Array.isArray(s.doc_photos) ? [...s.doc_photos] : [],
+    items: (s.items || []).map(it => ({
+      name: it.name || '', subtitle: it.subtitle || '', article: it.article || '',
+      sizes: trNormSizes(it.sizes),
+      qty_received: it.qty_received == null ? '' : it.qty_received, photo_url: it.photo_url || '',
+      received: it.received === true,
+    })),
+  };
+  trRender();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function trSave() {
+  const f = trState.form; if (!f) return;
+  if (!f.ship_date) { docToast('Укажите дату отправки'); return; }
+  if (!f.supplier || !f.supplier.trim()) { docToast('Укажите поставщика'); return; }
+  const btn = $('trSave'); if (btn) { btn.disabled = true; btn.textContent = 'Сохранение…'; }
+  const payload = {
+    id: f.id || undefined, ship_date: f.ship_date, supplier: f.supplier, country: f.country,
+    carrier: f.carrier, sender_company: f.sender_company, waybill_no: f.waybill_no,
+    places: f.places, weight_kg: f.weight_kg, delivery_cost: f.delivery_cost,
+    goods_cost: f.goods_cost, customs_cost: f.customs_cost, note: f.note,
+    doc_photos: f.docPhotos, by: state.user || 'admin',
+    items: f.items.map(it => ({
+      name: it.name, subtitle: it.subtitle, article: it.article,
+      sizes: (it.sizes || []).map(x => ({ size: x.size, qty: x.qty === '' || x.qty == null ? 0 : (parseInt(x.qty, 10) || 0) })),
+      qty: trItemQty(it), qty_received: it.qty_received, photo_url: it.photo_url, received: it.received,
+    })),
+  };
+  try {
+    await posApi('?action=transit-save', { method: 'POST', body: JSON.stringify(payload) });
+    docToast(f.id ? 'Отправка обновлена' : 'Отправка создана');
+    trState.form = null;
+    await trReload();
+  } catch (e) {
+    docToast('Ошибка: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = f.id ? 'Сохранить изменения' : 'Создать отправку'; }
+  }
+}
+
+async function trSetStatus(id, status) {
+  try {
+    await posApi('?action=transit-set-status', { method: 'POST', body: JSON.stringify({ id, status }) });
+    docToast(status === 'archived' ? 'Отправка перемещена в архив' : 'Отправка возвращена из архива');
+    await trReload();
+  } catch (e) { docToast('Ошибка: ' + e.message); }
+}
+
+async function trDelete(id) {
+  const s = trState.rows.find(r => r.id === id);
+  const name = s ? (s.supplier || 'отправка') : 'отправка';
+  if (!confirm(`Удалить полностью «${name}»? Все товары и фото будут удалены безвозвратно.`)) return;
+  try {
+    const r = await posApi('?action=transit-delete', { method: 'POST', body: JSON.stringify({ id }) });
+    docToast(`Удалено (фото: ${r.photos_removed || 0})`);
+    await trReload();
+  } catch (e) { docToast('Ошибка: ' + e.message); }
+}
+
+function trZoom(url) {
+  if (!url) return;
+  let ov = $('trZoomOv');
+  if (!ov) {
+    ov = document.createElement('div'); ov.id = 'trZoomOv'; ov.className = 'shp-zoom-ov';
+    ov.addEventListener('click', () => ov.classList.remove('show'));
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `<img src="${esc(url)}">`;
+  ov.classList.add('show');
+}
+
+
 // ══════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   initLogin();

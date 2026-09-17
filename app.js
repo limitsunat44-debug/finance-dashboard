@@ -10332,6 +10332,7 @@ const POS = {
     doctor: null,      // {c1_ref,full_name,card_code}
     client: null,      // {c1_ref,full_name,card_code,discount_pct}
     cartDiscountPct: 0,// ручная «5% на чек» (не считая клиентской карты)
+    reward: null,      // reward-код orto.cards: {code, value} — фикс. скидка (напр. 100 с.) на весь чек
     paytypes: null,    // {cash:[...],cards:[...],terminals:[...],defaultTerminal}
     payMode: 'cash',
     keySeq: 1,
@@ -10841,11 +10842,55 @@ function posShopWh() {
 }
 
 // Скан товара → автоподстановка в корзину
+// Reward-код orto.cards: формат RW-100-YYYY-XXXXXX. Распознаём по префиксу RW-.
+function posIsRewardCode(code) {
+    return /^RW-\d+-\d{4}-[0-9A-Za-z]{4,}$/i.test(String(code || '').trim());
+}
+
+// Применить reward-код к текущему чеку: проверяем через backend (не гасим),
+// кладём в POS.reward — скидка применится в posTotals, погасится при проведении чека.
+async function posApplyRewardCode(code) {
+    const rw = String(code || '').trim().toUpperCase();
+    const hint = document.getElementById('posScanHint');
+    if (POS.reward && POS.reward.code === rw) {
+        if (hint) hint.innerHTML = `ℹ️ Промо-код <b>${posEsc(rw)}</b> уже применён к чеку.`;
+        return;
+    }
+    if (POS.reward) {
+        if (hint) hint.innerHTML = `⛔ На чек уже применён промо-код <b>${posEsc(POS.reward.code)}</b>. На один чек — один код.`;
+        if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Код уже применён', 'На один чек — один промо-код', true);
+        return;
+    }
+    if (hint) hint.innerHTML = `⏳ Проверяю промо-код <b>${posEsc(rw)}</b>…`;
+    try {
+        const r = await posApiTimeout('?action=reward-check', { method: 'POST', body: JSON.stringify({ code: rw }) }, 10000);
+        if (!r.ok || !r.data || !r.data.ok) {
+            const err = (r.data && r.data.error) || `HTTP ${r.status}`;
+            const msg = err === 'already_redeemed' ? 'Промо-код уже использован'
+                : err === 'code_not_found' ? 'Промо-код не найден'
+                : err === 'bad_code_format' ? 'Неверный формат промо-кода'
+                : ('Промо-код недоступен: ' + err);
+            if (hint) hint.innerHTML = `❌ ${posEsc(msg)} (<b>${posEsc(rw)}</b>)`;
+            if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Промо-код не применён', msg, true);
+            return;
+        }
+        const val = Number(r.data.value_somoni) || 0;
+        POS.reward = { code: r.data.code || rw, value: val };
+        posRenderTotals();
+        if (hint) hint.innerHTML = `✅ Промо-код <b>${posEsc(POS.reward.code)}</b> применён: −${posMoney(val)} с. к чеку.`;
+        if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Промо-код применён', `−${posMoney(val)} с. к чеку`, false);
+    } catch (e) {
+        if (hint) hint.innerHTML = `⚠️ Не удалось проверить промо-код: ${posEsc((e && e.message) || String(e))}`;
+    }
+}
+
 async function posHandleScannedCode(code) {
     code = String(code || '').trim();
     if (!code) return;
     const inp = document.getElementById('posScanInput');
     if (inp) inp.value = '';
+    // Reward-код orto.cards (RW-...) — не товар и не карта: применяем как скидку на чек.
+    if (posIsRewardCode(code)) { await posApplyRewardCode(code); return; }
     const hint = document.getElementById('posScanHint');
     if (hint) hint.innerHTML = `⏳ Ищу товар <b>${posEsc(code)}</b>…`;
     // Офлайн-защита: если этот же экземплярный штрихкод уже стоит в офлайн-очереди — нельзя продать дважды.
@@ -11260,9 +11305,13 @@ function posTotals() {
         else discNet += net;
     });
     const cartPct = posCartDiscPct();
-    const grand = Math.round(discNet * (1 - cartPct / 100)) + Math.round(noDiscNet);
+    const beforeReward = Math.round(discNet * (1 - cartPct / 100)) + Math.round(noDiscNet);
+    // Reward-код orto.cards — фиксированная скидка (напр. 100 с.) на весь чек, поверх остальных.
+    const rewardVal = (POS.reward && Number(POS.reward.value)) || 0;
+    const reward = Math.min(rewardVal, beforeReward);   // не уводим итог ниже 0
+    const grand = Math.max(0, beforeReward - reward);
     const disc = Math.round(gross) - grand;
-    return { gross: Math.round(gross), grand, disc, cartPct };
+    return { gross: Math.round(gross), grand, disc, cartPct, reward, beforeReward };
 }
 
 function posRenderCart() {
@@ -11399,8 +11448,25 @@ function posRenderTotals() {
     const d = document.getElementById('posSumDisc');
     const grand = document.getElementById('posSumGrand');
     if (g) g.textContent = posMoney(t.gross);
-    if (d) d.textContent = '−' + posMoney(t.disc);
-    if (dRow) dRow.style.display = t.disc > 0 ? '' : 'none';
+    // «Скидка» — только обычная (карта/5%), без reward; reward показываем отдельной строкой.
+    const plainDisc = Math.max(0, Math.round(t.gross) - (t.beforeReward != null ? t.beforeReward : t.grand));
+    if (d) d.textContent = '−' + posMoney(plainDisc);
+    if (dRow) dRow.style.display = plainDisc > 0 ? '' : 'none';
+    // Строка promo-кода (если применён).
+    const rwRow = document.getElementById('posSumRewardRow');
+    const rwVal = document.getElementById('posSumReward');
+    const rwLbl = document.getElementById('posSumRewardLbl');
+    if (rwRow && rwVal) {
+        if (t.reward > 0 && POS.reward) {
+            rwRow.style.display = '';
+            rwVal.textContent = '−' + posMoney(t.reward);
+            if (rwLbl) rwLbl.innerHTML = `Промо-код <span style="font-size:11px;opacity:.7;">${posEsc(POS.reward.code)}</span> <button type="button" id="posRewardRm" title="Убрать" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>`;
+            const rm = document.getElementById('posRewardRm');
+            if (rm) rm.onclick = () => { POS.reward = null; posRenderTotals(); };
+        } else {
+            rwRow.style.display = 'none';
+        }
+    }
     if (grand) grand.textContent = posMoney(t.grand);
     // Оплата блокируется ТОЛЬКО при пустой корзине. Статус экземпляра (sold/списан)
     // больше НЕ блокирует; нулевой остаток — только мягкое предупреждение.
@@ -11654,6 +11720,8 @@ function posClientInputHandler(e) {
     posLookupClient(code);
 }
 async function posLookupClient(code) {
+    // Reward-код orto.cards (RW-...) могли навести на камеру клиента — это не карта, а скидка на чек.
+    if (posIsRewardCode(code)) { await posApplyRewardCode(code); return; }
     const chosen = document.getElementById('posClientChosen');
     try {
         const r = await posApi(`?action=card&type=client&q=${encodeURIComponent(code)}`, { method: 'GET' });
@@ -11687,7 +11755,7 @@ async function posToggleClientCamera() {
         POS.clientQr = new Html5Qrcode('posClientReader', { verbose: false });
         const cfg = {
             fps: 10, qrbox: { width: 250, height: 140 },
-            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE],
         };
         await POS.clientQr.start(
             { facingMode: 'environment' }, cfg,
@@ -12028,11 +12096,27 @@ async function posConfirmSale() {
         document.getElementById('posReceiptModal').style.display = 'none';
         const num = r.data.docNumber || '';
         const posted = r.data.posted;
+        // Reward-код orto.cards: гасим ПОСЛЕ успешного проведения чека (продажа первична).
+        // Ошибка погашения НЕ откатывает продажу — код останется активным (безопасно).
+        let rewardWarn = '';
+        if (POS.reward && POS.reward.code) {
+            try {
+                const rr = await posApiTimeout('?action=reward-redeem', {
+                    method: 'POST',
+                    body: JSON.stringify({ code: POS.reward.code, receiptRef: num || body.clientSaleId }),
+                }, 10000);
+                if (!rr.ok || !rr.data || !rr.data.ok) {
+                    rewardWarn = ` <span style="color:#b45309;">(промо-код не погашен — проверьте вручную)</span>`;
+                }
+            } catch (_) {
+                rewardWarn = ` <span style="color:#b45309;">(промо-код не погашен — нет связи, проверьте вручную)</span>`;
+            }
+        }
         pmobCaptureSale({ docNumber: num, posted: posted, queued: false, bonus: r.data.bonus || null });
         posResetSale();
         posUpdateConnUI();
         const hint = document.getElementById('posScanHint');
-        if (hint) hint.innerHTML = `✅ Продажа проведена! Чек <b>${posEsc(num)}</b>${posted ? '' : ' <span style="color:#b45309;">(создан, проведённость проверьте в 1С)</span>'}`;
+        if (hint) hint.innerHTML = `✅ Продажа проведена! Чек <b>${posEsc(num)}</b>${posted ? '' : ' <span style="color:#b45309;">(создан, проведённость проверьте в 1С)</span>'}${rewardWarn}`;
     } catch (e) {
         if (rerr) { rerr.style.display = 'block'; rerr.textContent = '⚠️ ' + e.message; }
     } finally {
@@ -12043,7 +12127,7 @@ async function posConfirmSale() {
 
 function posResetSale() {
     POS.cart = []; POS.activeKey = null; POS.doctor = null; POS.client = null;
-    POS.cartDiscountPct = 0; POS._payments = null;
+    POS.cartDiscountPct = 0; POS._payments = null; POS.reward = null;
     const dc = document.getElementById('posDoctorChosen'); if (dc) dc.style.display = 'none';
     const cc = document.getElementById('posClientChosen'); if (cc) cc.style.display = 'none';
     const dr = document.getElementById('posDoctorResults'); if (dr) dr.innerHTML = '';
@@ -12061,7 +12145,7 @@ async function posToggleCamera() {
         const config = {
             fps: 10,
             qrbox: { width: 250, height: 150 },
-            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128],
+            formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8, Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE],
         };
         await POS.html5qr.start(
             { facingMode: 'environment' },
@@ -12821,6 +12905,13 @@ function pmobRenderCard() {
 async function pmobCardHandleCode(code) {
     const c = String(code || '').trim();
     if (c.length < 3) { pmobToast('Некорректный код карты', c, true); return; }
+    // Reward-код orto.cards (RW-...) — не карта: применяем как скидку на чек и закрываем камеру.
+    if (posIsRewardCode(c)) {
+        await posApplyRewardCode(c);
+        pmobCloseScan();
+        if (POS.reward) { pmobShow('cart'); }
+        return;
+    }
     POS.client = null;
     POS.mobCardCode = c;
     await posLookupClient(c);

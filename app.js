@@ -12071,6 +12071,10 @@ async function posConfirmSale() {
             doctorCode: (POS.doctor && POS.doctor.card_code) || null,
             doctorName: (POS.doctor && POS.doctor.full_name) || null,
             items,
+            // Reward-код orto.cards — ФИКС. скидка (напр. 100 с.) на весь чек.
+            // Передаём в backend, чтобы он размазал её по позициям и итог чека (total)
+            // совпал с фактически оплаченной суммой (grand), а не остался = сумме без reward.
+            rewardValue: (POS.reward && Number(POS.reward.value)) || 0,
             payments: POS._payments || [],
         };
         // ОНЛАЙН-FIRST: сначала пробуем отправить в сеть с таймаутом.

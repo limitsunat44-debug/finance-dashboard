@@ -1848,3 +1848,11 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
   .shp-item-photo,.shp-item-photo img,.shp-item-photo-add{width:100%;height:150px}
   .shp-item-line{flex-direction:column}
 }
+
+/* процент скидки карты (v1.2.76) */
+.cd-pct-btn { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 3px 9px; font: inherit; font-weight: 700; cursor: pointer; font-variant-numeric: tabular-nums; }
+.cd-pct-btn:hover { border-color: var(--g, #16a34a); }
+.cd-pct-ed { color: var(--muted, #6b7280); font-weight: 400; margin-left: 2px; }
+.cd-pct-presets { display: flex; flex-wrap: wrap; gap: 8px; }
+.cd-pct-preset { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 7px 12px; font: inherit; font-weight: 700; cursor: pointer; }
+.cd-pct-preset.on { background: var(--g, #16a34a); border-color: var(--g, #16a34a); color: #fff; }

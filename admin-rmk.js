@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.74';
+const RMK_VERSION = '1.2.75';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.75', date: '26.09.2026', title: 'Дисконтные карты: администратор меняет процент скидки',
+    items: [
+      'В разделе «Дисконтные карты» процент скидки у карты стал кнопкой — нажмите, выберите 0/5/10/15/20/25/30% или впишите свой.',
+      'Менять процент могут только администраторы (Sunnat, Iskandar, Shahida); остальные видят процент без возможности изменить. Проверка — и на сервере.',
+      'Касса применяет новый процент при следующем сканировании карты; синхронизация orto.cards больше не перезаписывает процент, заданный администратором.',
+      'Каждое изменение сохраняется в журнал (кто, когда, с какого на какой процент).',
+    ],
+  },
   {
     v: '1.2.74', date: '16.09.2026', title: 'Поступление: цена размера подставляется надёжнее (полуразмеры)',
     items: [
@@ -1792,6 +1801,77 @@ function openDoctorModal(existing) {
   });
 }
 
+// ── Процент скидки дисконтной карты: менять может только полный администратор ──
+function cdIsAdmin() {
+  return state.allowedTabs === '*' && ['sunnat', 'iskandar', 'shahida'].includes(String(state.user || '').toLowerCase());
+}
+function openCardDiscModal(c) {
+  if (!cdIsAdmin()) { alert('Менять процент скидки может только администратор'); return; }
+  let ov = document.getElementById('cdPctOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'cdPctOverlay';
+  ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  const cur = Number(c.discountPct) || 0;
+  const presets = [0, 5, 10, 15, 20, 25, 30];
+  ov.innerHTML = `
+    <div class="rcedit-modal" role="dialog" style="max-width:440px">
+      <div class="rcedit-head">
+        <h3>Процент скидки по карте</h3>
+        <button class="rcedit-x" id="cdPctX" title="Закрыть">✕</button>
+      </div>
+      <div class="rcedit-body">
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div>
+            <div class="strong">${esc(c.name || 'Без имени')}</div>
+            <div class="muted" style="font-size:13px">Карта ${esc(c.code || '—')} · ${esc(c.typeLabel || '')} · сейчас ${cur}%</div>
+          </div>
+          <div class="cd-pct-presets">${presets.map(p => `<button type="button" class="cd-pct-preset${p === cur ? ' on' : ''}" data-p="${p}">${p}%</button>`).join('')}</div>
+          <div>
+            <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Свой процент (0–100)</label>
+            <input class="finput" id="cdPctVal" type="number" min="0" max="100" step="0.5" inputmode="decimal" value="${cur}">
+            <div class="muted" style="font-size:12px;margin-top:4px">Касса применит новый процент при следующем сканировании этой карты.</div>
+          </div>
+          <div id="cdPctErr" class="errbar" style="display:none"></div>
+        </div>
+      </div>
+      <div class="rcedit-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--line)">
+        <button class="btn" id="cdPctCancel">Отмена</button>
+        <button class="btn btn-primary" id="cdPctSave">Сохранить</button>
+      </div>
+    </div>`;
+  const close = () => ov.remove();
+  const inp = ov.querySelector('#cdPctVal');
+  ov.querySelector('#cdPctX').addEventListener('click', close);
+  ov.querySelector('#cdPctCancel').addEventListener('click', close);
+  ov.querySelectorAll('.cd-pct-preset').forEach(b => b.addEventListener('click', () => {
+    inp.value = b.getAttribute('data-p');
+    ov.querySelectorAll('.cd-pct-preset').forEach(x => x.classList.toggle('on', x === b));
+  }));
+  setTimeout(() => { inp.focus(); inp.select(); }, 50);
+  const errBox = ov.querySelector('#cdPctErr');
+  const save = ov.querySelector('#cdPctSave');
+  const doSave = async () => {
+    errBox.style.display = 'none';
+    const pct = Number(String(inp.value).replace(',', '.'));
+    if (!Number.isFinite(pct) || pct < 0 || pct > 100) { errBox.textContent = 'Укажите процент от 0 до 100.'; errBox.style.display = 'block'; return; }
+    save.disabled = true; save.textContent = 'Сохраняю…';
+    try {
+      await posApi('?action=card-set-discount', { method: 'POST', body: JSON.stringify({ id: c.id, pct, by: state.user }) });
+      docToast(`Скидка по карте ${c.code || ''}: ${cur}% → ${pct}%`);
+      close();
+      renderCards(true);
+    } catch (e) {
+      save.disabled = false; save.textContent = 'Сохранить';
+      errBox.textContent = e.message || String(e); errBox.style.display = 'block';
+    }
+  };
+  save.addEventListener('click', doSave);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
+}
+
 async function renderCards(force) {
   const box = $('cdBody');
   box.innerHTML = `<div class="loading">⏳ Загружаю карты…</div>`;
@@ -1809,9 +1889,9 @@ async function renderCards(force) {
     box.innerHTML = `
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
         ${kpi('💳','Всего карт', fmtInt(s.total||0),'gray', fmtInt(s.active||0)+' активных')}
-        ${kpi('👤','Клиентские', fmtInt((bt.client||{}).count||0),'g','скидка 10%')}
+        ${kpi('👤','Клиентские', fmtInt((bt.client||{}).count||0),'g','скидка по карте')}
         ${kpi('🩺','Врачебные', fmtInt((bt.doctor||{}).count||0),'blue','без скидки')}
-        ${kpi('👷','Сотрудники', fmtInt((bt.employee||{}).count||0),'amber','скидка 10%')}
+        ${kpi('👷','Сотрудники', fmtInt((bt.employee||{}).count||0),'amber','скидка по карте')}
       </div>
 
       <div class="card card-pad">
@@ -1840,7 +1920,9 @@ async function renderCards(force) {
                 <td>${esc(c.name||'Без имени')}</td>
                 <td class="c"><span class="badge ${CARD_TYPE_CLASS[c.type]||''}">${esc(c.typeLabel)}</span></td>
                 <td>${c.type==='doctor' ? docProfileCell(c) : '<span class="muted">—</span>'}</td>
-                <td class="c tnum">${c.discountPct?c.discountPct+'%':'—'}</td>
+                <td class="c tnum">${cdIsAdmin()
+                  ? `<button class="cd-pct-btn" data-i="${i}" title="Изменить процент скидки">${c.discountPct?c.discountPct+'%':'0%'} <span class="cd-pct-ed">✎</span></button>`
+                  : (c.discountPct?c.discountPct+'%':'—')}</td>
                 <td class="muted">${c.createdAt?dushTime(c.createdAt,true):'—'}</td>
                 <td class="c">${c.type==='doctor' ? `<button class="btn-icon cd-edit-doc" data-i="${i}" title="Редактировать врача">✎</button>` : ''}</td>
               </tr>`).join('')
@@ -1865,6 +1947,10 @@ async function renderCards(force) {
       const i = Number(b.getAttribute('data-i'));
       const c = (d.cards || [])[i];
       if (c) openDoctorModal({ id: c.id, code: c.code || '', name: c.name || '', workplace: c.workplace || '', walletNumber: c.walletNumber || '', walletType: c.walletType || '' });
+    }));
+    box.querySelectorAll('.cd-pct-btn').forEach(b => b.addEventListener('click', () => {
+      const c = (d.cards || [])[Number(b.getAttribute('data-i'))];
+      if (c) openCardDiscModal(c);
     }));
     $('cdPrev').addEventListener('click', () => { if (cdState.page>0){ cdState.page--; renderCards(); } });
     $('cdNext').addEventListener('click', () => { if (pageNow<totalPages){ cdState.page++; renderCards(); } });

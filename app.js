@@ -11290,9 +11290,16 @@ function posLineIsService(l) {
     return !!l && ((l.kind === 'service') || !!l.isService);
 }
 
-// Скидка на чек = клиентская карта (10%) + ручные 5%, ограничено 100%
+// Процент скидки дисконтной карты — задаёт администратор РМК (нет значения → 10%).
+function posCardPct(c) {
+    if (!c) return 0;
+    const v = Number(c.discount_pct);
+    return (c.discount_pct == null || !Number.isFinite(v)) ? 10 : v;
+}
+
+// Скидка на чек = процент дисконтной карты + ручные 5%, ограничено 100%
 function posCartDiscPct() {
-    const client = POS.client ? (Number(POS.client.discount_pct) || 0) : 0;
+    const client = POS.client ? posCardPct(POS.client) : 0;
     return Math.min(100, client + (POS.cartDiscountPct || 0));
 }
 
@@ -11738,7 +11745,7 @@ async function posLookupClient(code) {
         if (inp) inp.value = '';
         if (chosen) {
             chosen.style.display = 'flex'; chosen.style.background = '#ecfdf5'; chosen.style.borderColor = '#a7f3d0';
-            chosen.innerHTML = `<span>🏷️ Клиент: <b>${posEsc(c.full_name)}</b> · скидка ${Number(c.discount_pct) || 10}%</span>
+            chosen.innerHTML = `<span>🏷️ Клиент: <b>${posEsc(c.full_name)}</b> · скидка ${posCardPct(c)}%</span>
                 <button class="pos-chosen-rm" type="button" title="Убрать">×</button>`;
             chosen.querySelector('.pos-chosen-rm').onclick = () => { POS.client = null; chosen.style.display = 'none'; posRenderTotals(); };
         }
@@ -12920,7 +12927,7 @@ function pmobRenderClient() {
     bar.classList.toggle('on', !!c);
     if (c) {
         if (title) title.textContent = 'Дисконтная карта ' + pmobCardMask();
-        if (sub) sub.textContent = 'Скидка ' + (Number(c.discount_pct) || 10) + '% · ' + (c.full_name || 'покупатель');
+        if (sub) sub.textContent = 'Скидка ' + posCardPct(c) + '% · ' + (c.full_name || 'покупатель');
         if (rm) rm.style.display = '';
     } else {
         if (title) title.textContent = 'Применить скидку покупателя';
@@ -12936,7 +12943,7 @@ function pmobRenderCard() {
     const t = posTotals();
     num.textContent = pmobCardMask();
     const set = (id, v) => { const e = pmobEl(id); if (e) e.textContent = v; };
-    set('pmobCardPct', (c ? (Number(c.discount_pct) || 10) : 0) + '%');
+    set('pmobCardPct', (c ? posCardPct(c) : 0) + '%');
     set('pmobCardDiscTop', '−' + pmobMoney(t.disc));
     set('pmobCardGross', pmobMoney(t.gross));
     set('pmobCardDisc', '−' + pmobMoney(t.disc));
@@ -12964,7 +12971,7 @@ async function pmobCardHandleCode(code) {
         if (scr) scr.style.display = 'none';
         pmobCloseScan();
         pmobShow('card');
-        pmobToast('Скидка по карте применена', 'Скидка ' + (Number(POS.client.discount_pct) || 10) + '%');
+        pmobToast('Скидка по карте применена', 'Скидка ' + posCardPct(POS.client) + '%');
     } else {
         POS.mobCardCode = null;
         pmobToast('Карта не найдена', c, true);

@@ -4905,3 +4905,18 @@ select.pmob-mix-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='
 .pmob-earn-dbase { color: var(--pm-muted); }
 .pmob-earn-dbonus { font-weight: 800; color: var(--pm-green); }
 .pmob-earn-drow-ret .pmob-earn-dbonus { color: #b4472f; }
+
+/* — смешанный возврат (v1.2.75) — */
+.pmob-retmix { margin-top: 10px; padding: 12px; border: 1px solid var(--pm-line); border-radius: 14px; background: var(--pm-bg); }
+.pmob-retmix-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.pmob-retmix-row select { flex: 1 1 55%; min-width: 0; min-height: 46px; padding: 10px 30px 10px 12px; font-size: 14px; }
+.pmob-retmix-row input {
+    flex: 0 0 34%; min-width: 0; min-height: 46px; padding: 8px 10px; text-align: right;
+    border: 1px solid var(--pm-line); border-radius: 12px; background: #fff; color: var(--pm-ink);
+    font-size: 17px; font-weight: 800; font-family: inherit; font-variant-numeric: tabular-nums;
+}
+.pmob-retmix-x { flex: 0 0 34px; height: 34px; border: 0; border-radius: 10px; background: transparent; color: var(--pm-muted); font-size: 20px; }
+.pmob-retmix-add { border: 0; background: transparent; color: var(--pm-green, #16a34a); font-weight: 700; font-size: 14px; padding: 6px 0; font-family: inherit; }
+.pmob-retmix-left { margin-top: 6px; font-size: 14px; font-weight: 700; color: var(--pm-muted); font-variant-numeric: tabular-nums; }
+.pmob-retmix-left.ok { color: #15803d; }
+.pmob-retmix-left.bad { color: #b91c1c; }

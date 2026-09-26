@@ -13947,12 +13947,104 @@ function pmobFillRetRefund() {
     const src = pmobEl('posRetRefund');
     const dst = pmobEl('pmobRetRefund');
     if (!dst) return;
+    const mixRows = pmobEl('pmobRetMixRows'); if (mixRows) mixRows.innerHTML = '';   // новый возврат — чистая разбивка
     if (!src || !src.options.length) {
         dst.innerHTML = '<option value="">Наличные (по умолчанию)</option>';
+        pmobRetMixSetup();
         return;
     }
     dst.innerHTML = src.innerHTML;
     dst.value = src.value;
+    pmobRetMixSetup();
+}
+
+// ── СМЕШАННЫЙ ВОЗВРАТ (v1.2.75): наличные + один или несколько электронных способов ──
+const PMOB_RET_MIX = '__mixed__';
+function pmobRetPayOptions() {
+    const pt = (posPaytypesValid(POS.paytypes) ? POS.paytypes : (posPaytypesFromCache() || POS_PAYTYPES_DEFAULT));
+    return [...(pt.cash || []), ...(pt.cards || [])].map(x => ({ ref: x.ref, name: x.name }));
+}
+function pmobRetMixSetup() {
+    const sel = pmobEl('pmobRetRefund');
+    if (!sel) return;
+    if (!sel.querySelector('option[value="' + PMOB_RET_MIX + '"]')) {
+        const o = document.createElement('option');
+        o.value = PMOB_RET_MIX; o.textContent = 'Смешанная оплата';
+        sel.appendChild(o);
+    }
+    if (!sel._mixBound) {
+        sel._mixBound = true;
+        sel.addEventListener('change', pmobRetMixToggle);
+        const add = pmobEl('pmobRetMixAdd');
+        if (add) add.addEventListener('click', () => { pmobRetMixAddRow('', ''); pmobRetMixUpdate(); });
+        const inp = pmobEl('pmobRetSumInput');
+        if (inp) inp.addEventListener('input', pmobRetMixUpdate);
+    }
+    pmobRetMixToggle();
+}
+function pmobRetMixToggle() {
+    const sel = pmobEl('pmobRetRefund');
+    const box = pmobEl('pmobRetMix');
+    if (!sel || !box) return;
+    const on = sel.value === PMOB_RET_MIX;
+    box.style.display = on ? '' : 'none';
+    if (on && !pmobEl('pmobRetMixRows').children.length) {
+        const opts = pmobRetPayOptions();
+        const cash = opts.find(o => /налич/i.test(o.name));
+        const card = opts.find(o => !/налич/i.test(o.name));
+        pmobRetMixAddRow(cash ? cash.ref : '', '');
+        pmobRetMixAddRow(card ? card.ref : '', '');
+    }
+    pmobRetMixUpdate();
+}
+function pmobRetMixAddRow(ref, amount) {
+    const rows = pmobEl('pmobRetMixRows');
+    if (!rows) return;
+    const row = document.createElement('div');
+    row.className = 'pmob-retmix-row';
+    const opts = pmobRetPayOptions();
+    row.innerHTML = `<select class="pmob-select">${opts.map(o => `<option value="${posEsc(o.ref)}">${posEsc(o.name)}</option>`).join('')}</select>` +
+        `<input type="number" inputmode="numeric" min="0" step="1" placeholder="0">` +
+        `<button type="button" class="pmob-retmix-x" aria-label="Убрать">×</button>`;
+    const s = row.querySelector('select'); if (ref) s.value = ref;
+    const i = row.querySelector('input'); if (amount !== '') i.value = amount;
+    s.addEventListener('change', pmobRetMixUpdate);
+    i.addEventListener('input', () => { i._touched = true; pmobRetMixUpdate(); });
+    row.querySelector('.pmob-retmix-x').addEventListener('click', () => {
+        if (rows.children.length <= 2) return;   // минимум 2 способа
+        row.remove(); pmobRetMixUpdate();
+    });
+    rows.appendChild(row);
+}
+// Собираем части; последняя нетронутая строка автоматически получает остаток.
+function pmobRetMixParts() {
+    const rows = [...((pmobEl('pmobRetMixRows') || {}).children || [])];
+    const total = Math.round(Number((pmobEl('pmobRetSumInput') || {}).value) || 0);
+    return { total, parts: rows.map(r => {
+        const s = r.querySelector('select'), i = r.querySelector('input');
+        return { ref: s.value, name: (s.options[s.selectedIndex] || {}).text || '', amount: Math.round(Number(i.value) || 0), input: i };
+    }) };
+}
+function pmobRetMixUpdate() {
+    const sel = pmobEl('pmobRetRefund');
+    if (!sel || sel.value !== PMOB_RET_MIX) return;
+    const { total, parts } = pmobRetMixParts();
+    if (parts.length) {
+        const last = parts[parts.length - 1];
+        if (!last.input._touched) {
+            const other = parts.slice(0, -1).reduce((a, p) => a + p.amount, 0);
+            last.amount = Math.max(0, total - other);
+            last.input.value = last.amount || '';
+        }
+    }
+    const sum = parts.reduce((a, p) => a + p.amount, 0);
+    const left = pmobEl('pmobRetMixLeft');
+    if (left) {
+        const diff = total - sum;
+        left.className = 'pmob-retmix-left ' + (diff === 0 ? 'ok' : 'bad');
+        left.textContent = diff === 0 ? `✓ Распределено ${pmobMoney(total)}`
+            : (diff > 0 ? `Осталось распределить: ${pmobMoney(diff)}` : `Больше суммы возврата на ${pmobMoney(-diff)}`);
+    }
 }
 
 function pmobRenderRetItem() {
@@ -13995,9 +14087,26 @@ async function pmobRetConfirm() {
     const rSel = pmobEl('pmobRetReason');
     const reason = rSel ? (rSel.value || '') : '';
     const fSel = pmobEl('pmobRetRefund');
-    const refundPayC1Ref = (fSel && fSel.value) || null;
-    const refundPayName = (fSel && fSel.selectedIndex >= 0 && fSel.options[fSel.selectedIndex])
+    let refundPayC1Ref = (fSel && fSel.value) || null;
+    let refundPayName = (fSel && fSel.selectedIndex >= 0 && fSel.options[fSel.selectedIndex])
         ? fSel.options[fSel.selectedIndex].text.trim() : '';
+    let refundPayments = null;
+    if (refundPayC1Ref === PMOB_RET_MIX) {
+        const { total, parts } = pmobRetMixParts();
+        const used = parts.filter(p => p.amount > 0);
+        const sum = used.reduce((a, p) => a + p.amount, 0);
+        if (!total || used.length < 2 || sum !== total) {
+            if (err) { err.style.display = 'block'; err.textContent = used.length < 2
+                ? '⚠️ Для смешанного возврата укажите суммы минимум для двух способов'
+                : `⚠️ Сумма по способам (${sum}) должна равняться сумме возврата (${total})`; }
+            return;
+        }
+        refundTotal = total;
+        refundPayments = used.map(p => ({ ref: p.ref, name: p.name.trim(), amount: p.amount }));
+        const main = used.slice().sort((a, b) => b.amount - a.amount)[0];
+        refundPayC1Ref = main.ref;                  // основной способ — для совместимости
+        refundPayName = 'Смешанная: ' + used.map(p => `${p.name.trim()} ${p.amount}`).join(' + ');
+    }
     const sh = POS.shift || {};
 
     const btn = pmobEl('pmobRetConfirmBtn');
@@ -14014,6 +14123,7 @@ async function pmobRetConfirm() {
             reason,
             refundPayC1Ref,
             refundPayName,                         // читаемое имя способа — для разбивки возвратов
+            refundPayments,                        // смешанный возврат: [{ref,name,amount}] или null
             shiftId: sh.id || null,                // чтобы backend вычел возврат из итога смены
             refundTotal,
         };

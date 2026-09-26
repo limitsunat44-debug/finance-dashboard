@@ -17,7 +17,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260907-0025">
+    <link rel="stylesheet" href="style.css?v=20260926-retmix">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -2580,6 +2580,12 @@
 
                 <h3 class="pmob-sec-title">Способ возврата средств</h3>
                 <select class="pmob-select" id="pmobRetRefund"></select>
+                <!-- смешанный возврат: наличные + электронные способы -->
+                <div class="pmob-retmix" id="pmobRetMix" style="display:none;">
+                  <div class="pmob-retmix-rows" id="pmobRetMixRows"></div>
+                  <button type="button" class="pmob-retmix-add" id="pmobRetMixAdd">＋ ещё способ</button>
+                  <div class="pmob-retmix-left" id="pmobRetMixLeft"></div>
+                </div>
 
                 <h3 class="pmob-sec-title">Сумма возврата</h3>
                 <div class="pmob-ret-suminp">
@@ -3264,7 +3270,7 @@
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>window.__APP_BUILD = '20260818-135712';</script>
-    <script src="app.js?v=20260926-no1c"></script>
+    <script src="app.js?v=20260926-retmix"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

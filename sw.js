@@ -15,7 +15,7 @@
    ПРИ ОБНОВЛЕНИИ: поднять SW_VERSION (и, как обычно, ?v=... у app.js/style.css).
    ============================================================================ */
 
-const SW_VERSION = '20260918-reward';
+const SW_VERSION = '20260926-no1c';
 const CACHE_STATIC = 'orto-kassa-static-' + SW_VERSION;
 
 // Ядро оболочки (app-shell). Пути относительные к scope.

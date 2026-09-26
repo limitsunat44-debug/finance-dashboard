@@ -10581,6 +10581,7 @@ async function loadPos() {
         }
         POS.sellers = r.data.sellers || [];
         POS.loaded = true;
+        if (!posPaytypesValid(POS.paytypes)) { POS.paytypes = posPaytypesFromCache(); posLoadPaytypes(); } // заранее
         posRenderKassas();
         posPopulateSellers();
         // Если касса единственная (логин магазина) — сразу выбираем её,
@@ -11779,16 +11780,55 @@ async function posStopClientCamera() {
 }
 
 // ── Оплата ──
+// ── Виды оплат кассы (без 1С): встроенный список + копия на телефоне ──
+const POS_PAYTYPES_LS = 'pos_paytypes_v2';
+const POS_PAYTYPES_DEFAULT = {
+    cash: [{ ref: '30cd860d-357a-11ed-8788-40a3ccea3566', name: 'Наличные', kind: 'cash' }],
+    cards: [
+        ['ce9c7be3-9e71-11ef-8245-c018500f4abe', 'Alif QR'],
+        ['a12bc3f3-e7ed-11ed-8010-c018500f4abe', 'Alif Salom'],
+        ['80977525-3723-11ed-878a-40a3ccea3566', 'Alif Кошелек'],
+        ['ce9c7be4-9e71-11ef-8245-c018500f4abe', 'DC QR'],
+        ['ce9c7be5-9e71-11ef-8245-c018500f4abe', 'DC кошелек'],
+        ['80977526-3723-11ed-878a-40a3ccea3566', 'DCity'],
+        ['80977527-3723-11ed-878a-40a3ccea3566', 'Humo'],
+        ['80977528-3723-11ed-878a-40a3ccea3566', 'IBT24'],
+    ].map(([ref, name]) => ({ ref, name, kind: 'card' })),
+    terminals: [], defaultTerminal: null,
+};
+function posPaytypesValid(pt) {
+    return !!(pt && ((pt.cash && pt.cash.length) || (pt.cards && pt.cards.length)));
+}
+function posPaytypesFromCache() {
+    try { const v = JSON.parse(localStorage.getItem(POS_PAYTYPES_LS) || 'null'); return posPaytypesValid(v) ? v : null; }
+    catch (_) { return null; }
+}
+let _posPtLoading = null;
+function posLoadPaytypes() {
+    if (_posPtLoading) return _posPtLoading;
+    _posPtLoading = (async () => {
+        try {
+            const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
+            const r = await posApiTimeout(`?action=paytypes&shop=${shop}`, { method: 'GET' }, 6000);
+            if (r.ok && r.data.ok && posPaytypesValid(r.data.paytypes)) {
+                POS.paytypes = r.data.paytypes;
+                try { localStorage.setItem(POS_PAYTYPES_LS, JSON.stringify(r.data.paytypes)); } catch (_) {}
+            }
+        } catch (_) { /* нет сети — останется копия/встроенный список */ }
+        finally { _posPtLoading = null; }
+    })();
+    return _posPtLoading;
+}
+
 async function posOpenPayment() {
     if (!POS.cart.length) return;
     posError('');
-    // подгружаем виды оплат, если ещё нет
-    if (!POS.paytypes) {
-        try {
-            const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
-            const r = await posApi(`?action=paytypes&shop=${shop}`, { method: 'GET' });
-            if (r.ok && r.data.ok) POS.paytypes = r.data.paytypes;
-        } catch (_) { /* — */ }
+    // виды оплат: память → копия на телефоне → сервер (6 с) → встроенный список. Экран оплаты не ждёт сеть.
+    if (!posPaytypesValid(POS.paytypes)) {
+        const cached = posPaytypesFromCache();
+        if (cached) { POS.paytypes = cached; posLoadPaytypes(); }   // обновим в фоне
+        else await posLoadPaytypes();
+        if (!posPaytypesValid(POS.paytypes)) POS.paytypes = POS_PAYTYPES_DEFAULT;
     }
     posPopulateCardSelects();
     const t = posTotals();
@@ -13217,7 +13257,14 @@ async function pmobOpenPay() {
         pmobToast('Продажа невозможна', 'В чеке есть товар не со склада этой кассы', true);
         return;
     }
-    await posOpenPayment();                        // грузит POS.paytypes (общая логика)
+    const payBtn = pmobEl('pmobToPay');
+    if (payBtn && payBtn.dataset.busy === '1') return;           // защита от двойного нажатия
+    if (payBtn) { payBtn.dataset.busy = '1'; payBtn.dataset.txt = payBtn.textContent; payBtn.textContent = 'Открываю оплату…'; payBtn.disabled = true; }
+    try {
+        await posOpenPayment();                    // виды оплат — мгновенно из копии/встроенного списка
+    } finally {
+        if (payBtn) { payBtn.dataset.busy = ''; payBtn.textContent = payBtn.dataset.txt || 'Перейти к оплате'; payBtn.disabled = false; }
+    }
     const modal = pmobEl('posPayModal');
     if (modal) modal.style.display = 'none';       // ПК-модаль на мобиле не показываем
     pmobCloseMix();                                // сброс панели смешанной оплаты

@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.75';
+const RMK_VERSION = '1.2.76';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.76', date: '27.09.2026', title: 'Врачи: данные перенесены из crmfortp, телефон и специальность в карточке',
+    items: [
+      'Из crmfortp дописаны пустые поля у 405 врачей: место работы (399), телефон (208), номер кошелька (182), специальность (207), тип кошелька (181). Уже заполненные данные РМК не перезаписаны.',
+      'В окне «Редактирование врача» добавлены поля «Телефон» и «Специальность».',
+      'Исправлено: окно не узнавало тип кошелька «ДС»/«Алиф» и при сохранении стирало его.',
+      'В списке карт у врача показываются место работы, специальность и телефон.',
+    ],
+  },
   {
     v: '1.2.75', date: '26.09.2026', title: 'Дисконтные карты: администратор меняет процент скидки',
     items: [
@@ -1688,11 +1697,21 @@ const cdState = { q: '', type: '', page: 0, per: 50 };
 const CARD_TYPE_CLASS = { client: 'g', doctor: 'blue', employee: 'amber' };
 // Подписи типов кошелька врача.
 const WALLET_TYPE_LABEL = { alif: 'Алиф', ds: 'ДС', both: 'Алиф + ДС' };
+// Нормализация типа кошелька к русской метке: alif/ds/both и «ДС кошелек» → Алиф / ДС / Алиф + ДС.
+function docWtNorm(v) {
+  const l = String(v || '').trim().toLowerCase();
+  if (!l) return '';
+  if (l === 'both' || (l.includes('алиф') && (l.includes('дс') || l.includes('+')))) return 'Алиф + ДС';
+  if (l === 'alif' || l.includes('алиф')) return 'Алиф';
+  if (l === 'ds' || l.includes('дс')) return 'ДС';
+  return String(v).trim();
+}
 
 // Ячейка «Место / кошелёк» для строки врача в списке карт.
 function docProfileCell(c) {
   const parts = [];
   if (c.workplace) parts.push(`<div>${esc(c.workplace)}</div>`);
+  if (c.specialty || c.phone) parts.push(`<div class="muted" style="font-size:12.5px">${[c.specialty, c.phone].filter(Boolean).map(esc).join(' · ')}</div>`);
   if (c.walletNumber) {
     const wt = c.walletType ? ` <span class="badge blue" style="font-size:11px">${esc(WALLET_TYPE_LABEL[c.walletType] || c.walletType)}</span>` : '';
     parts.push(`<div class="muted rc-bc">${esc(c.walletNumber)}${wt}</div>`);
@@ -1715,7 +1734,7 @@ function openDoctorModal(existing) {
   document.body.appendChild(ov);
 
   const v = existing || {};
-  const wt = (v.walletType || '');
+  const wt = docWtNorm(v.walletType);
   ov.innerHTML = `
     <div class="rcedit-modal" role="dialog" style="max-width:480px">
       <div class="rcedit-head">
@@ -1737,13 +1756,24 @@ function openDoctorModal(existing) {
             <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Место работы</label>
             <input class="finput" id="docCrWork" placeholder="Напр.: Городская поликлиника №1" autocomplete="off" value="${esc(v.workplace || '')}">
           </div>
+          <div style="display:flex;gap:10px">
+            <div style="flex:1">
+              <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Телефон</label>
+              <input class="finput" id="docCrPhone" placeholder="+992…" autocomplete="off" inputmode="tel" value="${esc(v.phone || '')}">
+            </div>
+            <div style="flex:1">
+              <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Специальность</label>
+              <input class="finput" id="docCrSpec" placeholder="Напр.: Ортопед" autocomplete="off" value="${esc(v.specialty || '')}">
+            </div>
+          </div>
           <div>
             <label class="muted" style="display:block;margin-bottom:4px;font-size:13px">Тип кошелька</label>
             <select class="fselect" id="docCrWType">
               <option value="" ${wt===''?'selected':''}>— не указан —</option>
-              <option value="alif" ${wt==='alif'?'selected':''}>Алиф</option>
-              <option value="ds" ${wt==='ds'?'selected':''}>ДС</option>
-              <option value="both" ${wt==='both'?'selected':''}>Алиф + ДС (оба)</option>
+              <option value="Алиф" ${wt==='Алиф'?'selected':''}>Алиф</option>
+              <option value="ДС" ${wt==='ДС'?'selected':''}>ДС</option>
+              <option value="Алиф + ДС" ${wt==='Алиф + ДС'?'selected':''}>Алиф + ДС (оба)</option>
+              ${wt && !['Алиф','ДС','Алиф + ДС'].includes(wt) ? `<option value="${esc(wt)}" selected>${esc(wt)}</option>` : ''}
             </select>
           </div>
           <div>
@@ -1779,7 +1809,9 @@ function openDoctorModal(existing) {
     if (!code) { showErr('Укажите код врача.'); return; }
     saveBtn.disabled = true; saveBtn.textContent = isEdit ? 'Сохраняю…' : 'Создаю…';
     try {
-      const payload = { fullName, code, workplace, walletType, walletNumber };
+      const phone = ov.querySelector('#docCrPhone').value.trim();
+      const specialty = ov.querySelector('#docCrSpec').value.trim();
+      const payload = { fullName, code, workplace, walletType, walletNumber, phone, specialty };
       if (isEdit) payload.id = v.id;
       const r = await posApi(`?action=doctor-${isEdit ? 'update' : 'create'}`, {
         method: 'POST', body: JSON.stringify(payload),
@@ -1946,7 +1978,7 @@ async function renderCards(force) {
     box.querySelectorAll('.cd-edit-doc').forEach(b => b.addEventListener('click', () => {
       const i = Number(b.getAttribute('data-i'));
       const c = (d.cards || [])[i];
-      if (c) openDoctorModal({ id: c.id, code: c.code || '', name: c.name || '', workplace: c.workplace || '', walletNumber: c.walletNumber || '', walletType: c.walletType || '' });
+      if (c) openDoctorModal({ id: c.id, code: c.code || '', name: c.name || '', workplace: c.workplace || '', walletNumber: c.walletNumber || '', walletType: c.walletType || '', phone: c.phone || '', specialty: c.specialty || '' });
     }));
     box.querySelectorAll('.cd-pct-btn').forEach(b => b.addEventListener('click', () => {
       const c = (d.cards || [])[Number(b.getAttribute('data-i'))];

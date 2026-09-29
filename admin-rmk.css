@@ -2029,3 +2029,21 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
   .dv-top .dv-btn-primary{width:100%;justify-content:center;}
   .dv-foot{justify-content:center;}
 }
+/* v1.2.79 fix: фильтры 6 колонок в 2 ряда, таблица без обрезки действий */
+.dv-filters{grid-template-columns:repeat(6,minmax(0,1fr));}
+.dv-f-period{grid-column:span 2;}
+.dv-f-search{grid-column:span 2;}
+.dv-f-btns{grid-column:span 2;}
+.dv-tbl{min-width:980px;}
+.dv-tbl thead th,.dv-tbl tbody td{padding-left:11px;padding-right:11px;}
+.dv-name{min-width:190px;}
+.dv-work{max-width:170px;}
+@media (max-width:1100px){
+  .dv-filters{grid-template-columns:repeat(3,minmax(0,1fr));}
+  .dv-f-period,.dv-f-search{grid-column:span 2;}
+  .dv-f-btns{grid-column:1/-1;}
+}
+@media (max-width:720px){
+  .dv-filters{grid-template-columns:1fr 1fr;}
+  .dv-f-period,.dv-f-search,.dv-f-btns{grid-column:1/-1;}
+}

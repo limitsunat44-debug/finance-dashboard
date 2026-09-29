@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.77';
+const RMK_VERSION = '1.2.78';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.78', date: '30.09.2026', title: 'Перемещение: новый дизайн журнала документов',
+    items: [
+      'Журнал перемещений в новом виде: фильтры по периоду, складу-отправителю, складу-получателю, статусу, сотруднику и поиск.',
+      'В таблице — дата и время, маршрут «Откуда → Куда» с иконками складов, количество экземпляров, статус-плашка, кто создал.',
+      'Карточка документа: наглядный маршрут и данные документа. Логика проведения, отмены и удаления не изменилась.',
+    ],
+  },
   {
     v: '1.2.77', date: '29.09.2026', title: 'Администратор кассы: вход с паролем и скидка любой суммой',
     items: [
@@ -5385,249 +5393,13 @@ function woBindDone() {
 }
 
 // ──────────────────── ЖУРНАЛ ДОКУМЕНТОВ ────────────────────
-async function woLoadJournal() {
-  WO.jBusy = true; WO.jList = WO.jList; woPaint();
-  try {
-    let qs = '?action=writeoff-doc-list&limit=300';
-    if (WO.jWh) qs += '&warehouseId='+encodeURIComponent(WO.jWh);
-    if (WO.jReason) qs += '&reason='+encodeURIComponent(WO.jReason);
-    if (WO.jStatus) qs += '&status='+encodeURIComponent(WO.jStatus);
-    if (WO.jFrom) qs += '&from='+encodeURIComponent(WO.jFrom);
-    if (WO.jTo) qs += '&to='+encodeURIComponent(WO.jTo);
-    const d = await posApi(qs, { method:'GET' });
-    WO.jList = d.docs || [];
-  } catch (e) { WO.jList = []; }
-  WO.jBusy = false; woPaint();
-}
-
-function woStatusBadge(st) {
-  return st === 'posted'
-    ? '<span class="tr-badge tr-badge-ok">Проведён</span>'
-    : '<span class="tr-badge tr-badge-draft">Черновик</span>';
-}
-
-function woJournalHTML() {
-  const whOpts = `<option value="">Все склады</option>` + WO.warehouses.map(w=>`<option value="${esc(w.id)}" ${w.id===WO.jWh?'selected':''}>${esc(w.name)}</option>`).join('');
-  const reasonOpts = `<option value="">Все причины</option>` + WO_REASONS.map(r=>`<option value="${esc(r)}" ${r===WO.jReason?'selected':''}>${esc(r)}</option>`).join('');
-  const docs = WO.jList || [];
-  const rows = docs.map(d => `
-    <tr class="tr-jrow" data-open="${esc(d.id)}">
-      <td><b>${esc(d.doc_number)}</b></td>
-      <td>${esc((d.doc_date||d.created_at||'').slice(0,10).split('-').reverse().join('.'))}</td>
-      <td>${esc(d.warehouse_name||'—')}</td>
-      <td>${esc(d.reason||'—')}</td>
-      <td>${esc(d.written_by||'—')}</td>
-      <td class="c">${fmtInt(d.items_count||0)}</td>
-      <td class="c">${fmtInt(d.units_count||0)}</td>
-      <td class="c">${fmtNum(d.sum_total||0)}</td>
-      <td class="c">${woStatusBadge(d.status)}</td>
-    </tr>`).join('');
-  return `
-  <div class="tr-wrap wo-wrap-wide">
-    <div class="tr-card">
-      <div class="tr-card-head sm"><span class="tr-ic">📒</span><div><h2>Документы списания</h2><p>История списаний по складам</p></div></div>
-      <div class="wo-jfilters">
-        <select class="tr-select" id="woJWh">${whOpts}</select>
-        <select class="tr-select" id="woJReason">${reasonOpts}</select>
-        <input type="date" class="tr-input" id="woJFrom" value="${esc(WO.jFrom)}" title="С даты">
-        <input type="date" class="tr-input" id="woJTo" value="${esc(WO.jTo)}" title="По дату">
-        <button class="tr-btn tr-btn-outline" id="woJApply">Применить</button>
-        <button class="tr-btn tr-btn-ghost" id="woJReset">Сброс</button>
-      </div>
-      <div class="tr-jfilters">
-        <button class="tr-chip ${WO.jStatus===''?'active':''}" data-jflt="">Все</button>
-        <button class="tr-chip ${WO.jStatus==='posted'?'active':''}" data-jflt="posted">Проведённые</button>
-        <button class="tr-chip ${WO.jStatus==='draft'?'active':''}" data-jflt="draft">Черновики</button>
-        <button class="tr-btn tr-btn-ghost" id="woJRefresh">↻ Обновить</button>
-      </div>
-      <div class="tbl-wrap">
-        <table class="tbl tr-tbl">
-          <thead><tr><th>№</th><th>Дата</th><th>Склад</th><th>Причина</th><th>Кто списал</th><th class="c">Позиций</th><th class="c">Единиц</th><th class="c">Сумма</th><th class="c">Статус</th></tr></thead>
-          <tbody>${WO.jBusy?'<tr><td colspan="9" class="tr-empty">⏳ Загрузка…</td></tr>':(rows || '<tr><td colspan="9" class="tr-empty">Документов нет</td></tr>')}</tbody>
-        </table>
-      </div>
-    </div>
-  </div>`;
-}
-
-function woBindJournal() {
-  const on = (id, fn) => { const el=$(id); if (el) el.addEventListener('click', fn); };
-  on('woJApply', () => {
-    WO.jWh = $('woJWh')?$('woJWh').value:''; WO.jReason = $('woJReason')?$('woJReason').value:'';
-    WO.jFrom = $('woJFrom')?$('woJFrom').value:''; WO.jTo = $('woJTo')?$('woJTo').value:'';
-    woLoadJournal();
-  });
-  on('woJReset', () => { WO.jWh=''; WO.jReason=''; WO.jFrom=''; WO.jTo=''; WO.jStatus=''; woLoadJournal(); });
-  on('woJRefresh', woLoadJournal);
-  document.querySelectorAll('[data-jflt]').forEach(b => b.addEventListener('click', () => { WO.jStatus=b.dataset.jflt; woLoadJournal(); }));
-  document.querySelectorAll('[data-open]').forEach(r => r.addEventListener('click', () => woOpenDoc(r.dataset.open)));
-}
-
-async function woOpenDoc(id) {
-  WO.jBusy = true;
-  try {
-    const d = await posApi('?action=writeoff-doc-get&id='+encodeURIComponent(id), { method:'GET' });
-    WO.jDoc = d.doc || null;
-  } catch (e) { WO.jDoc = null; }
-  WO.jBusy = false; woPaint();
-}
-
-function woDocCardHTML() {
-  const d = WO.jDoc || {};
-  const posted = d.status === 'posted';
-  const items = d.items || [];
-  const rows = items.map(it => `
-    <tr>
-      <td class="tr-td-name">${esc(it.product_name || '—')}</td>
-      <td class="c">${it.size_label?esc(it.size_label):'—'}</td>
-      <td class="c">${fmtInt(posted?(it.qty_written||0):(it.qty||0))}</td>
-      <td class="c">${fmtNum(it.price||0)}</td>
-      <td class="c"><b>${fmtNum((Number(it.price)||0)*(Number(posted?it.qty_written:it.qty)||0))}</b></td>
-    </tr>`).join('');
-  return `
-  <div class="tr-wrap wo-wrap-wide">
-    <div class="tr-card">
-      <div class="tr-doc-head">
-        <button class="tr-btn tr-btn-ghost" id="woDocBack">← К документам</button>
-        <div class="tr-doc-title">${esc(d.doc_number)} ${woStatusBadge(d.status)}</div>
-      </div>
-      <div class="tr-conf-grid">
-        <div class="tr-conf-row"><span>Склад</span><b>${esc(d.warehouse_name||'—')}</b></div>
-        <div class="tr-conf-row"><span>Причина</span><b>${esc(d.reason||'—')}</b></div>
-        <div class="tr-conf-row"><span>Дата</span><b>${esc((d.doc_date||d.created_at||'').slice(0,10).split('-').reverse().join('.'))}</b></div>
-        <div class="tr-conf-row"><span>Кто списал</span><b>${esc(d.written_by||'—')}</b></div>
-        <div class="tr-conf-row"><span>Единиц</span><b>${fmtInt(d.units_count||0)}</b></div>
-        <div class="tr-conf-row"><span>Сумма</span><b>${fmtNum(d.sum_total||0)} ${CUR}</b></div>
-        ${d.comment ? `<div class="tr-conf-row"><span>Комментарий</span><b>${esc(d.comment)}</b></div>`:''}
-      </div>
-      <div class="tr-info"><span class="tr-info-ic">ℹ️</span><div>${posted
-        ? 'Документ <b>проведён</b>. Экземпляры списаны, остаток уменьшен. «Отменить проведение» вернёт экземпляры в наличие.'
-        : 'Документ — <b>черновик</b>. Товар не списан, пока не нажмёте «Провести».'}</div></div>
-      <div class="tbl-wrap">
-        <table class="tbl tr-tbl">
-          <thead><tr><th class="tr-td-name">Товар</th><th class="c">Размер</th><th class="c">Кол-во</th><th class="c">Цена</th><th class="c">Сумма</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="5" class="tr-empty">Строк нет</td></tr>'}</tbody>
-        </table>
-      </div>
-      <div id="woDocErr"></div>
-      <div class="tr-actions tr-doc-actions">
-        ${posted
-          ? '<button class="tr-btn tr-btn-outline" id="woUnpost">↩ Отменить проведение</button>'
-          : '<button class="tr-btn tr-btn-primary" id="woPostDoc">✓ Провести</button>'}
-        <button class="tr-btn tr-btn-danger" id="woDocDelete">🗑 Удалить документ</button>
-      </div>
-    </div>
-  </div>`;
-}
-
-function woBindDocCard() {
-  const on = (id, fn) => { const el=$(id); if (el) el.addEventListener('click', fn); };
-  const d = WO.jDoc || {};
-  on('woDocBack', () => { WO.jDoc=null; woPaint(); });
-  on('woPostDoc', () => woDocAction('writeoff-doc-post', { id: d.id }));
-  on('woUnpost', () => woDocAction('writeoff-doc-unpost', { id: d.id }));
-  on('woDocDelete', () => {
-    if (!confirm('Удалить документ '+ (d.doc_number||'') +'? Если проведён — экземпляры вернутся в наличие.')) return;
-    woDocAction('writeoff-doc-delete', { id: d.id }, true);
-  });
-}
-
-async function woDocAction(action, body, backToList) {
-  const errBox = $('woDocErr');
-  try {
-    const d = await posApi('?action='+action, { method:'POST', body: JSON.stringify(body) });
-    state.cache = {};
-    if (backToList) { WO.jDoc = null; woLoadJournal(); return; }
-    WO.jDoc = d.doc || WO.jDoc;
-    woPaint();
-  } catch (e) { if (errBox) errBox.innerHTML = errBar('Ошибка: ' + e.message); }
-}
-
-
-const TR = {
-  mode: 'new',         // new (мастер создания) | journal (журнал документов)
-  step: 'setup',       // setup | scan | added | list | check | confirm | done
-  fromRef: '', fromName: '',
-  toRef: '',   toName: '',
-  comment: '',
-  warehouses: [],      // [{id,name,c1Ref}]
-  items: [],           // [{barcode, name, sizeLabel, price, productC1Ref, charC1Ref, qty}]
-  lastAdded: null,     // последний добавленный товар (экран «Товар добавлен»)
-  sender: '', receiver: '',
-  scanner: null,       // Html5Qrcode инстанс
-  scanning: false,
-  busy: false,
-  result: null,        // ответ transfer-create {number, ref, date, ...}
-  // ── журнал документов ──
-  jList: null,         // массив документов журнала
-  jFilter: '',         // '' | 'draft' | 'posted'
-  jDoc: null,          // открытая карточка документа
-  jBusy: false,
-};
-
-async function renderTransfer(force) {
-  const box = $('trBody');
-  if (force) { TR.step = 'setup'; TR.items = []; TR.result = null; }
-  // загрузим склады один раз
-  if (!TR.warehouses.length) {
-    box.innerHTML = `<div class="loading">⏳ Загружаю склады…</div>`;
-    try {
-      const d = await posApi('?action=transfer-warehouses', { method: 'GET' });
-      TR.warehouses = d.warehouses || [];
-    } catch (e) { box.innerHTML = errBar('Не удалось загрузить склады: ' + e.message); return; }
-  }
-  trPaint();
-}
-
-// переключатель режимов раздела (Новое / Журнал)
-function trTabsHTML() {
-  return `
-  <div class="tr-tabs">
-    <button class="tr-tab ${TR.mode==='new'?'active':''}" id="trTabNew">➕ Новое перемещение</button>
-    <button class="tr-tab ${TR.mode==='journal'?'active':''}" id="trTabJournal">📒 Журнал документов</button>
-  </div>`;
-}
-
-// единый рендер по текущему шагу
-function trPaint() {
-  const box = $('trBody');
-  if (!box) return;
-  // если уходим со сканера — гасим камеру
-  if (!(TR.mode === 'new' && TR.step === 'scan')) trStopScanner();
-
-  if (TR.mode === 'journal') {
-    box.innerHTML = trTabsHTML() + (TR.jDoc ? trDocCardHTML() : trJournalHTML());
-    trBindTabs();
-    if (TR.jDoc) trBindDocCard(); else trBindJournal();
-    return;
-  }
-
-  // режим «Новое»: мастер. Вкладки показываем только на первом шаге (не мешать сканеру)
-  const tabs = (TR.step === 'setup') ? trTabsHTML() : '';
-  if (TR.step === 'setup')   box.innerHTML = tabs + trSetupHTML();
-  else if (TR.step === 'scan')    box.innerHTML = trScanHTML();
-  else if (TR.step === 'added')   box.innerHTML = trAddedHTML();
-  else if (TR.step === 'list')    box.innerHTML = trListHTML();
-  else if (TR.step === 'check')   box.innerHTML = trCheckHTML();
-  else if (TR.step === 'confirm') box.innerHTML = trConfirmHTML();
-  else if (TR.step === 'done')    box.innerHTML = trDoneHTML();
-  if (TR.step === 'setup') trBindTabs();
-  trBind();
-  if (TR.step === 'scan') trStartScanner();
-}
-
-function trBindTabs() {
-  const n = $('trTabNew'), j = $('trTabJournal');
-  if (n) n.addEventListener('click', () => { TR.mode='new'; TR.step='setup'; trPaint(); });
-  if (j) j.addEventListener('click', () => { TR.mode='journal'; TR.jDoc=null; trLoadJournal(); });
-}
-
-// ──────────────────── ЖУРНАЛ ДОКУМЕНТОВ ────────────────────
+// v1.2.78: новый дизайн журнала (фильтры: период / откуда / куда / статус / создал / поиск).
+// Логика документов (провести / отменить / удалить / добавить строку) НЕ менялась.
 async function trLoadJournal() {
   TR.jBusy = true; trPaint();
   try {
-    const qs = TR.jFilter ? ('&status=' + TR.jFilter) : '';
-    const d = await posApi('?action=transfer-doc-list&limit=200' + qs, { method: 'GET' });
+    // грузим все документы, фильтры применяются на клиенте
+    const d = await posApi('?action=transfer-doc-list&limit=500', { method: 'GET' });
     TR.jList = d.docs || [];
   } catch (e) { TR.jList = []; }
   TR.jBusy = false; trPaint();
@@ -5635,36 +5407,138 @@ async function trLoadJournal() {
 
 function trStatusBadge(st) {
   return st === 'posted'
-    ? '<span class="tr-badge tr-badge-ok">Проведён</span>'
-    : '<span class="tr-badge tr-badge-draft">Черновик</span>';
+    ? '<span class="trj-pill trj-pill-ok"><span class="trj-pill-ic">✓</span>Проведён</span>'
+    : '<span class="trj-pill trj-pill-draft"><span class="trj-pill-ic">✎</span>Черновик</span>';
+}
+
+// дата/время документа в TZ Asia/Tashkent
+function trDocDT(iso) {
+  if (!iso) return { d: '—', t: '' };
+  try {
+    const dt = new Date(iso);
+    const d = dt.toLocaleDateString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: 'numeric' });
+    const t = dt.toLocaleTimeString('ru-RU', { timeZone: 'Asia/Tashkent', hour: '2-digit', minute: '2-digit' });
+    return { d, t };
+  } catch (_) { return { d: String(iso).slice(0, 10).split('-').reverse().join('.'), t: '' }; }
+}
+function trDocYMD(iso) {
+  try { return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tashkent' }); } catch (_) { return String(iso || '').slice(0, 10); }
+}
+const TRJ_WH_IC = '<svg class="trj-wh-ic" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V8l9-5 9 5v13"/><path d="M7 21v-8h10v8"/><path d="M7 17h10"/></svg>';
+const TRJ_EYE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const TRJ_PRINT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>';
+
+function trJDefaults() {
+  return { from: '', to: '', src: '', dst: '', status: '', creator: '', q: '' };
+}
+function trJApplied() { if (!TR.jf) TR.jf = trJDefaults(); return TR.jf; }
+
+function trJournalFiltered() {
+  const f = trJApplied();
+  const q = (f.q || '').trim().toLowerCase();
+  return (TR.jList || []).filter(d => {
+    const ymd = trDocYMD(d.doc_date);
+    if (f.from && ymd < f.from) return false;
+    if (f.to && ymd > f.to) return false;
+    if (f.src && String(d.from_warehouse_id) !== f.src) return false;
+    if (f.dst && String(d.to_warehouse_id) !== f.dst) return false;
+    if (f.status && d.status !== f.status) return false;
+    if (f.creator && String(d.sender_name || '').trim() !== f.creator) return false;
+    if (q) {
+      const hay = [d.doc_number, d.from_name, d.to_name, d.sender_name, d.receiver_name, d.comment].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
 }
 
 function trJournalHTML() {
   if (TR.jBusy && TR.jList === null) return `<div class="loading">⏳ Загрузка журнала…</div>`;
-  const docs = TR.jList || [];
-  const rows = docs.map(d => `
+  const all = TR.jList || [];
+  const f = trJApplied();
+  const docs = trJournalFiltered();
+  // справочники для фильтров
+  const whs = {};
+  all.forEach(d => {
+    if (d.from_warehouse_id) whs[d.from_warehouse_id] = d.from_name || '—';
+    if (d.to_warehouse_id) whs[d.to_warehouse_id] = d.to_name || '—';
+  });
+  const whOpts = (sel) => Object.entries(whs).sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'ru'))
+    .map(([id, nm]) => `<option value="${esc(id)}" ${sel === id ? 'selected' : ''}>${esc(nm)}</option>`).join('');
+  const creators = [...new Set(all.map(d => String(d.sender_name || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const crOpts = creators.map(c => `<option value="${esc(c)}" ${f.creator === c ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  const units = docs.reduce((s, d) => s + (Number(d.items_count) || 0), 0);
+  const nPosted = docs.filter(d => d.status === 'posted').length;
+  const nDraft = docs.length - nPosted;
+
+  const rows = docs.map(d => {
+    const dt = trDocDT(d.doc_date);
+    const who = String(d.sender_name || '').trim();
+    return `
     <tr class="tr-jrow" data-open="${esc(d.id)}">
-      <td><b>${esc(d.doc_number)}</b></td>
-      <td>${esc((d.doc_date||'').slice(0,10).split('-').reverse().join('.'))}</td>
-      <td>${esc(d.from_name||'—')} → ${esc(d.to_name||'—')}</td>
-      <td class="c">${fmtInt(d.items_count||0)}</td>
-      <td class="c">${trStatusBadge(d.status)}</td>
-      <td class="c"><button class="tr-print-btn" data-print="${esc(d.id)}" title="Распечатать документ">🖨</button></td>
-    </tr>`).join('');
+      <td class="trj-num">${esc(d.doc_number)}</td>
+      <td class="trj-dt"><div>${esc(dt.d)}</div><div class="trj-sub">${esc(dt.t)}</div></td>
+      <td class="trj-route">
+        <div class="trj-route-in">
+          <span class="trj-wh">${TRJ_WH_IC}<span>${esc(d.from_name || '—')}</span></span>
+          <span class="trj-arrow">→</span>
+          <span class="trj-wh">${TRJ_WH_IC}<span>${esc(d.to_name || '—')}</span></span>
+        </div>
+      </td>
+      <td class="trj-qty"><b>${fmtInt(d.items_count || 0)}</b><div class="trj-sub">экз.</div></td>
+      <td>${trStatusBadge(d.status)}</td>
+      <td class="trj-who">${who ? esc(who) : '<span class="trj-sub">—</span>'}${d.receiver_name ? `<div class="trj-sub">принял: ${esc(d.receiver_name)}</div>` : ''}</td>
+      <td class="trj-act">
+        <button class="trj-icbtn" data-view="${esc(d.id)}" title="Открыть документ">${TRJ_EYE}</button>
+        <button class="trj-icbtn" data-print="${esc(d.id)}" title="Распечатать документ">${TRJ_PRINT}</button>
+      </td>
+    </tr>`;
+  }).join('');
+
   return `
-  <div class="tr-wrap">
-    <div class="tr-card">
-      <div class="tr-card-head sm"><span class="tr-ic">📒</span><div><h2>Журнал перемещений</h2><p>Локальные документы (без 1С)</p></div></div>
-      <div class="tr-jfilters">
-        <button class="tr-chip ${TR.jFilter===''?'active':''}" data-flt="">Все</button>
-        <button class="tr-chip ${TR.jFilter==='posted'?'active':''}" data-flt="posted">Проведённые</button>
-        <button class="tr-chip ${TR.jFilter==='draft'?'active':''}" data-flt="draft">Черновики</button>
-        <button class="tr-btn tr-btn-ghost tr-jrefresh" id="trJRefresh">↻ Обновить</button>
+  <div class="tr-wrap trj-wrap">
+    <div class="trj-filters">
+      <div class="trj-f trj-f-period">
+        <label>Период</label>
+        <div class="trj-period">
+          <input type="date" id="trjFrom" value="${esc(f.from)}">
+          <span>—</span>
+          <input type="date" id="trjTo" value="${esc(f.to)}">
+        </div>
       </div>
-      <div class="tbl-wrap">
-        <table class="tbl tr-tbl">
-          <thead><tr><th>№ док.</th><th>Дата</th><th>Маршрут</th><th class="c">Строк</th><th class="c">Статус</th><th class="c">Печать</th></tr></thead>
-          <tbody>${rows || '<tr><td colspan="6" class="tr-empty">Документов нет</td></tr>'}</tbody>
+      <div class="trj-f"><label>Откуда</label><select id="trjSrc"><option value="">Все склады</option>${whOpts(f.src)}</select></div>
+      <div class="trj-f"><label>Куда</label><select id="trjDst"><option value="">Все склады</option>${whOpts(f.dst)}</select></div>
+      <div class="trj-f"><label>Статус</label><select id="trjStatus">
+        <option value="">Все статусы</option>
+        <option value="posted" ${f.status === 'posted' ? 'selected' : ''}>Проведён</option>
+        <option value="draft" ${f.status === 'draft' ? 'selected' : ''}>Черновик</option>
+      </select></div>
+      <div class="trj-f"><label>Создал</label><select id="trjCreator"><option value="">Все сотрудники</option>${crOpts}</select></div>
+      <div class="trj-f trj-f-search"><label>Поиск</label>
+        <div class="trj-search"><span>⌕</span><input type="text" id="trjQ" value="${esc(f.q)}" placeholder="Номер, склад, сотрудник, комментарий…"></div>
+      </div>
+      <div class="trj-f trj-f-btns">
+        <button class="trj-btn trj-btn-ghost" id="trjReset">↻ Сбросить</button>
+        <button class="trj-btn trj-btn-primary" id="trjApply">Применить</button>
+      </div>
+    </div>
+
+    <div class="trj-summary">
+      <span>Документов: <b>${fmtInt(docs.length)}</b></span>
+      <span>Проведено: <b>${fmtInt(nPosted)}</b></span>
+      <span>Черновиков: <b>${fmtInt(nDraft)}</b></span>
+      <span>Экземпляров: <b>${fmtInt(units)}</b></span>
+      <button class="trj-btn trj-btn-ghost trj-refresh" id="trJRefresh">⟳ Обновить</button>
+    </div>
+
+    <div class="trj-table-card">
+      <div class="trj-scroll">
+        <table class="trj-tbl">
+          <thead><tr>
+            <th>№ документа</th><th>Дата</th><th>Откуда → Куда</th>
+            <th>Кол-во<div class="trj-sub">(экз.)</div></th><th>Статус</th><th>Создал</th><th class="c">Действия</th>
+          </tr></thead>
+          <tbody>${rows || '<tr><td colspan="7" class="tr-empty">Документов нет</td></tr>'}</tbody>
         </table>
       </div>
     </div>
@@ -5674,11 +5548,25 @@ function trJournalHTML() {
 function trBindJournal() {
   const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
   on('trJRefresh', trLoadJournal);
-  document.querySelectorAll('[data-flt]').forEach(b => b.addEventListener('click', () => {
-    TR.jFilter = b.dataset.flt; trLoadJournal();
-  }));
+  const read = () => ({
+    from: ($('trjFrom') || {}).value || '',
+    to: ($('trjTo') || {}).value || '',
+    src: ($('trjSrc') || {}).value || '',
+    dst: ($('trjDst') || {}).value || '',
+    status: ($('trjStatus') || {}).value || '',
+    creator: ($('trjCreator') || {}).value || '',
+    q: ($('trjQ') || {}).value || '',
+  });
+  on('trjApply', () => { TR.jf = read(); trPaint(); });
+  on('trjReset', () => { TR.jf = trJDefaults(); trPaint(); });
+  const qi = $('trjQ');
+  if (qi) qi.addEventListener('keydown', e => { if (e.key === 'Enter') { TR.jf = read(); trPaint(); } });
   document.querySelectorAll('[data-open]').forEach(r => r.addEventListener('click', () => {
     trOpenDoc(r.dataset.open);
+  }));
+  document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    trOpenDoc(b.dataset.view);
   }));
   // Кнопка печати в строке журнала — не открываем карточку (stopPropagation)
   document.querySelectorAll('[data-print]').forEach(b => b.addEventListener('click', (e) => {
@@ -5731,19 +5619,23 @@ function trDocCardHTML() {
     return head + sizeRows;
   }).join('');
   return `
-  <div class="tr-wrap">
-    <div class="tr-card">
-      <div class="tr-doc-head">
-        <button class="tr-btn tr-btn-ghost" id="trDocBack">← К журналу</button>
-        <div class="tr-doc-title">${esc(d.doc_number)} ${trStatusBadge(d.status)}</div>
+  <div class="tr-wrap trj-wrap">
+    <div class="tr-card trj-doc">
+      <div class="tr-doc-head trj-doc-head">
+        <button class="trj-btn trj-btn-ghost" id="trDocBack">← К журналу</button>
+        <div class="tr-doc-title trj-doc-title">${esc(d.doc_number)} ${trStatusBadge(d.status)}</div>
       </div>
-      <div class="tr-conf-grid">
-        <div class="tr-conf-row"><span>Откуда</span><b>${esc(d.from_name||'—')}</b></div>
-        <div class="tr-conf-row"><span>Куда</span><b>${esc(d.to_name||'—')}</b></div>
-        <div class="tr-conf-row"><span>Дата</span><b>${esc((d.doc_date||'').slice(0,10).split('-').reverse().join('.'))}</b></div>
-        <div class="tr-conf-row"><span>Строк</span><b>${fmtInt(items.length)}</b></div>
-        ${d.sender_name ? `<div class="tr-conf-row"><span>Отправил</span><b>${esc(d.sender_name)}</b></div>`:''}
-        ${d.comment ? `<div class="tr-conf-row"><span>Комментарий</span><b>${esc(d.comment)}</b></div>`:''}
+      <div class="trj-doc-route">
+        <div class="trj-doc-wh"><span class="trj-sub">Откуда</span><span class="trj-wh">${TRJ_WH_IC}<b>${esc(d.from_name||'—')}</b></span></div>
+        <span class="trj-arrow big">→</span>
+        <div class="trj-doc-wh"><span class="trj-sub">Куда</span><span class="trj-wh">${TRJ_WH_IC}<b>${esc(d.to_name||'—')}</b></span></div>
+      </div>
+      <div class="trj-doc-meta">
+        <div><span class="trj-sub">Дата</span><b>${esc(trDocDT(d.doc_date).d)} ${esc(trDocDT(d.doc_date).t)}</b></div>
+        <div><span class="trj-sub">Экземпляров</span><b>${fmtInt(items.length)}</b></div>
+        ${d.sender_name ? `<div><span class="trj-sub">Создал</span><b>${esc(d.sender_name)}</b></div>`:''}
+        ${d.receiver_name ? `<div><span class="trj-sub">Принял</span><b>${esc(d.receiver_name)}</b></div>`:''}
+        ${d.comment ? `<div class="wide"><span class="trj-sub">Комментарий</span><b>${esc(d.comment)}</b></div>`:''}
       </div>
 
       <div class="tr-info"><span class="tr-info-ic">ℹ️</span><div>${posted

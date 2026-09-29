@@ -220,8 +220,10 @@ function _afterLoginLoad() {
 // Вход администратора кассы: пароль проверяет сервер, в браузере храним только токен.
 async function kassaAdminLoginRemote(username, password) {
     try {
-        const r = await posApiTimeout('?action=kassa-admin-login', { method: 'POST', body: JSON.stringify({ login: username, password }) }, 10000);
-        if (r && r.ok && r.token) {
+        const rr = await posApiTimeout('?action=kassa-admin-login', { method: 'POST', body: JSON.stringify({ login: username, password }) }, 10000);
+        if (!rr || (!rr.ok && rr.status >= 500)) return 'network';
+        const r = (rr && rr.data) || {};
+        if (r.ok && r.token) {
             try {
                 localStorage.setItem(KASSA_ADMIN_LS, JSON.stringify({ token: r.token, login: r.login, name: r.name }));
                 localStorage.setItem('ortoSession', KASSA_ADMIN_SESSION);
@@ -1779,7 +1781,7 @@ function restoreSession() {
         _afterLoginLoad();
         // Перепроверяем токен (пароль могли сменить). Нет связи — остаёмся в системе.
         posApiTimeout('?action=kassa-admin-verify', { method: 'POST', body: JSON.stringify({ token: a.token }) }, 10000)
-            .then(r => { if (r && r.ok === false) logout(); }).catch(() => {});
+            .then(rr => { if (rr && rr.ok && rr.data && rr.data.ok === false) logout(); }).catch(() => {});
         return true;
     }
     const account = ADMIN_ACCOUNTS[acctKey];

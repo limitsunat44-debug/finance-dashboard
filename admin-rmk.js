@@ -5666,6 +5666,7 @@ const TRJ_WH_IC = '<svg class="trj-wh-ic" viewBox="0 0 24 24" width="18" height=
 const TRJ_EYE = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const TRJ_PRINT = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>';
 
+function trShortWh(n) { return String(n || '—').replace(/^Ортосалон\s*/i, '').replace(/["«»]/g, '').trim() || '—'; }
 function trJDefaults() {
   return { from: '', to: '', src: '', dst: '', status: '', creator: '', q: '' };
 }
@@ -5718,9 +5719,9 @@ function trJournalHTML() {
       <td class="trj-dt"><div>${esc(dt.d)}</div><div class="trj-sub">${esc(dt.t)}</div></td>
       <td class="trj-route">
         <div class="trj-route-in">
-          <span class="trj-wh">${TRJ_WH_IC}<span>${esc(d.from_name || '—')}</span></span>
+          <span class="trj-wh" title="${esc(d.from_name || '')}">${TRJ_WH_IC}<span>${esc(trShortWh(d.from_name))}</span></span>
           <span class="trj-arrow">→</span>
-          <span class="trj-wh">${TRJ_WH_IC}<span>${esc(d.to_name || '—')}</span></span>
+          <span class="trj-wh" title="${esc(d.to_name || '')}">${TRJ_WH_IC}<span>${esc(trShortWh(d.to_name))}</span></span>
         </div>
       </td>
       <td class="trj-qty"><b>${fmtInt(d.items_count || 0)}</b><div class="trj-sub">экз.</div></td>

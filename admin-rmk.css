@@ -1939,3 +1939,5 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
   .trj-doc-meta{grid-template-columns:1fr 1fr;}
   .trj-doc{padding:16px;}
 }
+.trj-search input[type=text]{border:none!important;box-shadow:none!important;padding:0!important;height:100%!important;background:transparent!important;}
+.trj-route .trj-wh{width:150px;}

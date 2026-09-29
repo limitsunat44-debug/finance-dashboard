@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.78';
+const RMK_VERSION = '1.2.79';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.79', date: '30.09.2026', title: 'Дисконтные карты → Врачи: новый дизайн списка',
+    items: [
+      'Категория «Врачи» открывается отдельной таблицей: код, ФИО с инициалами, специализация, телефон, кошелёк, дата создания, статус, место работы.',
+      'Фильтры: дата создания карты, статус, наличие телефона и кошелька, место работы, специализация, источник (РМК / 1С) и поиск по ФИО, коду или телефону.',
+      'Статусы: «Активен», «Нет телефона», «Нет кошелька». Постраничный вывод с выбором «Показывать по 10/25/50/100».',
+      'Переключатель типов карт сверху. Создание и редактирование врача — прежние, без изменений.',
+    ],
+  },
   {
     v: '1.2.78', date: '30.09.2026', title: 'Перемещение: новый дизайн журнала документов',
     items: [
@@ -1836,6 +1845,7 @@ function openDoctorModal(existing) {
       docToast((isEdit ? 'Врач обновлён: ' : 'Врач создан: ') + (r.doctor && r.doctor.name || fullName));
       close();
       if (!isEdit) cdState.page = 0;
+      dvState.list = null;
       renderCards(true);
     } catch (e) {
       saveBtn.disabled = false; saveBtn.textContent = isEdit ? 'Сохранить' : 'Создать врача';
@@ -1921,8 +1931,272 @@ function openCardDiscModal(c) {
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doSave(); } });
 }
 
+// ═════════ Дисконтные карты → категория «Врачи» (v1.2.79, новый дизайн) ═════════
+// Только отображение: данные берутся тем же action=cards&type=doctor, создание/редактирование —
+// прежняя модалка openDoctorModal (doctor-create / doctor-update). Логика не менялась.
+const dvState = { list: null, loading: false, f: null, page: 0, per: 10 };
+function dvDefaults() { return { from: '', to: '', status: '', phone: '', wallet: '', work: '', spec: '', src: '', q: '' }; }
+function dvF() { if (!dvState.f) dvState.f = dvDefaults(); return dvState.f; }
+function dvYMD(iso) { try { return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tashkent' }); } catch (_) { return ''; } }
+function dvDate(iso) { try { return new Date(iso).toLocaleDateString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: 'numeric' }); } catch (_) { return '—'; } }
+function dvInitials(n) {
+  const w = String(n || '').replace(/[^\p{L}\s-]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+  return ((w[0] || '?')[0] + (w[1] ? w[1][0] : '')).toUpperCase();
+}
+const DV_AV_COLORS = [['#e0f2fe','#0369a1'],['#dcfce7','#15803d'],['#fef3c7','#b45309'],['#ede9fe','#6d28d9'],['#fce7f3','#be185d'],['#e0e7ff','#4338ca'],['#ccfbf1','#0f766e']];
+function dvAvatar(n) {
+  let h = 0; for (const ch of String(n || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const [bg, fg] = DV_AV_COLORS[h % DV_AV_COLORS.length];
+  return `<span class="dv-av" style="background:${bg};color:${fg}">${esc(dvInitials(n))}</span>`;
+}
+function dvStatus(c) {
+  if (!c.phone) return { k: 'nophone', t: 'Нет телефона' };
+  if (!c.walletNumber) return { k: 'nowallet', t: 'Нет кошелька' };
+  return { k: 'ok', t: 'Активен' };
+}
+function dvSource(c) { return String(c.c1Ref || '').startsWith('rmk-doctor:') ? 'rmk' : '1c'; }
+const DV_IC = {
+  phone: '<svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg>',
+  nophone: '<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="12" cy="12" r="9" fill="#cbd5e1"/><path d="M8 12h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
+  wallet: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 7h14a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V7z"/><path d="M4 7l11-3v3"/><path d="M16 13.5h2"/></svg>',
+  eye: '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></svg>',
+  reset: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M20 12a8 8 0 11-2.3-5.6"/><path d="M20 4v4h-4"/></svg>',
+  filter: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+};
+
+async function dvLoad() {
+  dvState.loading = true;
+  const all = [];
+  let off = 0;
+  for (let guard = 0; guard < 20; guard++) {
+    const d = await posApi(`?action=cards&type=doctor&limit=200&offset=${off}`, { method: 'GET' });
+    const arr = d.cards || [];
+    all.push(...arr);
+    if (arr.length < 200) break;
+    off += 200;
+  }
+  dvState.list = all;
+  dvState.loading = false;
+}
+
+function dvFiltered() {
+  const f = dvF();
+  const q = (f.q || '').trim().toLowerCase();
+  const qd = q.replace(/\D/g, '');
+  return (dvState.list || []).filter(c => {
+    const ymd = c.createdAt ? dvYMD(c.createdAt) : '';
+    if (f.from && (!ymd || ymd < f.from)) return false;
+    if (f.to && (!ymd || ymd > f.to)) return false;
+    if (f.status && dvStatus(c).k !== f.status) return false;
+    if (f.phone === 'yes' && !c.phone) return false;
+    if (f.phone === 'no' && c.phone) return false;
+    if (f.wallet === 'yes' && !c.walletNumber) return false;
+    if (f.wallet === 'no' && c.walletNumber) return false;
+    if (f.work && String(c.workplace || '').trim() !== f.work) return false;
+    if (f.spec && String(c.specialty || '').trim() !== f.spec) return false;
+    if (f.src && dvSource(c) !== f.src) return false;
+    if (q) {
+      const hay = [c.name, c.code, c.phone, c.workplace, c.specialty, c.walletNumber].join(' ').toLowerCase();
+      const phoneDigits = String(c.phone || '').replace(/\D/g, '');
+      if (!hay.includes(q) && !(qd.length >= 3 && phoneDigits.includes(qd))) return false;
+    }
+    return true;
+  });
+}
+
+function dvOpts(values, sel) {
+  return values.map(v => `<option value="${esc(v)}" ${sel === v ? 'selected' : ''}>${esc(v)}</option>`).join('');
+}
+
+function dvPager(total) {
+  const pages = Math.max(1, Math.ceil(total / dvState.per));
+  const cur = Math.min(dvState.page, pages - 1) + 1;
+  const nums = [];
+  const push = (n) => nums.push(n);
+  if (pages <= 7) { for (let i = 1; i <= pages; i++) push(i); }
+  else {
+    push(1);
+    if (cur > 3) push('…');
+    for (let i = Math.max(2, cur - 1); i <= Math.min(pages - 1, cur + 1); i++) push(i);
+    if (cur < pages - 2) push('…');
+    push(pages);
+  }
+  return `
+    <div class="dv-pager">
+      <button class="dv-pg" data-pg="${cur - 1}" ${cur <= 1 ? 'disabled' : ''}>‹</button>
+      ${nums.map(n => n === '…' ? '<span class="dv-pg-gap">…</span>' : `<button class="dv-pg ${n === cur ? 'on' : ''}" data-pg="${n}">${n}</button>`).join('')}
+      <button class="dv-pg" data-pg="${cur + 1}" ${cur >= pages ? 'disabled' : ''}>›</button>
+    </div>`;
+}
+
+function dvViewModal(c) {
+  let ov = document.getElementById('dvViewOverlay'); if (ov) ov.remove();
+  ov = document.createElement('div'); ov.id = 'dvViewOverlay'; ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) ov.remove(); });
+  document.body.appendChild(ov);
+  const st = dvStatus(c);
+  const row = (k, v) => `<div class="dv-vrow"><span>${k}</span><b>${v}</b></div>`;
+  ov.innerHTML = `
+    <div class="rcedit-modal" role="dialog" style="max-width:460px">
+      <div class="rcedit-head"><h3>Карточка врача</h3><button class="rcedit-x" id="dvVX">✕</button></div>
+      <div class="rcedit-body">
+        <div class="dv-vhead">${dvAvatar(c.name)}<div><div class="strong" style="font-size:16px">${esc(c.name || 'Без имени')}</div><div class="muted">Код ${esc(c.code || '—')}</div></div></div>
+        ${row('Статус', `<span class="dv-pill dv-pill-${st.k}">${st.t}</span>`)}
+        ${row('Специализация', esc(c.specialty || '—'))}
+        ${row('Телефон', esc(c.phone || '—'))}
+        ${row('Кошелёк', c.walletNumber ? esc(c.walletNumber) + (c.walletType ? ' · ' + esc(docWtNorm(c.walletType)) : '') : '—')}
+        ${row('Место работы', esc(c.workplace || '—'))}
+        ${row('Карта создана', c.createdAt ? esc(dushTime(c.createdAt, true)) : '—')}
+        ${row('Источник', dvSource(c) === 'rmk' ? 'Создан в РМК' : 'Из 1С')}
+      </div>
+      <div class="rcedit-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid var(--line)">
+        <button class="btn" id="dvVClose">Закрыть</button>
+        <button class="btn btn-primary" id="dvVEdit">Редактировать</button>
+      </div>
+    </div>`;
+  const close = () => ov.remove();
+  ov.querySelector('#dvVX').addEventListener('click', close);
+  ov.querySelector('#dvVClose').addEventListener('click', close);
+  ov.querySelector('#dvVEdit').addEventListener('click', () => { close(); dvEdit(c); });
+}
+function dvEdit(c) {
+  openDoctorModal({ id: c.id, code: c.code || '', name: c.name || '', workplace: c.workplace || '', walletNumber: c.walletNumber || '', walletType: c.walletType || '', phone: c.phone || '', specialty: c.specialty || '' });
+}
+
+async function renderDoctorCards(force) {
+  const box = $('cdBody');
+  if (force || !dvState.list) {
+    box.innerHTML = `<div class="loading">⏳ Загружаю врачей…</div>`;
+    try { await dvLoad(); } catch (e) { box.innerHTML = errBar('Не удалось загрузить врачей: ' + (e.message || e)); return; }
+  }
+  dvPaint();
+}
+
+function dvPaint() {
+  const box = $('cdBody');
+  const all = dvState.list || [];
+  const f = dvF();
+  const rows = dvFiltered();
+  const pages = Math.max(1, Math.ceil(rows.length / dvState.per));
+  if (dvState.page > pages - 1) dvState.page = pages - 1;
+  const off = dvState.page * dvState.per;
+  const pageRows = rows.slice(off, off + dvState.per);
+  const works = [...new Set(all.map(c => String(c.workplace || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const specs = [...new Set(all.map(c => String(c.specialty || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const cnt = { ok: 0, nophone: 0, nowallet: 0 };
+  all.forEach(c => { cnt[dvStatus(c).k]++; });
+
+  const tr = pageRows.map(c => {
+    const st = dvStatus(c);
+    return `
+      <tr>
+        <td class="dv-code">${esc(c.code || '—')}</td>
+        <td><div class="dv-name">${dvAvatar(c.name)}<span>${esc(c.name || 'Без имени')}</span></div></td>
+        <td class="dv-muted">${esc(c.specialty || '—')}</td>
+        <td>${c.phone ? `<span class="dv-phone">${DV_IC.phone}<span>${esc(c.phone)}</span></span>` : `<span class="dv-none">${DV_IC.nophone}<span>—</span></span>`}</td>
+        <td>${c.walletNumber
+          ? `<span class="dv-wallet">${DV_IC.wallet}<span>${esc(c.walletNumber)}${c.walletType ? `<em>${esc(docWtNorm(c.walletType))}</em>` : ''}</span></span>`
+          : `<span class="dv-none dv-wallet-none">${DV_IC.wallet}<span>—</span></span>`}</td>
+        <td class="dv-muted tnum">${c.createdAt ? esc(dvDate(c.createdAt)) : '—'}</td>
+        <td><span class="dv-pill dv-pill-${st.k}">${st.t}</span></td>
+        <td class="dv-muted dv-work">${esc(c.workplace || '—')}</td>
+        <td class="dv-act">
+          <button class="dv-icbtn" data-dvview="${esc(c.id)}" title="Открыть">${DV_IC.eye}</button>
+          <button class="dv-icbtn" data-dvedit="${esc(c.id)}" title="Редактировать">${DV_IC.edit}</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  box.innerHTML = `
+    <div class="dv-top">
+      <div class="dv-seg">
+        <button class="dv-seg-b" data-cdtype="">Все карты</button>
+        <button class="dv-seg-b" data-cdtype="client">Клиентские</button>
+        <button class="dv-seg-b on" data-cdtype="doctor">Врачи</button>
+        <button class="dv-seg-b" data-cdtype="employee">Сотрудники</button>
+      </div>
+      <button class="dv-btn dv-btn-primary" id="dvAdd">${DV_IC.plus}<span>Добавить врача</span></button>
+    </div>
+    <div class="dv-kpis">
+      <div class="dv-kpi"><span>Всего врачей</span><b>${fmtInt(all.length)}</b></div>
+      <div class="dv-kpi"><span>Активны</span><b class="g">${fmtInt(cnt.ok)}</b></div>
+      <div class="dv-kpi"><span>Без телефона</span><b class="a">${fmtInt(cnt.nophone)}</b></div>
+      <div class="dv-kpi"><span>Без кошелька</span><b class="r">${fmtInt(cnt.nowallet)}</b></div>
+    </div>
+
+    <div class="dv-filters">
+      <div class="dv-f dv-f-period"><label>Дата создания карты</label>
+        <div class="dv-period">${DV_IC.cal}<input type="date" id="dvFrom" value="${esc(f.from)}"><span>—</span><input type="date" id="dvTo" value="${esc(f.to)}"></div>
+      </div>
+      <div class="dv-f"><label>Статус</label><select id="dvStatus">
+        <option value="">Все статусы</option>
+        <option value="ok" ${f.status==='ok'?'selected':''}>Активен</option>
+        <option value="nophone" ${f.status==='nophone'?'selected':''}>Нет телефона</option>
+        <option value="nowallet" ${f.status==='nowallet'?'selected':''}>Нет кошелька</option>
+      </select></div>
+      <div class="dv-f"><label>Наличие телефона</label><select id="dvPhone">
+        <option value="">Все</option><option value="yes" ${f.phone==='yes'?'selected':''}>Есть</option><option value="no" ${f.phone==='no'?'selected':''}>Нет</option>
+      </select></div>
+      <div class="dv-f"><label>Наличие кошелька</label><select id="dvWallet">
+        <option value="">Все</option><option value="yes" ${f.wallet==='yes'?'selected':''}>Есть</option><option value="no" ${f.wallet==='no'?'selected':''}>Нет</option>
+      </select></div>
+      <div class="dv-f"><label>Место работы</label><select id="dvWork"><option value="">Все места</option>${dvOpts(works, f.work)}</select></div>
+      <div class="dv-f"><label>Специализация</label><select id="dvSpec"><option value="">Все специализации</option>${dvOpts(specs, f.spec)}</select></div>
+      <div class="dv-f"><label>Источник</label><select id="dvSrc">
+        <option value="">Все источники</option><option value="rmk" ${f.src==='rmk'?'selected':''}>Создан в РМК</option><option value="1c" ${f.src==='1c'?'selected':''}>Из 1С</option>
+      </select></div>
+      <div class="dv-f dv-f-search"><label>Поиск</label>
+        <div class="dv-search">${DV_IC.search}<input type="text" id="dvQ" value="${esc(f.q)}" placeholder="Введите ФИО, код или телефон…"></div>
+      </div>
+      <div class="dv-f dv-f-btns">
+        <button class="dv-btn dv-btn-ghost" id="dvReset">${DV_IC.reset}<span>Сбросить</span></button>
+        <button class="dv-btn dv-btn-primary" id="dvApply">${DV_IC.filter}<span>Применить</span></button>
+      </div>
+    </div>
+
+    <div class="dv-table-card">
+      <div class="dv-scroll">
+        <table class="dv-tbl">
+          <thead><tr><th>Код</th><th>ФИО</th><th>Специализация</th><th>Телефон</th><th>Кошелёк</th><th>Дата создания</th><th>Статус</th><th>Место работы</th><th class="c">Действия</th></tr></thead>
+          <tbody>${tr || '<tr><td colspan="9" class="tbl-empty">Врачи не найдены</td></tr>'}</tbody>
+        </table>
+      </div>
+      <div class="dv-foot">
+        <div class="dv-shown">Показано <b>${rows.length ? off + 1 : 0}–${Math.min(off + dvState.per, rows.length)}</b> из <b>${fmtInt(rows.length)}</b></div>
+        ${dvPager(rows.length)}
+        <div class="dv-per"><span>Показывать по</span><select id="dvPer">${[10, 25, 50, 100].map(n => `<option value="${n}" ${dvState.per===n?'selected':''}>${n}</option>`).join('')}</select></div>
+      </div>
+    </div>`;
+
+  const read = () => ({
+    from: $('dvFrom').value || '', to: $('dvTo').value || '', status: $('dvStatus').value || '',
+    phone: $('dvPhone').value || '', wallet: $('dvWallet').value || '', work: $('dvWork').value || '',
+    spec: $('dvSpec').value || '', src: $('dvSrc').value || '', q: $('dvQ').value || '',
+  });
+  $('dvApply').addEventListener('click', () => { dvState.f = read(); dvState.page = 0; dvPaint(); });
+  $('dvReset').addEventListener('click', () => { dvState.f = dvDefaults(); dvState.page = 0; dvPaint(); });
+  $('dvQ').addEventListener('keydown', e => { if (e.key === 'Enter') { dvState.f = read(); dvState.page = 0; dvPaint(); } });
+  $('dvPer').addEventListener('change', () => { dvState.per = Number($('dvPer').value) || 10; dvState.page = 0; dvPaint(); });
+  $('dvAdd').addEventListener('click', () => openDoctorModal(null));
+  box.querySelectorAll('.dv-pg[data-pg]').forEach(b => b.addEventListener('click', () => {
+    const n = Number(b.getAttribute('data-pg')); if (n >= 1) { dvState.page = n - 1; dvPaint(); }
+  }));
+  box.querySelectorAll('[data-cdtype]').forEach(b => b.addEventListener('click', () => {
+    cdState.type = b.getAttribute('data-cdtype'); cdState.page = 0; renderCards();
+  }));
+  const byId = (id) => (dvState.list || []).find(x => String(x.id) === String(id));
+  box.querySelectorAll('[data-dvview]').forEach(b => b.addEventListener('click', () => { const c = byId(b.getAttribute('data-dvview')); if (c) dvViewModal(c); }));
+  box.querySelectorAll('[data-dvedit]').forEach(b => b.addEventListener('click', () => { const c = byId(b.getAttribute('data-dvedit')); if (c) dvEdit(c); }));
+  bumpSync();
+}
+
 async function renderCards(force) {
   const box = $('cdBody');
+  if (cdState.type === 'doctor') return renderDoctorCards(force);
   box.innerHTML = `<div class="loading">⏳ Загружаю карты…</div>`;
   try {
     const off = cdState.page * cdState.per;
@@ -1936,6 +2210,14 @@ async function renderCards(force) {
     const pageNow = cdState.page + 1;
 
     box.innerHTML = `
+      <div class="dv-top">
+        <div class="dv-seg">
+          <button class="dv-seg-b ${cdState.type===''?'on':''}" data-cdtype="">Все карты</button>
+          <button class="dv-seg-b ${cdState.type==='client'?'on':''}" data-cdtype="client">Клиентские</button>
+          <button class="dv-seg-b" data-cdtype="doctor">Врачи</button>
+          <button class="dv-seg-b ${cdState.type==='employee'?'on':''}" data-cdtype="employee">Сотрудники</button>
+        </div>
+      </div>
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">
         ${kpi('💳','Всего карт', fmtInt(s.total||0),'gray', fmtInt(s.active||0)+' активных')}
         ${kpi('👤','Клиентские', fmtInt((bt.client||{}).count||0),'g','скидка по карте')}
@@ -1992,6 +2274,7 @@ async function renderCards(force) {
     $('cdType').addEventListener('change', doSearch);
     $('cdReset').addEventListener('click', () => { cdState.q=''; cdState.type=''; cdState.page=0; renderCards(); });
     $('cdAddDoctor').addEventListener('click', () => openDoctorModal(null));
+    box.querySelectorAll('[data-cdtype]').forEach(b => b.addEventListener('click', () => { cdState.type = b.getAttribute('data-cdtype'); cdState.page = 0; renderCards(); }));
     box.querySelectorAll('.cd-edit-doc').forEach(b => b.addEventListener('click', () => {
       const i = Number(b.getAttribute('data-i'));
       const c = (d.cards || [])[i];

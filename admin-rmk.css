@@ -1856,3 +1856,7 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
 .cd-pct-presets { display: flex; flex-wrap: wrap; gap: 8px; }
 .cd-pct-preset { border: 1px solid var(--line); background: #fff; border-radius: 10px; padding: 7px 12px; font: inherit; font-weight: 700; cursor: pointer; }
 .cd-pct-preset.on { background: var(--g, #16a34a); border-color: var(--g, #16a34a); color: #fff; }
+
+/* администратор кассы (v1.2.77) */
+.ka-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.ka-lbl { display: block; margin-bottom: 4px; font-size: 13px; }

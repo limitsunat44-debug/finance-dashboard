@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.76';
+const RMK_VERSION = '1.2.77';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.77', date: '29.09.2026', title: 'Администратор кассы: вход с паролем и скидка любой суммой',
+    items: [
+      'В разделе «Пользователи» появился блок «Администратор кассы»: логин, имя и пароль задаёт Sunnat/Iskandar/Shahida.',
+      'Администратор кассы входит в кассу РМК своим логином и паролем (пароль проверяет сервер), видит все кассы.',
+      'Только у него на кассе есть «Скидка суммой»: вписывает сумму скидки на чек вручную. У продавцов всё как прежде.',
+      'Сервер не проведёт чек со скидкой суммой без входа администратора; каждая такая скидка записывается в журнал.',
+    ],
+  },
   {
     v: '1.2.76', date: '27.09.2026', title: 'Врачи: данные перенесены из crmfortp, телефон и специальность в карточке',
     items: [
@@ -3488,11 +3497,59 @@ async function psaShowFullTop() {
 //  РАЗДЕЛ: ПОЛЬЗОВАТЕЛИ
 // ═════════════════════════════════════════════════════
 const ROLE_CLS = { admin: 'amber', warehouse: 'g', cashier: 'blue', manager: 'blue' };
+// ── Администратор кассы: логин/пароль задаёт полный администратор РМК ──
+function kassaAdminCard(ka) {
+  const isFull = cdIsAdmin();
+  const status = ka.exists
+    ? `<span class="badge ok">Создан</span> <span class="muted" style="font-size:12.5px">логин <b>${esc(ka.login)}</b>${ka.updatedAt ? ' · изменён ' + dushTime(ka.updatedAt, true) + (ka.updatedBy ? ' (' + esc(ka.updatedBy) + ')' : '') : ''}</span>`
+    : `<span class="badge off">Не создан</span>`;
+  return `
+    <div class="card card-pad">
+      <div class="card-h-row"><h3>Администратор кассы</h3></div>
+      <div class="muted" style="font-size:13px;margin-bottom:10px">Входит в кассу РМК по своему логину и паролю. Видит все кассы и может сделать на чек скидку любой суммой (вписывает вручную). У остальных продавцов права не меняются.</div>
+      <div style="margin-bottom:12px">${status}</div>
+      ${isFull ? `
+      <div class="ka-form">
+        <div><label class="muted ka-lbl">Логин</label><input class="finput" id="kaLogin" autocomplete="off" value="${esc(ka.login || 'admin')}"></div>
+        <div><label class="muted ka-lbl">Имя в кассе</label><input class="finput" id="kaName" autocomplete="off" value="${esc(ka.name || 'Администратор')}"></div>
+        <div><label class="muted ka-lbl">${ka.exists ? 'Новый пароль (пусто — не менять)' : 'Пароль'}</label><input class="finput" id="kaPass" type="password" autocomplete="new-password" placeholder="минимум 6 символов"></div>
+        <div><label class="muted ka-lbl">Повтор пароля</label><input class="finput" id="kaPass2" type="password" autocomplete="new-password"></div>
+      </div>
+      <div id="kaErr" class="errbar" style="display:none;margin-top:10px"></div>
+      <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn btn-primary" id="kaSave">${ka.exists ? 'Сохранить' : 'Создать администратора'}</button></div>
+      <div class="muted" style="font-size:12px;margin-top:8px">Пароль хранится на сервере только в зашифрованном виде. После смены пароля администратор кассы выйдет на всех устройствах.</div>
+      ` : `<div class="muted" style="font-size:12.5px">Изменять может только Sunnat, Iskandar или Shahida.</div>`}
+    </div>`;
+}
+function kassaAdminBind(ka) {
+  const btn = $('kaSave');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const err = $('kaErr'); err.style.display = 'none';
+    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+    const login = $('kaLogin').value.trim(), name = $('kaName').value.trim();
+    const p1 = $('kaPass').value, p2 = $('kaPass2').value;
+    if (!login) return show('Укажите логин.');
+    if (!ka.exists && !p1) return show('Укажите пароль.');
+    if (p1 && p1.length < 6) return show('Пароль — минимум 6 символов.');
+    if (p1 !== p2) return show('Пароли не совпадают.');
+    btn.disabled = true; btn.textContent = 'Сохраняю…';
+    try {
+      await posApi('?action=kassa-admin-set', { method: 'POST', body: JSON.stringify({ login, name, password: p1, by: state.user }) });
+      docToast('Администратор кассы сохранён: ' + login);
+      renderUsers(true);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = ka.exists ? 'Сохранить' : 'Создать администратора';
+      show(e.message || String(e));
+    }
+  });
+}
+
 async function renderUsers(force) {
   const box = $('usBody');
   box.innerHTML = `<div class="loading">⏳ Загружаю пользователей…</div>`;
   try {
-    const d = await cachedApi('users', '?action=pos-users');
+    const d = force ? await posApi('?action=pos-users', { method: 'GET' }) : await cachedApi('users', '?action=pos-users');
     const s = d.stats || {};
     const pos = d.posAccounts || [];
     const web = d.webAdmins || [];
@@ -3502,6 +3559,8 @@ async function renderUsers(force) {
         ${kpi('🛡️','Веб-админы', fmtInt(s.webTotal||0),'gray','доступ к дашборду')}
         ${kpi('🔑','Админы админки РМК', '3','gray','полный доступ')}
       </div>
+
+      ${kassaAdminCard(d.kassaAdmin || {})}
 
       <div class="card card-pad">
         <div class="card-h-row"><h3>Учётки касс и складов</h3></div>
@@ -3537,6 +3596,7 @@ async function renderUsers(force) {
         ${web.length ? `<div style="margin-top:12px"><div class="muted" style="font-size:12.5px;margin-bottom:6px">app_users:</div>${web.map(u=>`<span class="badge gray" style="margin:0 6px 6px 0">${esc(u.username)} · ${esc(u.roleLabel)}</span>`).join('')}</div>` : ''}
       </div>
     `;
+    kassaAdminBind(d.kassaAdmin || {});
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить пользователей: ' + (e.message || e));

@@ -195,6 +195,47 @@ function _doLoginApproved(username, password) {
 let currentAllowedTabs = '*';
 // Разрешённая касса для логина магазина (точное имя) или null = все кассы.
 let currentAllowedKassa = null;
+// Администратор кассы (вход с паролем на сервере): может делать ручную скидку суммой.
+let currentKassaAdmin = false;
+const KASSA_ADMIN_SESSION = '__kassa_admin__';
+const KASSA_ADMIN_LS = 'pos_kassa_admin';
+function posIsKassaAdmin() { return !!currentKassaAdmin; }
+function posKassaAdminToken() {
+    try { const a = JSON.parse(localStorage.getItem(KASSA_ADMIN_LS) || 'null'); return (a && a.token) || null; } catch (_) { return null; }
+}
+function _kassaAdminAccount(name) {
+    return { displayName: name || 'Администратор', allowedTabs: ['cashier'], allowedKassa: null, kassaAdmin: true };
+}
+function _afterLoginLoad() {
+    applyTabAccess();
+    loadData().then(() => {
+        loadSales1C().then(() => updateDashboard());
+        loadEmployeeSales1C();
+        updateDashboard();
+        loadAllTables();
+        const exchangeRateInput = document.getElementById('exchangeRateInput');
+        if (exchangeRateInput) exchangeRateInput.value = appData.exchangeRate;
+    });
+}
+// Вход администратора кассы: пароль проверяет сервер, в браузере храним только токен.
+async function kassaAdminLoginRemote(username, password) {
+    try {
+        const r = await posApiTimeout('?action=kassa-admin-login', { method: 'POST', body: JSON.stringify({ login: username, password }) }, 10000);
+        if (r && r.ok && r.token) {
+            try {
+                localStorage.setItem(KASSA_ADMIN_LS, JSON.stringify({ token: r.token, login: r.login, name: r.name }));
+                localStorage.setItem('ortoSession', KASSA_ADMIN_SESSION);
+                localStorage.setItem('ortoSessionEpoch', SESSION_EPOCH);
+            } catch (_) {}
+            _applyAccount(_kassaAdminAccount(r.name));
+            _afterLoginLoad();
+            return 'ok';
+        }
+        return 'bad';
+    } catch (e) {
+        return 'network';
+    }
+}
 
 function isTabAllowed(tabName) {
     // Вкладка «Касса» (РМК) видна ВСЕМ пользователям (в т.ч. кассиру).
@@ -1640,6 +1681,8 @@ function _applyAccount(account) {
     currentUser = account.displayName;
     currentAllowedTabs = account.allowedTabs || '*';
     currentAllowedKassa = account.allowedKassa || null;
+    currentKassaAdmin = !!account.kassaAdmin;
+    document.body.classList.toggle('kassa-admin', currentKassaAdmin);
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('mainApp').style.display = 'block';
     document.getElementById('currentUser').textContent = currentUser;
@@ -1690,6 +1733,9 @@ function logout() {
     currentUser = null;
     currentAllowedTabs = '*';
     currentAllowedKassa = null;
+    currentKassaAdmin = false;
+    document.body.classList.remove('kassa-admin');
+    try { localStorage.removeItem(KASSA_ADMIN_LS); } catch (_) {}
     // Сбрасываем состояние РМК, чтобы следующий аккаунт загрузил кассы заново
     // (иначе останется отфильтрованный список предыдущего магазина).
     if (typeof POS !== 'undefined') {
@@ -1724,6 +1770,17 @@ function restoreSession() {
     if (epoch !== SESSION_EPOCH) {
         try { localStorage.removeItem('ortoSession'); } catch (_) {}
         return false;
+    }
+    if (acctKey === KASSA_ADMIN_SESSION) {
+        let a = null;
+        try { a = JSON.parse(localStorage.getItem(KASSA_ADMIN_LS) || 'null'); } catch (_) {}
+        if (!a || !a.token) { try { localStorage.removeItem('ortoSession'); } catch (_) {} return false; }
+        _applyAccount(_kassaAdminAccount(a.name));
+        _afterLoginLoad();
+        // Перепроверяем токен (пароль могли сменить). Нет связи — остаёмся в системе.
+        posApiTimeout('?action=kassa-admin-verify', { method: 'POST', body: JSON.stringify({ token: a.token }) }, 10000)
+            .then(r => { if (r && r.ok === false) logout(); }).catch(() => {});
+        return true;
     }
     const account = ADMIN_ACCOUNTS[acctKey];
     if (!account) { try { localStorage.removeItem('ortoSession'); } catch (_) {} return false; }
@@ -3138,6 +3195,20 @@ document.addEventListener('DOMContentLoaded', function() {
         e.preventDefault();
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
+
+        // АДМИНИСТРАТОР КАССЫ: логина нет в локальном списке → проверяем на сервере.
+        const _uLow = String(username || '').trim().toLowerCase();
+        const _isLocal = Object.keys(ADMIN_ACCOUNTS).some(k => k.toLowerCase() === _uLow);
+        if (!_isLocal && _uLow) {
+            const btn = this.querySelector('button[type="submit"]');
+            if (btn) { btn.disabled = true; btn.textContent = 'Проверяем…'; }
+            const st = await kassaAdminLoginRemote(String(username).trim(), password);
+            if (btn) { btn.disabled = false; btn.textContent = 'Войти'; }
+            if (st === 'ok') { document.getElementById('loginError').style.display = 'none'; }
+            else if (st === 'network') showError('Нет связи с сервером. Попробуйте ещё раз.', 'loginError');
+            else showError('Неверное имя пользователя или пароль.', 'loginError');
+            return;
+        }
 
         // МОБИЛЬНАЯ/PWA-КАССА: вход только через одобренное устройство.
         // На ПК и для админов — обычный вход (ветка else ниже).
@@ -11317,9 +11388,13 @@ function posTotals() {
     // Reward-код orto.cards — фиксированная скидка (напр. 100 с.) на весь чек, поверх остальных.
     const rewardVal = (POS.reward && Number(POS.reward.value)) || 0;
     const reward = Math.min(rewardVal, beforeReward);   // не уводим итог ниже 0
-    const grand = Math.max(0, beforeReward - reward);
+    // Ручная скидка суммой (только администратор кассы) — не распространяется на услуги/пронатор.
+    const eligible = Math.max(0, Math.round(discNet * (1 - cartPct / 100)) - reward);
+    const manualWanted = posIsKassaAdmin() ? Math.max(0, Number(POS.manualDisc) || 0) : 0;
+    const manual = Math.min(manualWanted, eligible);
+    const grand = Math.max(0, beforeReward - reward - manual);
     const disc = Math.round(gross) - grand;
-    return { gross: Math.round(gross), grand, disc, cartPct, reward, beforeReward };
+    return { gross: Math.round(gross), grand, disc, cartPct, reward, beforeReward, manual, manualMax: eligible };
 }
 
 function posRenderCart() {
@@ -11474,6 +11549,16 @@ function posRenderTotals() {
         } else {
             rwRow.style.display = 'none';
         }
+    }
+    const mRow = document.getElementById('posSumManualRow');
+    if (mRow) {
+        mRow.style.display = t.manual > 0 ? '' : 'none';
+        const mv = document.getElementById('posSumManual'); if (mv) mv.textContent = '−' + posMoney(t.manual);
+    }
+    const mBtn = document.getElementById('posManualDiscBtn');
+    if (mBtn) {
+        mBtn.style.display = posIsKassaAdmin() ? '' : 'none';
+        mBtn.textContent = t.manual > 0 ? ('Скидка −' + posMoney(t.manual)) : 'Скидка суммой';
     }
     if (grand) grand.textContent = posMoney(t.grand);
     // Оплата блокируется ТОЛЬКО при пустой корзине. Статус экземпляра (sold/списан)
@@ -11674,6 +11759,57 @@ function posApply5Item() {
 function posApply5Cart() {
     POS.cartDiscountPct = POS.cartDiscountPct >= 5 ? 0 : 5;
     posRenderTotals();
+}
+
+// ── Ручная скидка суммой (только администратор кассы) ──
+function posManualDiscAsk() {
+    if (!posIsKassaAdmin()) { posError('Скидку суммой может делать только администратор.'); return; }
+    if (!POS.cart.length) { posError('Сначала отсканируйте товар.'); return; }
+    const t = posTotals();
+    let ov = document.getElementById('posManualOv');
+    if (ov) ov.remove();
+    ov = document.createElement('div');
+    ov.id = 'posManualOv';
+    ov.className = 'pos-manual-ov';
+    ov.innerHTML = `
+      <div class="pos-manual-box" role="dialog">
+        <div class="pos-manual-title">Скидка суммой на чек</div>
+        <div class="pos-manual-sub">Сумма чека ${posMoney(t.beforeReward - t.reward)} с. · можно до ${posMoney(t.manualMax)} с.</div>
+        <input id="posManualInp" class="pos-manual-inp" type="number" inputmode="decimal" min="0" step="1" placeholder="Сумма скидки, с." value="${t.manual > 0 ? t.manual : ''}">
+        <div class="pos-manual-hint" id="posManualHint"></div>
+        <div class="pos-manual-btns">
+          ${t.manual > 0 ? '<button type="button" class="pos-manual-clear" id="posManualClear">Убрать скидку</button>' : ''}
+          <button type="button" class="pos-manual-cancel" id="posManualCancel">Отмена</button>
+          <button type="button" class="pos-manual-ok" id="posManualOk">Применить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    const inp = ov.querySelector('#posManualInp');
+    const hint = ov.querySelector('#posManualHint');
+    const close = () => ov.remove();
+    const upd = () => {
+        const v = Number(String(inp.value).replace(',', '.')) || 0;
+        const base = t.beforeReward - t.reward;
+        if (v > t.manualMax) hint.textContent = 'Больше допустимого — будет применено ' + posMoney(t.manualMax) + ' с.';
+        else if (v > 0) hint.textContent = 'К оплате: ' + posMoney(Math.max(0, base - v)) + ' с.';
+        else hint.textContent = '';
+    };
+    inp.addEventListener('input', upd); upd();
+    const apply = () => {
+        const v = Math.max(0, Math.round(Number(String(inp.value).replace(',', '.')) || 0));
+        POS.manualDisc = Math.min(v, t.manualMax);
+        close();
+        posRenderTotals();
+        if (typeof pmobRender === 'function') pmobRender();
+        if (POS.isMobile && typeof pmobToast === 'function') pmobToast(POS.manualDisc > 0 ? 'Скидка применена' : 'Скидка убрана', POS.manualDisc > 0 ? ('−' + posMoney(POS.manualDisc) + ' с. на чек') : '');
+    };
+    ov.querySelector('#posManualOk').onclick = apply;
+    ov.querySelector('#posManualCancel').onclick = close;
+    const clr = ov.querySelector('#posManualClear');
+    if (clr) clr.onclick = () => { inp.value = ''; apply(); };
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+    setTimeout(() => inp.focus(), 50);
 }
 
 // ── Карта врача (ВР) ──
@@ -12122,6 +12258,9 @@ async function posConfirmSale() {
             // Передаём в backend, чтобы он размазал её по позициям и итог чека (total)
             // совпал с фактически оплаченной суммой (grand), а не остался = сумме без reward.
             rewardValue: (POS.reward && Number(POS.reward.value)) || 0,
+            // Ручная скидка суммой — только администратор кассы (сервер проверяет токен).
+            manualDiscount: posIsKassaAdmin() ? (posTotals().manual || 0) : 0,
+            adminToken: posIsKassaAdmin() ? posKassaAdminToken() : null,
             payments: POS._payments || [],
         };
         // ОНЛАЙН-FIRST: сначала пробуем отправить в сеть с таймаутом.
@@ -12178,7 +12317,7 @@ async function posConfirmSale() {
 
 function posResetSale() {
     POS.cart = []; POS.activeKey = null; POS.doctor = null; POS.client = null;
-    POS.cartDiscountPct = 0; POS._payments = null; POS.reward = null;
+    POS.cartDiscountPct = 0; POS._payments = null; POS.reward = null; POS.manualDisc = 0;
     const dc = document.getElementById('posDoctorChosen'); if (dc) dc.style.display = 'none';
     const cc = document.getElementById('posClientChosen'); if (cc) cc.style.display = 'none';
     const dr = document.getElementById('posDoctorResults'); if (dr) dr.innerHTML = '';
@@ -12684,6 +12823,13 @@ function pmobRender() {
     const discOn = (POS.cartDiscountPct || 0) >= 5;
     if (discState) discState.textContent = discOn ? 'вкл' : 'выкл';
     if (discItem) discItem.classList.toggle('on', discOn);
+    const manItem = pmobEl('pmobMoreManual');
+    if (manItem) {
+        manItem.style.display = posIsKassaAdmin() ? '' : 'none';
+        const ms = pmobEl('pmobManualState');
+        if (ms) ms.textContent = t.manual > 0 ? ('−' + pmobMoney(t.manual)) : 'нет';
+        manItem.classList.toggle('on', t.manual > 0);
+    }
 
     const meta = pmobEl('pmobMoreMeta');
     if (meta) {
@@ -14900,6 +15046,7 @@ function pmobBindEvents() {
         pmobHistRender();
     });
     on('pmobMoreDisc', () => { posApply5Cart(); pmobRender(); });
+    on('pmobMoreManual', () => { posManualDiscAsk(); });
     on('pmobMoreDesktop', () => { POS.mobDesktopView = true; pmobApply(); });
 
     // дисконтная карта покупателя
@@ -15010,6 +15157,8 @@ function posBindEvents() {
     // Быстрые скидки 5%
     const d5i = document.getElementById('posDisc5Item');
     if (d5i) d5i.addEventListener('click', posApply5Item);
+    const mdb = document.getElementById('posManualDiscBtn');
+    if (mdb) mdb.addEventListener('click', posManualDiscAsk);
     const d5c = document.getElementById('posDisc5Cart');
     if (d5c) d5c.addEventListener('click', posApply5Cart);
     // Карта врача (поиск по коду/имени) и дисконтная карта клиента (скан)

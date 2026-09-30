@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.79';
+const RMK_VERSION = '1.2.80';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.80', date: '30.09.2026', title: 'Врачи: сортировка и «Показать ещё»',
+    items: [
+      'Сортировка «По имени (А→Я)» — по умолчанию; вариант «Сначала новые» — по дате создания.',
+      'Вместо постраничного вывода — первые 50 врачей и кнопка «Показать ещё» (+50).',
+      'Исправлено: часть врачей (55) не показывалась из-за нестабильной сортировки при загрузке.',
+    ],
+  },
   {
     v: '1.2.79', date: '30.09.2026', title: 'Дисконтные карты → Врачи: новый дизайн списка',
     items: [
@@ -1934,8 +1942,9 @@ function openCardDiscModal(c) {
 // ═════════ Дисконтные карты → категория «Врачи» (v1.2.79, новый дизайн) ═════════
 // Только отображение: данные берутся тем же action=cards&type=doctor, создание/редактирование —
 // прежняя модалка openDoctorModal (doctor-create / doctor-update). Логика не менялась.
-const dvState = { list: null, loading: false, f: null, page: 0, per: 10 };
-function dvDefaults() { return { from: '', to: '', status: '', phone: '', wallet: '', work: '', spec: '', src: '', q: '' }; }
+const dvState = { list: null, loading: false, f: null, shown: 50 };
+const DV_STEP = 50;
+function dvDefaults() { return { from: '', to: '', status: '', phone: '', wallet: '', work: '', spec: '', src: '', q: '', sort: 'az' }; }
 function dvF() { if (!dvState.f) dvState.f = dvDefaults(); return dvState.f; }
 function dvYMD(iso) { try { return new Date(iso).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tashkent' }); } catch (_) { return ''; } }
 function dvDate(iso) { try { return new Date(iso).toLocaleDateString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: 'numeric' }); } catch (_) { return '—'; } }
@@ -1988,7 +1997,7 @@ function dvFiltered() {
   const f = dvF();
   const q = (f.q || '').trim().toLowerCase();
   const qd = q.replace(/\D/g, '');
-  return (dvState.list || []).filter(c => {
+  const out = (dvState.list || []).filter(c => {
     const ymd = c.createdAt ? dvYMD(c.createdAt) : '';
     if (f.from && (!ymd || ymd < f.from)) return false;
     if (f.to && (!ymd || ymd > f.to)) return false;
@@ -2007,6 +2016,17 @@ function dvFiltered() {
     }
     return true;
   });
+  const nm = c => String(c.name || '').trim().replace(/^[^\p{L}]+/u, '');
+  if (f.sort === 'new') {
+    out.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')) || nm(a).localeCompare(nm(b), 'ru', { sensitivity: 'base' }));
+  } else {
+    out.sort((a, b) => {
+      const x = nm(a), y = nm(b);
+      if (!x && y) return 1; if (x && !y) return -1;
+      return x.localeCompare(y, 'ru', { sensitivity: 'base' }) || String(a.code || '').localeCompare(String(b.code || ''), 'ru', { numeric: true });
+    });
+  }
+  return out;
 }
 
 function dvOpts(values, sel) {
@@ -2082,10 +2102,8 @@ function dvPaint() {
   const all = dvState.list || [];
   const f = dvF();
   const rows = dvFiltered();
-  const pages = Math.max(1, Math.ceil(rows.length / dvState.per));
-  if (dvState.page > pages - 1) dvState.page = pages - 1;
-  const off = dvState.page * dvState.per;
-  const pageRows = rows.slice(off, off + dvState.per);
+  const shown = Math.min(dvState.shown || DV_STEP, rows.length);
+  const pageRows = rows.slice(0, shown);
   const works = [...new Set(all.map(c => String(c.workplace || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
   const specs = [...new Set(all.map(c => String(c.specialty || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
   const cnt = { ok: 0, nophone: 0, nowallet: 0 };
@@ -2150,6 +2168,9 @@ function dvPaint() {
       <div class="dv-f"><label>Источник</label><select id="dvSrc">
         <option value="">Все источники</option><option value="rmk" ${f.src==='rmk'?'selected':''}>Создан в РМК</option><option value="1c" ${f.src==='1c'?'selected':''}>Из 1С</option>
       </select></div>
+      <div class="dv-f"><label>Сортировка</label><select id="dvSort">
+        <option value="az" ${f.sort!=='new'?'selected':''}>По имени (А→Я)</option><option value="new" ${f.sort==='new'?'selected':''}>Сначала новые</option>
+      </select></div>
       <div class="dv-f dv-f-search"><label>Поиск</label>
         <div class="dv-search">${DV_IC.search}<input type="text" id="dvQ" value="${esc(f.q)}" placeholder="Введите ФИО, код или телефон…"></div>
       </div>
@@ -2166,26 +2187,26 @@ function dvPaint() {
           <tbody>${tr || '<tr><td colspan="9" class="tbl-empty">Врачи не найдены</td></tr>'}</tbody>
         </table>
       </div>
-      <div class="dv-foot">
-        <div class="dv-shown">Показано <b>${rows.length ? off + 1 : 0}–${Math.min(off + dvState.per, rows.length)}</b> из <b>${fmtInt(rows.length)}</b></div>
-        ${dvPager(rows.length)}
-        <div class="dv-per"><span>Показывать по</span><select id="dvPer">${[10, 25, 50, 100].map(n => `<option value="${n}" ${dvState.per===n?'selected':''}>${n}</option>`).join('')}</select></div>
+      <div class="dv-foot dv-foot-more">
+        <div class="dv-shown">Показано <b>${fmtInt(shown)}</b> из <b>${fmtInt(rows.length)}</b></div>
+        ${shown < rows.length ? `<button class="dv-btn dv-btn-ghost dv-more" id="dvMore">Показать ещё ${fmtInt(Math.min(DV_STEP, rows.length - shown))}</button>` : '<span></span>'}
+        <span></span>
       </div>
     </div>`;
 
   const read = () => ({
     from: $('dvFrom').value || '', to: $('dvTo').value || '', status: $('dvStatus').value || '',
     phone: $('dvPhone').value || '', wallet: $('dvWallet').value || '', work: $('dvWork').value || '',
-    spec: $('dvSpec').value || '', src: $('dvSrc').value || '', q: $('dvQ').value || '',
+    spec: $('dvSpec').value || '', src: $('dvSrc').value || '', q: $('dvQ').value || '', sort: $('dvSort').value || 'az',
   });
-  $('dvApply').addEventListener('click', () => { dvState.f = read(); dvState.page = 0; dvPaint(); });
-  $('dvReset').addEventListener('click', () => { dvState.f = dvDefaults(); dvState.page = 0; dvPaint(); });
-  $('dvQ').addEventListener('keydown', e => { if (e.key === 'Enter') { dvState.f = read(); dvState.page = 0; dvPaint(); } });
-  $('dvPer').addEventListener('change', () => { dvState.per = Number($('dvPer').value) || 10; dvState.page = 0; dvPaint(); });
+  $('dvApply').addEventListener('click', () => { dvState.f = read(); dvState.shown = DV_STEP; dvPaint(); });
+  $('dvReset').addEventListener('click', () => { dvState.f = dvDefaults(); dvState.shown = DV_STEP; dvPaint(); });
+  $('dvQ').addEventListener('keydown', e => { if (e.key === 'Enter') { dvState.f = read(); dvState.shown = DV_STEP; dvPaint(); } });
+  $('dvSort').addEventListener('change', () => { dvState.f = read(); dvState.shown = DV_STEP; dvPaint(); });
+  if ($('dvMore')) $('dvMore').addEventListener('click', () => {
+    const y = window.scrollY; dvState.shown = (dvState.shown || DV_STEP) + DV_STEP; dvPaint(); window.scrollTo(0, y);
+  });
   $('dvAdd').addEventListener('click', () => openDoctorModal(null));
-  box.querySelectorAll('.dv-pg[data-pg]').forEach(b => b.addEventListener('click', () => {
-    const n = Number(b.getAttribute('data-pg')); if (n >= 1) { dvState.page = n - 1; dvPaint(); }
-  }));
   box.querySelectorAll('[data-cdtype]').forEach(b => b.addEventListener('click', () => {
     cdState.type = b.getAttribute('data-cdtype'); cdState.page = 0; renderCards();
   }));

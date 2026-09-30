@@ -1979,7 +1979,8 @@ async function dvLoad() {
     if (arr.length < 200) break;
     off += 200;
   }
-  dvState.list = all;
+  const seen = new Set();
+  dvState.list = all.filter(c => { const k = c.id || c.c1Ref; if (seen.has(k)) return false; seen.add(k); return true; });
   dvState.loading = false;
 }
 

@@ -10797,8 +10797,46 @@ async function posOpenShift() {
     }
 }
 
+// ── Контроль смены: если администратор закрыл смену в РМК-админке ──
+// Раз в минуту (и при возврате на вкладку) проверяем, что наша смена ещё открыта.
+// Реагируем только на УСПЕШНЫЙ ответ сервера (офлайн/ошибка сети — ничего не делаем)
+// и не прерываем идущее проведение чека (POS.busy).
+let POS_SHIFT_WATCH = null;
+function posStartShiftWatch() {
+    if (POS_SHIFT_WATCH) return;
+    POS_SHIFT_WATCH = setInterval(posCheckShiftAlive, 60000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) posCheckShiftAlive(); });
+}
+async function posCheckShiftAlive() {
+    const sh = POS.shift;
+    if (!sh || !sh.id || !sh.kassa_c1_ref || POS.busy) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    let r;
+    try { r = await posApi(`?action=shift&kassa=${encodeURIComponent(sh.kassa_c1_ref)}`, { method: 'GET' }); } catch (_) { return; }
+    if (!r || !r.ok || !r.data || !r.data.ok) return;
+    const cur = r.data.shift;
+    if (cur && cur.id === sh.id) return;
+    if (!POS.shift || POS.shift.id !== sh.id || POS.busy) return;
+    try { await posStopCamera(); } catch (_) {}
+    POS.shift = null;
+    POS.chosen = null;
+    const top = document.getElementById('posTopStatus');
+    if (top) top.textContent = '';
+    const chk = document.getElementById('posConfirmKassa');
+    if (chk) chk.checked = false;
+    const wrap = document.getElementById('posConfirmWrap');
+    if (wrap) wrap.style.display = 'none';
+    try { posUpdateStep1Btn(); } catch (_) {}
+    posShowStep(1);
+    if (currentAllowedKassa && POS.kassas && POS.kassas.length === 1) {
+        try { posSelectKassa(POS.kassas[0]); } catch (_) {}
+    }
+    alert('Смена закрыта администратором.\nЧтобы продолжить продажи, откройте новую смену.');
+}
+
 // ── Шаг 3: область продаж ──
 function posEnterSalesArea() {
+    posStartShiftWatch();
     posShowStep(3);
     const sh = POS.shift || {};
     const meta = document.getElementById('posShiftMeta');

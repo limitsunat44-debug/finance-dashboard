@@ -2053,3 +2053,30 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
 .dv-more{min-width:200px;justify-content:center;}
 @media (max-width:1100px){.dv-f-search{grid-column:span 2;}}
 @media (max-width:720px){.dv-foot-more{grid-template-columns:1fr;gap:10px;justify-items:center;}.dv-f-search{grid-column:1/-1;}}
+/* v1.2.81: смена — детали и закрытие */
+.shx-modal{max-width:1080px}
+.shx-body{max-height:74vh}
+.shx-top{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.shx-meta{font-size:13px;color:var(--tx2,#555);margin-left:8px}
+.shx-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px}
+.shx-kpi{border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px 14px;background:var(--card,#fff)}
+.shx-k{font-size:12px;color:var(--tx3,#6b7280)}
+.shx-v{font-size:20px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.shx-kpi.g .shx-v{color:#0f9d58}
+.shx-s{font-size:12px;color:var(--tx3,#6b7280);margin-top:2px}
+.shx-grid{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:4px}
+.shx-hours{display:flex;align-items:flex-end;gap:6px;height:140px;padding-top:10px}
+.shx-hb{flex:1;min-width:18px;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative}
+.shx-hbar{width:100%;background:#10b981;border-radius:6px 6px 2px 2px;min-height:0}
+.shx-hn{font-size:11px;font-weight:600;margin-top:3px;min-height:14px}
+.shx-hl{font-size:11px;color:var(--tx3,#6b7280)}
+.shx-ret td{color:#b42318}
+.shx-actions{display:flex;gap:8px;margin-top:14px}
+.shx-rowbtns{display:flex;gap:6px;justify-content:center}
+.shx-row{cursor:pointer}
+.shx-row:hover td{background:rgba(16,185,129,.05)}
+.btn.btn-sm{padding:5px 10px;font-size:12px}
+.btn.shx-close-btn{background:#fff1f0;color:#b42318;border-color:#f3c7c3}
+.btn.shx-close-btn:hover{background:#fde4e1}
+.shx-toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#111827;color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;z-index:9999}
+@media (max-width:900px){.shx-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.shx-grid{grid-template-columns:1fr}}

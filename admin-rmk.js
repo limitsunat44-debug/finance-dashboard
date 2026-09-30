@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.80';
+const RMK_VERSION = '1.2.81';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.81', date: '30.09.2026', title: 'Смена: детали, время на продажи и закрытие администратором',
+    items: [
+      'По клику на смену — окно с деталями: длительность, ориентировочное время на продажи, занятость, самый долгий перерыв, чеки по часам, оплаты и список чеков.',
+      'Администратор может закрыть открытую смену (кнопка «Закрыть»). Касса продавца сама увидит, что смена закрыта.',
+      'В таблице смен — колонка «Длительность».',
+    ],
+  },
   {
     v: '1.2.80', date: '30.09.2026', title: 'Врачи: сортировка и «Показать ещё»',
     items: [
@@ -1411,6 +1419,7 @@ async function renderShift(force) {
             <div class="info-row"><span class="k">Касса</span><span class="v">${esc(cur.kassaName || '—')}</span></div>
             <div class="info-row"><span class="k">Продавец</span><span class="v">${esc(cur.seller || cur.openedBy || '—')}</span></div>
             <div class="info-row"><span class="k">Открыта</span><span class="v">${dushTime(cur.openedAt,true)}</span></div>
+            <div class="shx-actions"><button class="btn" data-shview="${esc(cur.id)}">Подробнее</button><button class="btn shx-close-btn" data-shclose="${esc(cur.id)}">Закрыть смену</button></div>
           ` : `<div class="tbl-empty">Нет открытых смен${state.kassa ? ' по выбранной кассе' : ''}</div>`}
         </div>
 
@@ -1438,29 +1447,169 @@ async function renderShift(force) {
         <div class="card-h-row"><h3>Смены (сегодня + недавние)</h3></div>
         <div class="tbl-wrap">
           <table class="tbl">
-            <thead><tr><th>№ смены</th><th>Статус</th><th>Продавец</th><th>Касса</th><th>Открыта</th><th>Закрыта</th><th class="r">Чеков</th><th class="r">Выручка</th></tr></thead>
+            <thead><tr><th>№ смены</th><th>Статус</th><th>Продавец</th><th>Касса</th><th>Открыта</th><th>Закрыта</th><th class="r">Длительность</th><th class="r">Чеков</th><th class="r">Выручка</th><th class="c">Действия</th></tr></thead>
             <tbody>${shifts.length ? shifts.map(s => `
-              <tr>
+              <tr class="shx-row" data-shview="${esc(s.id)}">
                 <td class="strong">${esc(s.c1ShiftNumber || s.id || '—')}</td>
                 <td>${s.status === 'open' ? '<span class="badge ok"><span class="dot on"></span> Открыта</span>' : '<span class="badge off"><span class="dot offd"></span> Закрыта</span>'}</td>
                 <td>${esc(s.seller || s.openedBy || '—')}</td>
                 <td class="muted">${esc(s.kassaName || '—')}</td>
                 <td class="muted">${dushTime(s.openedAt,true)}</td>
                 <td class="muted">${s.closedAt ? dushTime(s.closedAt,true) : '—'}</td>
+                <td class="r muted tnum">${s.openedAt ? shxDur(((s.closedAt ? new Date(s.closedAt) : new Date()) - new Date(s.openedAt)) / 60000) : '—'}</td>
                 <td class="r tnum">${fmtInt(s.receipts)}</td>
                 <td class="r strong tnum">${fmtNum(s.totalSales)}</td>
+                <td class="c"><div class="shx-rowbtns"><button class="btn btn-sm" data-shview="${esc(s.id)}">Подробнее</button>${s.status === 'open' ? `<button class="btn btn-sm shx-close-btn" data-shclose="${esc(s.id)}">Закрыть</button>` : ''}</div></td>
               </tr>`).join('')
-              : `<tr><td class="tbl-empty" colspan="8">Смен за сегодня нет</td></tr>`}
+              : `<tr><td class="tbl-empty" colspan="10">Смен за сегодня нет</td></tr>`}
             </tbody>
           </table>
         </div>
-        <div class="hint">ℹ Действия со сменами (открыть/закрыть/инкассация) появятся на следующем этапе — сейчас раздел работает в режиме просмотра.</div>
+        <div class="hint">ℹ Нажмите на смену, чтобы увидеть чеки, оплаты и ориентировочное время на продажи. Открытую смену можно закрыть кнопкой «Закрыть».</div>
       </div>
     `;
+    box.querySelectorAll('[data-shclose]').forEach(b => b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const s = shifts.find(x => String(x.id) === b.getAttribute('data-shclose')); if (s) shxCloseShift(s);
+    }));
+    box.querySelectorAll('[data-shview]').forEach(b => b.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-shclose]')) return;
+      ev.stopPropagation(); shxOpen(b.getAttribute('data-shview'));
+    }));
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить смены: ' + (e.message || e));
   }
+}
+
+// ═════════ Смена: детали, оценка рабочего времени, закрытие администратором (v1.2.81) ═════════
+// Оценка времени на продажи: 6 мин на чек + 2 мин за каждую доп. позицию (не более 20 мин на чек),
+// возврат — 5 мин. Оценка чека не может быть больше, чем прошло с предыдущего чека / открытия смены.
+const SHX_SALE_BASE = 6, SHX_PER_ITEM = 2, SHX_SALE_MAX = 20, SHX_RETURN = 5;
+function shxDur(min) {
+  min = Math.max(0, Math.round(min));
+  const h = Math.floor(min / 60), m = min % 60;
+  return h ? `${h} ч ${String(m).padStart(2, '0')} мин` : `${m} мин`;
+}
+function shxCalc(shift, receipts) {
+  const t0 = new Date(shift.opened_at).getTime();
+  const t1 = shift.closed_at ? new Date(shift.closed_at).getTime() : Date.now();
+  const durMin = Math.max(0, (t1 - t0) / 60000);
+  let prev = t0, workMin = 0, maxGap = 0, maxGapFrom = null, maxGapTo = null;
+  let sales = 0, returns = 0, nSales = 0, nRet = 0, items = 0;
+  const pay = {};
+  const rows = receipts.map(r => {
+    const t = new Date(r.sold_at).getTime();
+    const gap = Math.max(0, (t - prev) / 60000);
+    if (gap > maxGap) { maxGap = gap; maxGapFrom = prev; maxGapTo = t; }
+    const isRet = r.kind === 'return' || r.op_type === 'return';
+    const n = Number(r.items_count) || 1;
+    const norm = isRet ? SHX_RETURN : Math.min(SHX_SALE_MAX, SHX_SALE_BASE + SHX_PER_ITEM * Math.max(0, n - 1));
+    const est = Math.min(norm, gap);
+    workMin += est;
+    const sum = Number(r.total) || 0;
+    if (isRet) { returns += sum; nRet++; } else { sales += sum; nSales++; items += n; }
+    (Array.isArray(r.payments) ? r.payments : []).forEach(p => {
+      const k = p.label || 'Прочее'; pay[k] = (pay[k] || 0) + (isRet ? -1 : 1) * (Number(p.amount) || 0);
+    });
+    prev = t;
+    return { ...r, isRet, gap, est };
+  });
+  const tailGap = Math.max(0, (t1 - prev) / 60000);
+  if (tailGap > maxGap) { maxGap = tailGap; maxGapFrom = prev; maxGapTo = t1; }
+  // по часам
+  const hours = [];
+  const h0 = Math.floor(t0 / 3600000), h1 = Math.floor(t1 / 3600000);
+  for (let h = h0; h <= h1 && hours.length < 30; h++) hours.push({ h, n: 0, sum: 0 });
+  rows.forEach(r => { const hh = Math.floor(new Date(r.sold_at).getTime() / 3600000); const b = hours.find(x => x.h === hh); if (b && !r.isRet) { b.n++; b.sum += Number(r.total) || 0; } });
+  return { t0, t1, durMin, workMin, idleMin: Math.max(0, durMin - workMin), busyPct: durMin ? Math.min(100, workMin / durMin * 100) : 0,
+    maxGap, maxGapFrom, maxGapTo, sales, returns, nSales, nRet, items, pay, rows, hours,
+    avg: nSales ? sales / nSales : 0, perHour: durMin >= 1 ? nSales / (durMin / 60) : 0 };
+}
+async function shxOpen(shiftId) {
+  let ov = document.getElementById('shxOverlay'); if (ov) ov.remove();
+  ov = document.createElement('div'); ov.id = 'shxOverlay'; ov.className = 'rcedit-overlay';
+  ov.addEventListener('click', (ev) => { if (ev.target === ov) ov.remove(); });
+  ov.innerHTML = `<div class="rcedit-modal shx-modal" role="dialog"><div class="rcedit-head"><h3>Смена</h3><button class="rcedit-x" data-x>✕</button></div><div class="rcedit-body"><div class="loading">⏳ Загружаю смену…</div></div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-x]').addEventListener('click', () => ov.remove());
+  let d;
+  try { d = await posApi(`?action=shift-detail&id=${encodeURIComponent(shiftId)}`, { method: 'GET' }); }
+  catch (e) { ov.querySelector('.rcedit-body').innerHTML = errBar('Не удалось загрузить смену: ' + (e.message || e)); return; }
+  const sh = d.shift || {}; const c = shxCalc(sh, d.receipts || []);
+  const isOpen = sh.status === 'open';
+  const kpi = (k, v, sub, cls) => `<div class="shx-kpi ${cls || ''}"><div class="shx-k">${k}</div><div class="shx-v">${v}</div>${sub ? `<div class="shx-s">${sub}</div>` : ''}</div>`;
+  const maxH = Math.max(1, ...c.hours.map(h => h.n));
+  const hourBars = c.hours.map(h => {
+    const lbl = String((new Date(h.h * 3600000 + 5 * 3600000)).getUTCHours()).padStart(2, '0');
+    return `<div class="shx-hb" title="${lbl}:00 — чеков: ${h.n}, ${fmtNum(h.sum)} ${CUR}"><div class="shx-hbar" style="height:${h.n ? Math.max(8, h.n / maxH * 100) : 0}%"></div><div class="shx-hn">${h.n || ''}</div><div class="shx-hl">${lbl}</div></div>`;
+  }).join('');
+  const payRows = Object.entries(c.pay).filter(([, v]) => Math.abs(v) > 0.001).sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `<div class="info-row"><span class="k">${esc(k)}</span><span class="v tnum">${money(v)}</span></div>`).join('') || '<div class="tbl-empty">Оплат нет</div>';
+  const recRows = c.rows.map(r => `<tr class="${r.isRet ? 'shx-ret' : ''}">
+      <td class="tnum">${dushTime(r.sold_at)}</td><td class="strong">${esc(r.receipt_number || '—')}</td>
+      <td>${r.isRet ? '<span class="badge off">Возврат</span>' : 'Продажа'}</td>
+      <td class="r tnum">${fmtInt(r.items_count || 0)}</td>
+      <td class="r tnum strong">${r.isRet ? '−' : ''}${fmtNum(r.total)}</td>
+      <td class="muted">${esc((Array.isArray(r.payments) ? r.payments : []).map(p => p.label).filter(Boolean).join(', ') || '—')}</td>
+      <td class="muted">${esc(r.doctor_name || '—')}</td>
+      <td class="r muted tnum">${shxDur(r.gap)}</td>
+      <td class="r tnum">≈ ${shxDur(r.est)}</td></tr>`).join('');
+  ov.querySelector('.rcedit-modal').innerHTML = `
+    <div class="rcedit-head"><h3>Смена · ${esc(sh.shop_name || sh.kassa_name || '')}</h3><button class="rcedit-x" data-x>✕</button></div>
+    <div class="rcedit-body shx-body">
+      <div class="shx-top">
+        <div>${isOpen ? '<span class="badge ok"><span class="dot on"></span> Открыта</span>' : '<span class="badge off"><span class="dot offd"></span> Закрыта</span>'}
+          <span class="shx-meta">Продавец: <b>${esc(sh.seller_name || '—')}</b> · Касса: ${esc(sh.kassa_name || '—')}</span></div>
+        <div class="shx-meta">Открыта ${dushTime(sh.opened_at, true)} · ${sh.closed_at ? 'закрыта ' + dushTime(sh.closed_at, true) : 'идёт сейчас'}</div>
+      </div>
+      <div class="shx-kpis">
+        ${kpi('Длительность смены', shxDur(c.durMin), isOpen ? 'на текущий момент' : '')}
+        ${kpi('Время на продажи', '≈ ' + shxDur(c.workMin), 'оценка по чекам', 'g')}
+        ${kpi('Занятость', Math.round(c.busyPct) + '%', 'простой ≈ ' + shxDur(c.idleMin))}
+        ${kpi('Самый долгий перерыв', shxDur(c.maxGap), c.maxGapFrom ? dushTime(new Date(c.maxGapFrom).toISOString()) + '–' + dushTime(new Date(c.maxGapTo).toISOString()) : '')}
+      </div>
+      <div class="shx-kpis">
+        ${kpi('Продажи', money(c.sales), fmtInt(c.nSales) + ' чек.')}
+        ${kpi('Возвраты', money(c.returns), fmtInt(c.nRet) + ' чек.')}
+        ${kpi('Итого выручка', money(c.sales - c.returns), '', 'g')}
+        ${kpi('Средний чек', money(c.avg), fmtNum(c.perHour) + ' чек./час · ' + fmtInt(c.items) + ' поз.')}
+      </div>
+      <div class="shx-grid">
+        <div class="card card-pad"><div class="card-h">Чеки по часам</div><div class="shx-hours">${hourBars || '<div class="tbl-empty">—</div>'}</div></div>
+        <div class="card card-pad"><div class="card-h">Оплаты</div>${payRows}</div>
+      </div>
+      <div class="card card-pad" style="margin-top:14px"><div class="card-h">Чеки смены (${fmtInt(c.rows.length)})</div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Время</th><th>№ чека</th><th>Тип</th><th class="r">Поз.</th><th class="r">Сумма</th><th>Оплата</th><th>Врач</th><th class="r">После пред.</th><th class="r">На чек</th></tr></thead>
+        <tbody>${recRows || '<tr><td colspan="9" class="tbl-empty">Чеков нет</td></tr>'}</tbody></table></div>
+      </div>
+      <div class="hint">ℹ Время на продажи — ориентировочная оценка: ${SHX_SALE_BASE} мин на чек + ${SHX_PER_ITEM} мин за каждую доп. позицию (до ${SHX_SALE_MAX} мин), возврат — ${SHX_RETURN} мин. Если чеки шли подряд, на чек засчитывается не больше, чем прошло с предыдущего.</div>
+    </div>
+    <div class="rcedit-foot" style="display:flex;justify-content:flex-end;gap:10px;padding:14px 22px;border-top:1px solid var(--line)">
+      <button class="btn" data-x2>Закрыть окно</button>
+      ${isOpen ? '<button class="btn shx-close-btn" data-close>Закрыть смену</button>' : ''}
+    </div>`;
+  ov.querySelector('[data-x]').addEventListener('click', () => ov.remove());
+  ov.querySelector('[data-x2]').addEventListener('click', () => ov.remove());
+  const cb = ov.querySelector('[data-close]');
+  if (cb) cb.addEventListener('click', async () => { if (await shxCloseShift(sh)) ov.remove(); });
+}
+async function shxCloseShift(sh) {
+  const who = (sh.seller_name || sh.seller || '—'), where = (sh.shop_name || sh.shopName || sh.kassa_name || sh.kassaName || '');
+  if (!confirm(`Закрыть смену?\n\n${where}\nПродавец: ${who}\n\nКасса продавца получит сообщение, что смена закрыта администратором, и для продаж нужно будет открыть новую смену.`)) return false;
+  try {
+    await posApi('?action=close-shift', { method: 'POST', body: JSON.stringify({ shiftId: sh.id }) });
+    try { posApi('?action=close-shift-1c', { method: 'POST', body: JSON.stringify({ shiftId: sh.id }) }).catch(() => {}); } catch (_) {}
+    delete state.cache['shifts'];
+    toastMsg('Смена закрыта');
+    renderShift(true);
+    return true;
+  } catch (e) { alert('Не удалось закрыть смену: ' + (e.message || e)); return false; }
+}
+function toastMsg(t) {
+  if (typeof showToast === 'function') { try { showToast(t); return; } catch (_) {} }
+  const el = document.createElement('div'); el.className = 'shx-toast'; el.textContent = t; document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
 }
 
 // ══════════════════════════════════════════════════════════

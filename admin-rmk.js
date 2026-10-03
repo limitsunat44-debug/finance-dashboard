@@ -9813,6 +9813,13 @@ function recvFootSVG() {
 
 // Печать этикеток 58×40мм с настоящим EAN-13 (JsBarcode)
 // items: [{barcode, size, productName, salePrice}]  — по одной этикетке на экземпляр
+// На этикетке — только размер: «цвет:черный размер:40» → «40», «Размер: 35» → «35».
+function lblSizeOnly(v) {
+  const raw = String(v || '');
+  const m = raw.match(/разм(?:ер)?\.?\s*[:\-–—]\s*([^\s,;]+)/i);
+  if (m) return m[1].trim();
+  return raw.replace(/цвет\s*:\s*\S+\s*/ig, '').trim();
+}
 function recvBuildLabelsHTML(items) {
   const cards = items.map((b, i) => `
     <div class="lbl">
@@ -9821,7 +9828,7 @@ function recvBuildLabelsHTML(items) {
       <div class="lbl-mid">
         <div class="lbl-col">
           <div class="lbl-tag">РАЗМЕР</div>
-          <div class="lbl-size">${esc(String(b.size || ''))}</div>
+          <div class="lbl-size">${esc(lblSizeOnly(b.size))}</div>
         </div>
         <div class="lbl-vsep"></div>
         <div class="lbl-col">

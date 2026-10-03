@@ -9901,8 +9901,13 @@ function csFmtPrice(n) {
 // Убрать дублирующий префикс «Размер:» из значения характеристики
 // (в 1С характеристика заведена как «Размер: 35» — на этикетке уже есть бейдж «РАЗМЕР»).
 function csCleanSize(s) {
-    return String(s || '')
+    const raw = String(s || '');
+    // «цвет:черный размер:40» → «40»: если есть «размер:», берём только значение после него
+    const m = raw.match(/разм(?:ер)?\.?\s*[:\-–—]\s*([^\s,;]+)/i);
+    if (m) return m[1].trim();
+    return raw
         .replace(/^\s*разм(?:ер)?\.?\s*[:\-–—]?\s*/i, '')
+        .replace(/цвет\s*:\s*\S+\s*/ig, '')
         .trim();
 }
 function csBuildLabelsHTML58x40(items) {

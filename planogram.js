@@ -436,6 +436,7 @@ function bind3dPointer() {
   el.addEventListener('pointerdown', (e) => {
     down = { x: e.clientX, y: e.clientY };
     if (!S.edit) return;
+    if (e.button && e.button !== 0) return;
     setNdc(e);
     const hit = ray.intersectObjects(G.pick, false)[0];
     if (hit && hit.object.userData.fid) {
@@ -443,9 +444,11 @@ function bind3dPointer() {
       const p = new THREE.Vector3(); ray.ray.intersectPlane(plane, p);
       G.drag = { fx, ox: fx.x - p.x, oy: fx.y - p.z, moved: false };
       G.ctl.enabled = false;
+      e.stopImmediatePropagation();
       el.setPointerCapture(e.pointerId);
+      el.style.cursor = 'grabbing';
     }
-  });
+  }, { capture: true });
   el.addEventListener('pointermove', (e) => {
     if (!G.drag) return;
     setNdc(e);
@@ -459,7 +462,7 @@ function bind3dPointer() {
   el.addEventListener('pointerup', (e) => {
     const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5;
     if (G.drag) {
-      const d = G.drag; G.drag = null; G.ctl.enabled = true;
+      const d = G.drag; G.drag = null; G.ctl.enabled = true; el.style.cursor = '';
       if (d.moved) { S.sel = { k: 'fx', fid: d.fx.id }; changed(true); return; }
     }
     if (moved) return;
@@ -519,7 +522,7 @@ function svgPlan(host, opts) {
     const t = TYPES[fx.type] || TYPES.wall;
     const sel = S.sel && S.sel.fid === fx.id;
     const fill = t.shelves ? (fx.type === 'rack' ? '#cbd5e1' : '#ffffff') : (fx.type === 'plant' ? '#bbf7d0' : fx.type === 'bench' ? '#cbd5e1' : fx.type === 'cash' ? '#dbeafe' : '#e0e7ff');
-    h += `<g data-fid="${fx.id}" transform="translate(${fx.x} ${fx.y}) rotate(${fx.rot})" style="cursor:${S.edit ? 'move' : 'pointer'}">`;
+    h += `<g data-fid="${fx.id}" transform="translate(${fx.x} ${fx.y}) rotate(${fx.rot})" style="cursor:move">`;
     if (fx.type === 'plant') h += `<circle r="${fx.w / 2}" fill="${fill}" stroke="#16a34a" stroke-width="0.04"/>`;
     else h += `<rect x="${-fx.w / 2}" y="${-fx.d / 2}" width="${fx.w}" height="${fx.d}" rx="0.04" fill="${fill}" stroke="${sel ? '#2563eb' : '#64748b'}" stroke-width="${sel ? 0.07 : 0.03}"/>`;
     if (t.shelves && fx.shelves && fx.shelves.length) {
@@ -539,7 +542,7 @@ function svgPlan(host, opts) {
       const flip = rotBack > 90 && rotBack < 270 ? 180 : 0;
       h += `<text x="0" y="${t.shelves ? -0.02 : 0.05}" font-size="${fs}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-weight="700" transform="rotate(${flip})" pointer-events="none">${esc(label)}</text>`;
     }
-    if (sel && S.edit && !opts.mini) {
+    if (sel && !opts.mini) {
       h += `<line x1="0" y1="${-fx.d / 2}" x2="0" y2="${-fx.d / 2 - 0.45}" stroke="#2563eb" stroke-width="0.03"/><circle data-rot="${fx.id}" cx="0" cy="${-fx.d / 2 - 0.5}" r="0.13" fill="#fff" stroke="#2563eb" stroke-width="0.05" style="cursor:grab"/>`;
     }
     h += `</g>`;
@@ -582,9 +585,11 @@ function bind2d(svg, pts) {
     const g = e.target.closest('[data-fid]');
     if (g) {
       const fx = fxById(g.dataset.fid);
-      if (!S.sel || S.sel.fid !== fx.id || S.sel.k !== 'fx') { S.sel = { k: 'fx', fid: fx.id }; }
-      if (S.edit) { drag = { k: 'fx', fx, ox: fx.x - x, oy: fx.y - y, moved: false }; svg.setPointerCapture(e.pointerId); }
-      render2d(); renderPanel(); hint();
+      const was = S.sel && S.sel.k === 'fx' && S.sel.fid === fx.id;
+      S.sel = { k: 'fx', fid: fx.id };
+      drag = { k: 'fx', fx, ox: fx.x - x, oy: fx.y - y, moved: false, sx: e.clientX, sy: e.clientY, was };
+      svg.setPointerCapture(e.pointerId);
+      e.preventDefault();
       return;
     }
     select(null);
@@ -593,6 +598,7 @@ function bind2d(svg, pts) {
     if (!drag) return;
     const [x, y] = toPt(e);
     if (drag.k === 'fx') {
+      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) return;
       drag.fx.x = Math.round((x + drag.ox) * 20) / 20; drag.fx.y = Math.round((y + drag.oy) * 20) / 20; drag.moved = true;
       const g = svg.querySelector(`[data-fid="${drag.fx.id}"]`); if (g) g.setAttribute('transform', `translate(${drag.fx.x} ${drag.fx.y}) rotate(${drag.fx.rot})`);
     } else if (drag.k === 'rot') {
@@ -604,10 +610,14 @@ function bind2d(svg, pts) {
       render2dKeep(svg);
     }
   });
-  svg.addEventListener('pointerup', () => {
-    if (drag && drag.moved) { drag = null; changed(true); return; }
-    drag = null;
-  });
+  const end = () => {
+    const d = drag; drag = null;
+    if (!d) return;
+    if (d.moved) { changed(true); return; }
+    if (d.k === 'fx') renderAll(true); // просто клик — выбрать шкаф
+  };
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
 }
 let rafKeep = 0;
 function render2dKeep() { cancelAnimationFrame(rafKeep); rafKeep = requestAnimationFrame(() => render2d()); }
@@ -945,7 +955,8 @@ function hint() {
   const el = $('pgHint');
   let t = '';
   if (S.shapeEdit) t = 'Форма помещения: тяните синие углы, «+» на стене — добавить угол';
-  else if (S.edit) t = S.view === '3d' && S.zone === 'hall' ? 'Перетаскивайте шкафы мышью/пальцем · вращение камеры — по пустому месту' : 'Перетаскивайте шкафы · синий кружок — поворот';
+  else if (S.view === '3d' && S.zone === 'hall') t = S.edit ? 'Тяните шкаф мышью/пальцем, чтобы переместить · камера — по пустому месту' : 'Чтобы двигать шкафы в 3D — включите «Редактирование» (или перейдите в 2D план)';
+  else t = 'Тяните шкаф, чтобы переместить · синий кружок — поворот';
   el.textContent = t; el.style.display = t ? 'block' : 'none';
 }
 function renderAll(rebuild3d) {

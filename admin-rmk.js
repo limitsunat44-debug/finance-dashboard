@@ -4978,7 +4978,7 @@ function incDetailHTML(r, i) {
       `Смена закрыта без квитанции инкассации. Чеков: ${fmtInt(ns.receipts || 0)}, выручка: ${money(ns.net || 0)} Посмотрите разбивку в «Отчёты продаж за день».`}</div>`;
   }
   const wl = (x.wallets || []).map(w => `<tr>
-      <td>👛 ${esc(w.label)}${w.refundOut ? `<div class="muted" style="font-size:12px">возвраты с кошелька ${fmtNum(w.refundOut)}</div>` : ''}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
+      <td>👛 ${esc(w.label)}${w.returns ? `<div class="muted" style="font-size:12px">продажи ${fmtNum(w.sales || 0)} − возвраты ${fmtNum(w.returns)}${!w.expected ? ' · переводить нечего' : ''}</div>` : ''}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
       <td>${esc(w.txn || '—')}</td>
       <td>${w.photoUrl ? `<a href="${esc(w.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(w.photoUrl)}" alt="скриншот" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb"></a>` : '<span class="muted">нет</span>'}</td>
     </tr>`).join('');

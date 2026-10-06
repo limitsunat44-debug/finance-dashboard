@@ -12545,22 +12545,29 @@ async function posIncassFlow(shift) {
       <div class="inc-b">
         <div class="inc-sec">
           <h4><span class="inc-t">💵 Наличные</span> <span class="inc-amt">в кассе: ${posIncFmt(exp.cash)}</span></h4>
-          ${(Number(exp.openingFloat) || Number(exp.cashSales) < 0) ? `<div class="inc-calc inc-note">Размен с прошлой смены ${posIncFmt(exp.openingFloat)} ${Number(exp.cashSales) < 0 ? '− возвраты наличными ' + posIncFmt(-exp.cashSales) : '+ наличные за смену ' + posIncFmt(exp.cashSales)}</div>` : ''}
+          ${(Number(exp.openingFloat) || Number(exp.cashReturned)) ? `<div class="inc-calc inc-note">${Number(exp.openingFloat) ? 'Размен с прошлой смены ' + posIncFmt(exp.openingFloat) + ' + ' : ''}продажи ${posIncFmt(exp.cashSold)}${Number(exp.cashReturned) ? ' − возвраты ' + posIncFmt(exp.cashReturned) : ''}</div>` : ''}
           <div class="inc-row"><label>Пересчитано наличных, с.</label><input id="incCash" inputmode="decimal" placeholder="Пересчитайте и введите сумму" value="${prev ? posEsc(String(prev.cash.counted)) : ''}"></div>
           <div class="inc-row"><label>Оставлено в кассе на размен, с.</label><input id="incFloat" inputmode="decimal" value="${prev ? posEsc(String(prev.cash.floatLeft || 0)) : '0'}"></div>
           <div class="inc-calc"><span>В пакет курьеру:</span><b id="incBag">—</b></div>
           <div class="inc-row"><label>Номер пакета / конверта</label><input id="incBagNo" placeholder="например, 0457" value="${prev ? posEsc(prev.cash.bagNo || '') : ''}"></div>
           <div class="inc-diff" id="incCashDiff" style="display:none"></div>
         </div>
-        ${wallets.map(w => `<div class="inc-sec" data-w="${posEsc(w.id)}">
-          <h4><span class="inc-t">👛 ${posEsc(w.label)}</span> <span class="inc-amt">к переводу: ${posIncFmt(w.amount)}</span></h4>
-          ${w.refundOut ? `<div class="inc-calc inc-note">Возвратов с кошелька больше, чем продаж: ${posIncFmt(w.refundOut)} — переводить нечего</div>` : ''}
-          <div class="inc-row"><label>Переведено на общий кошелёк, с.</label><input class="incSent" inputmode="decimal" value="${posEsc(String(pv(w.id, 'sent') != null ? pv(w.id, 'sent') : w.amount))}"></div>
+        ${wallets.map(w => {
+          const ret = Number(w.returns) || 0, sold = Number(w.sales) || 0, need = Number(w.amount) || 0;
+          const brk = ret > 0 ? `<div class="inc-calc inc-note">Продажи ${posIncFmt(sold)} − возвраты ${posIncFmt(ret)}</div>` : '';
+          if (need <= 0) return `<div class="inc-sec" data-w="${posEsc(w.id)}" data-none="1">
+            <h4><span class="inc-t">👛 ${posEsc(w.label)}</span> <span class="inc-amt">переводить нечего</span></h4>
+            <div class="inc-calc inc-note">↩ Возврат клиенту с кошелька: ${posIncFmt(ret)}${sold ? ' (продажи за смену ' + posIncFmt(sold) + ')' : ' — по чеку другого дня'}. Отметка сохранится в квитанции.</div>
+          </div>`;
+          return `<div class="inc-sec" data-w="${posEsc(w.id)}">
+          <h4><span class="inc-t">👛 ${posEsc(w.label)}</span> <span class="inc-amt">к переводу: ${posIncFmt(need)}</span></h4>
+          ${brk}
+          <div class="inc-row"><label>Переведено на общий кошелёк, с.</label><input class="incSent" inputmode="decimal" value="${posEsc(String(pv(w.id, 'sent') != null ? pv(w.id, 'sent') : need))}"></div>
           <div class="inc-row"><label>Номер операции (если есть)</label><input class="incTxn" value="${posEsc(pv(w.id, 'txn') || '')}"></div>
           <div class="inc-photo"><label class="inc-pbtn">📷 Скриншот перевода<input type="file" accept="image/*" class="incFile" style="display:none"></label>
             <img class="incImg" style="${photos[w.id] ? '' : 'display:none'}" src="${posEsc(photos[w.id])}" alt="скриншот"><span class="inc-pst">${photos[w.id] ? 'прикреплён' : ''}</span></div>
           <div class="inc-diff incWDiff" style="display:none"></div>
-        </div>`).join('')}
+        </div>`; }).join('')}
         ${bank.length ? `<div class="inc-sec inc-info">🏦 Поступает на счёт банка, переводить не нужно:<br>${bank.map(b => `${posEsc(b.label)}: <b>${posIncFmt(b.amount)}</b>`).join(' · ')}</div>` : ''}
         <div class="inc-row"><label id="incCommentLbl">Комментарий</label><textarea id="incComment" rows="2" placeholder="Причина расхождения, если есть">${prev ? posEsc(prev.comment || '') : ''}</textarea></div>
         <div class="inc-err" id="incErr"></div>
@@ -12584,7 +12591,7 @@ async function posIncassFlow(shift) {
         const cashFilled = String($i('incCash').value).trim() !== '';
         $i('incBag').textContent = (cashFilled && Number.isFinite(c) && Number.isFinite(f)) ? posIncFmt(c - f) : '—';
         let anyDiff = cashFilled ? diffBox($i('incCashDiff'), c - (Number(exp.cash) || 0), 'Наличные сходятся') : (diffBox($i('incCashDiff'), NaN), false);
-        ov.querySelectorAll('[data-w]').forEach(sec => {
+        ov.querySelectorAll('[data-w]:not([data-none])').forEach(sec => {
             const w = wallets.find(x => x.id === sec.dataset.w);
             const s = posIncNum(sec.querySelector('.incSent').value || '0');
             if (diffBox(sec.querySelector('.incWDiff'), s - (Number(w.amount) || 0), 'Перевод сходится')) anyDiff = true;
@@ -12595,7 +12602,7 @@ async function posIncassFlow(shift) {
     ov.querySelectorAll('input,textarea').forEach(el => el.addEventListener('input', recalc));
     recalc();
 
-    ov.querySelectorAll('[data-w]').forEach(sec => {
+    ov.querySelectorAll('[data-w]:not([data-none])').forEach(sec => {
         const id = sec.dataset.w;
         sec.querySelector('.incFile').addEventListener('change', async (ev) => {
             const file = ev.target.files && ev.target.files[0];
@@ -12628,7 +12635,7 @@ async function posIncassFlow(shift) {
             if (f > c) return showErr('Размен не может быть больше пересчитанных наличных.');
             if (c - f > 0 && !$i('incBagNo').value.trim()) return showErr('Укажите номер пакета (конверта) с наличными.');
             const ws = [];
-            for (const sec of ov.querySelectorAll('[data-w]')) {
+            for (const sec of ov.querySelectorAll('[data-w]:not([data-none])')) {
                 const w = wallets.find(x => x.id === sec.dataset.w);
                 const sent = posIncNum(sec.querySelector('.incSent').value || '0');
                 const txn = sec.querySelector('.incTxn').value.trim();

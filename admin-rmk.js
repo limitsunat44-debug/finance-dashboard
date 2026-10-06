@@ -4919,12 +4919,14 @@ async function renderIncass(force) {
     const missing = rows.filter(r => !r.incass && r.shiftStatus !== 'open' && ((r.noIncassSales || {}).receipts || (r.noIncassSales || {}).net));
     const diffs = withInc.filter(r => r.incass.status === 'diff');
     const bagSum = withInc.reduce((a, r) => a + (Number(r.incass.cash && r.incass.cash.bagAmount) || 0), 0);
-    const walSum = withInc.reduce((a, r) => a + (r.incass.wallets || []).reduce((x, w) => x + (Number(w.sent) || 0), 0), 0);
+    const walBy = (id) => withInc.reduce((a, r) => a + (r.incass.wallets || []).filter(w => w.id === id).reduce((x, w) => x + (Number(w.sent) || 0), 0), 0);
+    const dcSum = walBy('dcwlt'), alifSum = walBy('alifwlt');
     const diffSum = withInc.reduce((a, r) => a + (Number(r.incass.totalDiff) || 0), 0);
     box.innerHTML = `
       <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
         ${kpi('💵','Наличные в пакетах', money(bagSum),'g','за '+per)}
-        ${kpi('👛','Переведено с кошельков', money(walSum),'blue','DC / Alif кошелёк')}
+        ${kpi('👛','DC кошелёк', money(dcSum),'blue','переведено на общий кошелёк')}
+        ${kpi('👛','Alif кошелёк', money(alifSum),'blue','переведено на общий кошелёк')}
         ${kpi('⚠','Расхождения', money(diffSum), diffs.length ? 'r' : 'gray', fmtInt(diffs.length)+' смен')}
         ${kpi('🧾','Квитанций', fmtInt(withInc.length)+' / '+fmtInt(rows.length), missing.length ? 'r' : 'gray', missing.length ? ('без квитанции: '+fmtInt(missing.length)) : 'все смены сданы')}
       </div>
@@ -4936,7 +4938,7 @@ async function renderIncass(force) {
         <div class="card-h-row"><h3>Журнал инкассаций</h3><span class="muted">${fmtInt(rows.length)} смен</span></div>
         ${rows.length ? `<div class="tbl-wrap"><table class="tbl sr-tbl">
           <thead><tr><th style="width:26px"></th><th>Дата</th><th>Касса / Магазин</th><th>Продавец</th><th>Сдано</th>
-            <th class="r">Наличные в кассе</th><th class="r">Пересчитано</th><th>Пакет</th><th class="r">Кошельки</th><th class="r">Расхождение</th><th>Статус</th></tr></thead>
+            <th class="r">Наличные в кассе</th><th class="r">Пересчитано</th><th>Пакет</th><th class="r">DC кошелёк</th><th class="r">Alif кошелёк</th><th class="r">Расхождение</th><th>Статус</th></tr></thead>
           <tbody>${rows.map((r, i) => incRowHTML(r, i)).join('')}</tbody>
         </table></div>` : `<div class="tbl-empty">Нет смен за период</div>`}
       </div>`;
@@ -4953,8 +4955,13 @@ async function renderIncass(force) {
 }
 function incRowHTML(r, i) {
   const x = r.incass;
-  const wSent = x ? (x.wallets || []).reduce((a, w) => a + (Number(w.sent) || 0), 0) : 0;
-  const wExp = x ? (x.wallets || []).reduce((a, w) => a + (Number(w.expected) || 0), 0) : 0;
+  const wCell = (id) => {
+    if (!x) return '—';
+    const w = (x.wallets || []).find(v => v.id === id);
+    if (!w) return '<span class="muted">—</span>';
+    if (!(Number(w.expected) > 0)) return `<span class="muted">0</span>${w.returns ? `<div class="muted" style="font-size:12px">возврат ${fmtNum(w.returns)}</div>` : ''}`;
+    return `${fmtNum(w.sent)}<div class="muted" style="font-size:12px">из ${fmtNum(w.expected)}</div>`;
+  };
   const ns = r.noIncassSales || {};
   return `<tr class="sr-row inc-row" data-idx="${i}">
     <td class="c"><span class="caret">›</span></td>
@@ -4965,11 +4972,12 @@ function incRowHTML(r, i) {
     <td class="r">${x ? money(x.cash.expected) : (ns.receipts ? '<span class="muted">выручка ' + fmtNum(ns.net) + '</span>' : '—')}</td>
     <td class="r strong">${x ? money(x.cash.counted) : '—'}</td>
     <td>${x ? (x.cash.bagAmount > 0 ? `№ <b>${esc(x.cash.bagNo || '—')}</b> · ${fmtNum(x.cash.bagAmount)}` : '<span class="muted">—</span>') + (x.cash.floatLeft > 0 ? `<div class="muted" style="font-size:12px">размен ${fmtNum(x.cash.floatLeft)}</div>` : '') : '—'}</td>
-    <td class="r">${x ? (x.wallets.length ? `${fmtNum(wSent)}<div class="muted" style="font-size:12px">из ${fmtNum(wExp)}</div>` : '<span class="muted">—</span>') : '—'}</td>
+    <td class="r">${wCell('dcwlt')}</td>
+    <td class="r">${wCell('alifwlt')}</td>
     <td class="r">${x ? incDiffHTML(x.totalDiff) : '—'}</td>
     <td>${incStatusPill(r)}</td>
   </tr>
-  <tr class="sr-det" id="incDet-${i}" style="display:none"><td colspan="11"><div id="incDetBody-${i}"></div></td></tr>`;
+  <tr class="sr-det" id="incDet-${i}" style="display:none"><td colspan="12"><div id="incDetBody-${i}"></div></td></tr>`;
 }
 function incToggle(tr) {
   const i = tr.dataset.idx;

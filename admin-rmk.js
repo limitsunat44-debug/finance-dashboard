@@ -4932,7 +4932,7 @@ async function renderIncass(force) {
         <div class="card-h-row"><h3>Журнал инкассаций</h3><span class="muted">${fmtInt(rows.length)} смен</span></div>
         ${rows.length ? `<div class="tbl-wrap"><table class="tbl sr-tbl">
           <thead><tr><th style="width:26px"></th><th>Дата</th><th>Касса / Магазин</th><th>Продавец</th><th>Сдано</th>
-            <th class="r">Наличные по кассе</th><th class="r">Пересчитано</th><th>Пакет</th><th class="r">Кошельки</th><th class="r">Расхождение</th><th>Статус</th></tr></thead>
+            <th class="r">Наличные в кассе</th><th class="r">Пересчитано</th><th>Пакет</th><th class="r">Кошельки</th><th class="r">Расхождение</th><th>Статус</th></tr></thead>
           <tbody>${rows.map((r, i) => incRowHTML(r, i)).join('')}</tbody>
         </table></div>` : `<div class="tbl-empty">Нет смен за период</div>`}
       </div>`;
@@ -4978,7 +4978,7 @@ function incDetailHTML(r, i) {
       `Смена закрыта без квитанции инкассации. Чеков: ${fmtInt(ns.receipts || 0)}, выручка: ${money(ns.net || 0)} Посмотрите разбивку в «Отчёты продаж за день».`}</div>`;
   }
   const wl = (x.wallets || []).map(w => `<tr>
-      <td>👛 ${esc(w.label)}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
+      <td>👛 ${esc(w.label)}${w.refundOut ? `<div class="muted" style="font-size:12px">возвраты с кошелька ${fmtNum(w.refundOut)}</div>` : ''}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
       <td>${esc(w.txn || '—')}</td>
       <td>${w.photoUrl ? `<a href="${esc(w.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(w.photoUrl)}" alt="скриншот" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb"></a>` : '<span class="muted">нет</span>'}</td>
     </tr>`).join('');
@@ -4988,7 +4988,7 @@ function incDetailHTML(r, i) {
     <table class="tbl" style="margin-bottom:10px">
       <thead><tr><th>Способ</th><th class="r">По кассе</th><th class="r">Сдано</th><th class="r">Разница</th><th>Номер операции / пакета</th><th>Скриншот</th></tr></thead>
       <tbody>
-        <tr><td>💵 Наличные${x.cash.floatLeft > 0 ? ` <span class="muted">(размен ${fmtNum(x.cash.floatLeft)})</span>` : ''}</td><td class="r">${money(x.cash.expected)}</td><td class="r strong">${money(x.cash.counted)}</td><td class="r">${incDiffHTML(x.cash.diff)}</td>
+        <tr><td>💵 Наличные${x.cash.openingFloat ? `<div class="muted" style="font-size:12px">размен на начало ${fmtNum(x.cash.openingFloat)} ${Number(x.cash.cashSales) < 0 ? '− возвраты' : '+ за смену'} ${fmtNum(Math.abs(Number(x.cash.cashSales) || 0))}</div>` : ''}${x.cash.floatLeft > 0 ? `<div class="muted" style="font-size:12px">оставлено на размен ${fmtNum(x.cash.floatLeft)}</div>` : ''}</td><td class="r">${money(x.cash.expected)}</td><td class="r strong">${money(x.cash.counted)}</td><td class="r">${incDiffHTML(x.cash.diff)}</td>
           <td>${x.cash.bagAmount > 0 ? `пакет № <b>${esc(x.cash.bagNo || '—')}</b> — ${money(x.cash.bagAmount)}` : '—'}</td><td></td></tr>
         ${wl}
       </tbody>

@@ -12496,6 +12496,7 @@ function posIncStyle() {
 .inc-row label{font-size:12.5px;color:#334155 !important;font-weight:600}
 .inc-m input,.inc-m textarea{color:#0f172a !important;background:#fff !important}
 .inc-calc,.inc-calc b{color:#0f172a !important}
+.inc-note{font-size:12.5px;color:#64748b !important;padding-top:0}
 .inc-row input,.inc-row textarea{font-size:16px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;width:100%;box-sizing:border-box;font-family:inherit}
 .inc-row input:focus,.inc-row textarea:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.15)}
 .inc-calc{display:flex;justify-content:space-between;font-size:14px;padding:6px 2px}
@@ -12543,7 +12544,8 @@ async function posIncassFlow(shift) {
         Чеков: ${Number(exp.receipts) || 0} · Выручка: ${posIncFmt((exp.sales || 0) - (exp.returns || 0))}</div></div>
       <div class="inc-b">
         <div class="inc-sec">
-          <h4><span class="inc-t">💵 Наличные</span> <span class="inc-amt">по кассе: ${posIncFmt(exp.cash)}</span></h4>
+          <h4><span class="inc-t">💵 Наличные</span> <span class="inc-amt">в кассе: ${posIncFmt(exp.cash)}</span></h4>
+          ${(Number(exp.openingFloat) || Number(exp.cashSales) < 0) ? `<div class="inc-calc inc-note">Размен с прошлой смены ${posIncFmt(exp.openingFloat)} ${Number(exp.cashSales) < 0 ? '− возвраты наличными ' + posIncFmt(-exp.cashSales) : '+ наличные за смену ' + posIncFmt(exp.cashSales)}</div>` : ''}
           <div class="inc-row"><label>Пересчитано наличных, с.</label><input id="incCash" inputmode="decimal" placeholder="Пересчитайте и введите сумму" value="${prev ? posEsc(String(prev.cash.counted)) : ''}"></div>
           <div class="inc-row"><label>Оставлено в кассе на размен, с.</label><input id="incFloat" inputmode="decimal" value="${prev ? posEsc(String(prev.cash.floatLeft || 0)) : '0'}"></div>
           <div class="inc-calc"><span>В пакет курьеру:</span><b id="incBag">—</b></div>
@@ -12552,6 +12554,7 @@ async function posIncassFlow(shift) {
         </div>
         ${wallets.map(w => `<div class="inc-sec" data-w="${posEsc(w.id)}">
           <h4><span class="inc-t">👛 ${posEsc(w.label)}</span> <span class="inc-amt">к переводу: ${posIncFmt(w.amount)}</span></h4>
+          ${w.refundOut ? `<div class="inc-calc inc-note">Возвратов с кошелька больше, чем продаж: ${posIncFmt(w.refundOut)} — переводить нечего</div>` : ''}
           <div class="inc-row"><label>Переведено на общий кошелёк, с.</label><input class="incSent" inputmode="decimal" value="${posEsc(String(pv(w.id, 'sent') != null ? pv(w.id, 'sent') : w.amount))}"></div>
           <div class="inc-row"><label>Номер операции (если есть)</label><input class="incTxn" value="${posEsc(pv(w.id, 'txn') || '')}"></div>
           <div class="inc-photo"><label class="inc-pbtn">📷 Скриншот перевода<input type="file" accept="image/*" class="incFile" style="display:none"></label>

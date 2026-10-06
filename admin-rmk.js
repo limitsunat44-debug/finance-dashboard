@@ -4928,6 +4928,10 @@ async function renderIncass(force) {
         ${kpi('⚠','Расхождения', money(diffSum), diffs.length ? 'r' : 'gray', fmtInt(diffs.length)+' смен')}
         ${kpi('🧾','Квитанций', fmtInt(withInc.length)+' / '+fmtInt(rows.length), missing.length ? 'r' : 'gray', missing.length ? ('без квитанции: '+fmtInt(missing.length)) : 'все смены сданы')}
       </div>
+      <div class="card card-pad" style="margin-bottom:14px">
+        <div class="card-h-row"><h3>Номера пакетов продавцов</h3><span class="muted">закрепляются автоматически, новым — следующий номер</span></div>
+        <div id="incBags" style="display:flex;flex-wrap:wrap;gap:8px"><span class="muted">⏳</span></div>
+      </div>
       <div class="card card-pad">
         <div class="card-h-row"><h3>Журнал инкассаций</h3><span class="muted">${fmtInt(rows.length)} смен</span></div>
         ${rows.length ? `<div class="tbl-wrap"><table class="tbl sr-tbl">
@@ -4937,6 +4941,11 @@ async function renderIncass(force) {
         </table></div>` : `<div class="tbl-empty">Нет смен за период</div>`}
       </div>`;
     box.querySelectorAll('tr.inc-row').forEach(tr => tr.addEventListener('click', () => incToggle(tr)));
+    posApi('?action=incass-bags', { method: 'GET' }).then(b => {
+      const el = $('incBags'); if (!el) return;
+      const list = b.bags || [];
+      el.innerHTML = list.length ? list.map(x => `<span class="sr-bd-chip">№ <b>${esc(x.no)}</b> — ${esc(x.name || '')}</span>`).join('') : '<span class="muted">—</span>';
+    }).catch(() => {});
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить инкассации: ' + (e.message || e));

@@ -12497,6 +12497,8 @@ function posIncStyle() {
 .inc-m input,.inc-m textarea{color:#0f172a !important;background:#fff !important}
 .inc-calc,.inc-calc b{color:#0f172a !important}
 .inc-note{font-size:12.5px;color:#64748b !important;padding-top:0}
+.inc-bag{background:#f0fdfa;border:1px solid #99f6e4;border-radius:10px;padding:10px 12px;margin-bottom:8px;color:#0f172a !important;font-size:13px}
+.inc-bag b{display:block;font-size:26px;font-weight:800;color:#0f766e !important;letter-spacing:1px;margin:2px 0}
 .inc-row input,.inc-row textarea{font-size:16px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;width:100%;box-sizing:border-box;font-family:inherit}
 .inc-row input:focus,.inc-row textarea:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.15)}
 .inc-calc{display:flex;justify-content:space-between;font-size:14px;padding:6px 2px}
@@ -12549,7 +12551,10 @@ async function posIncassFlow(shift) {
           <div class="inc-row"><label>Пересчитано наличных, с.</label><input id="incCash" inputmode="decimal" placeholder="Пересчитайте и введите сумму" value="${prev ? posEsc(String(prev.cash.counted)) : ''}"></div>
           <div class="inc-row"><label>Оставлено в кассе на размен, с.</label><input id="incFloat" inputmode="decimal" value="${prev ? posEsc(String(prev.cash.floatLeft || 0)) : '0'}"></div>
           <div class="inc-calc"><span>В пакет курьеру:</span><b id="incBag">—</b></div>
-          <div class="inc-row"><label>Номер пакета / конверта</label><input id="incBagNo" placeholder="например, 0457" value="${prev ? posEsc(prev.cash.bagNo || '') : ''}"></div>
+          ${exp.bagNo ? `<div class="inc-bag"><div>Номер пакета / конверта</div><b>№ ${posEsc(exp.bagNo)}</b>
+            <div class="inc-note">Закреплён за продавцом. Напишите на конверте: № ${posEsc(exp.bagNo)} · ${new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}</div>
+            <input id="incBagNo" type="hidden" value="${posEsc(exp.bagNo)}"></div>`
+          : `<div class="inc-row"><label>Номер пакета / конверта</label><input id="incBagNo" placeholder="например, 0457" value="${prev ? posEsc(prev.cash.bagNo || '') : ''}"></div>`}
           <div class="inc-diff" id="incCashDiff" style="display:none"></div>
         </div>
         ${wallets.map(w => {

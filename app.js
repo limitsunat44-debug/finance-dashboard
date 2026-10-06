@@ -12484,14 +12484,18 @@ function posIncStyle() {
 .inc-ov{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10050;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:16px 10px}
 .inc-m{background:#fff;border-radius:16px;width:100%;max-width:520px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-size:15px;color:#0f172a}
 .inc-h{padding:16px 18px 10px;border-bottom:1px solid #e5e7eb}
-.inc-h h3{margin:0;font-size:19px}
+.inc-h h3{margin:0;font-size:19px;font-weight:800;color:#0f172a !important}
 .inc-h .inc-sub{color:#64748b;font-size:13px;margin-top:4px}
 .inc-b{padding:12px 18px}
 .inc-sec{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-bottom:12px}
-.inc-sec h4{margin:0 0 8px;font-size:15px;display:flex;justify-content:space-between;gap:8px}
-.inc-sec h4 span{color:#0f766e;white-space:nowrap}
+.inc-m h3,.inc-m h4,.inc-m b,.inc-m label{-webkit-text-fill-color:currentColor;text-shadow:none;background:none}
+.inc-sec h4{margin:0 0 8px;font-size:16px;font-weight:800;color:#0f172a !important;display:flex;justify-content:space-between;gap:8px}
+.inc-sec h4 .inc-t{color:#0f172a !important}
+.inc-sec h4 span.inc-amt{color:#0f766e !important;white-space:nowrap}
 .inc-row{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
-.inc-row label{font-size:12.5px;color:#475569}
+.inc-row label{font-size:12.5px;color:#334155 !important;font-weight:600}
+.inc-m input,.inc-m textarea{color:#0f172a !important;background:#fff !important}
+.inc-calc,.inc-calc b{color:#0f172a !important}
 .inc-row input,.inc-row textarea{font-size:16px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;width:100%;box-sizing:border-box;font-family:inherit}
 .inc-row input:focus,.inc-row textarea:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.15)}
 .inc-calc{display:flex;justify-content:space-between;font-size:14px;padding:6px 2px}
@@ -12539,7 +12543,7 @@ async function posIncassFlow(shift) {
         Чеков: ${Number(exp.receipts) || 0} · Выручка: ${posIncFmt((exp.sales || 0) - (exp.returns || 0))}</div></div>
       <div class="inc-b">
         <div class="inc-sec">
-          <h4>💵 Наличные <span>по кассе: ${posIncFmt(exp.cash)}</span></h4>
+          <h4><span class="inc-t">💵 Наличные</span> <span class="inc-amt">по кассе: ${posIncFmt(exp.cash)}</span></h4>
           <div class="inc-row"><label>Пересчитано наличных, с.</label><input id="incCash" inputmode="decimal" placeholder="Пересчитайте и введите сумму" value="${prev ? posEsc(String(prev.cash.counted)) : ''}"></div>
           <div class="inc-row"><label>Оставлено в кассе на размен, с.</label><input id="incFloat" inputmode="decimal" value="${prev ? posEsc(String(prev.cash.floatLeft || 0)) : '0'}"></div>
           <div class="inc-calc"><span>В пакет курьеру:</span><b id="incBag">—</b></div>
@@ -12547,7 +12551,7 @@ async function posIncassFlow(shift) {
           <div class="inc-diff" id="incCashDiff" style="display:none"></div>
         </div>
         ${wallets.map(w => `<div class="inc-sec" data-w="${posEsc(w.id)}">
-          <h4>👛 ${posEsc(w.label)} <span>к переводу: ${posIncFmt(w.amount)}</span></h4>
+          <h4><span class="inc-t">👛 ${posEsc(w.label)}</span> <span class="inc-amt">к переводу: ${posIncFmt(w.amount)}</span></h4>
           <div class="inc-row"><label>Переведено на общий кошелёк, с.</label><input class="incSent" inputmode="decimal" value="${posEsc(String(pv(w.id, 'sent') != null ? pv(w.id, 'sent') : w.amount))}"></div>
           <div class="inc-row"><label>Номер операции (если есть)</label><input class="incTxn" value="${posEsc(pv(w.id, 'txn') || '')}"></div>
           <div class="inc-photo"><label class="inc-pbtn">📷 Скриншот перевода<input type="file" accept="image/*" class="incFile" style="display:none"></label>
@@ -12567,7 +12571,7 @@ async function posIncassFlow(shift) {
     const diffBox = (el, diff, label) => {
         if (!Number.isFinite(diff)) { el.style.display = 'none'; return false; }
         el.style.display = '';
-        if (Math.abs(diff) < 0.01) { el.className = el.className.replace(/\b(ok|bad)\b/g, '').trim() + ' ok'; el.textContent = '✓ ' + label + ' сходится'; return false; }
+        if (Math.abs(diff) < 0.01) { el.className = el.className.replace(/\b(ok|bad)\b/g, '').trim() + ' ok'; el.textContent = '✓ ' + label; return false; }
         el.className = el.className.replace(/\b(ok|bad)\b/g, '').trim() + ' bad';
         el.textContent = (diff < 0 ? '⚠ Недостача ' : '⚠ Излишек ') + posIncFmt(Math.abs(diff));
         return true;
@@ -12576,11 +12580,11 @@ async function posIncassFlow(shift) {
         const c = posIncNum($i('incCash').value), f = posIncNum($i('incFloat').value || '0');
         const cashFilled = String($i('incCash').value).trim() !== '';
         $i('incBag').textContent = (cashFilled && Number.isFinite(c) && Number.isFinite(f)) ? posIncFmt(c - f) : '—';
-        let anyDiff = cashFilled ? diffBox($i('incCashDiff'), c - (Number(exp.cash) || 0), 'Наличные') : (diffBox($i('incCashDiff'), NaN), false);
+        let anyDiff = cashFilled ? diffBox($i('incCashDiff'), c - (Number(exp.cash) || 0), 'Наличные сходятся') : (diffBox($i('incCashDiff'), NaN), false);
         ov.querySelectorAll('[data-w]').forEach(sec => {
             const w = wallets.find(x => x.id === sec.dataset.w);
             const s = posIncNum(sec.querySelector('.incSent').value || '0');
-            if (diffBox(sec.querySelector('.incWDiff'), s - (Number(w.amount) || 0), 'Перевод')) anyDiff = true;
+            if (diffBox(sec.querySelector('.incWDiff'), s - (Number(w.amount) || 0), 'Перевод сходится')) anyDiff = true;
         });
         $i('incCommentLbl').textContent = anyDiff ? 'Комментарий — обязательно: причина расхождения' : 'Комментарий';
         return anyDiff;

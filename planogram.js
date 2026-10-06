@@ -479,6 +479,7 @@ function svgPlan(host, opts) {
   const pad = opts.mini ? 0.4 : 1.2;
   const vb = [b.x0 - pad, b.y0 - pad, (b.x1 - b.x0) + pad * 2, (b.y1 - b.y0) + pad * 2];
   const NS = 'http://www.w3.org/2000/svg';
+  const FS = Math.max(vb[2], vb[3]) / 52; // базовый размер шрифта под масштаб помещения
   let h = `<svg xmlns="${NS}" viewBox="${vb.join(' ')}" preserveAspectRatio="xMidYMid meet">`;
   h += `<defs><pattern id="g1${opts.mini ? 'm' : ''}" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="#e2e8f0" stroke-width="0.02"/></pattern></defs>`;
   if (!opts.mini) h += `<rect x="${vb[0]}" y="${vb[1]}" width="${vb[2]}" height="${vb[3]}" fill="url(#g1)"/>`;
@@ -491,7 +492,11 @@ function svgPlan(host, opts) {
       const c = zone.door.t * len;
       const a = [p[0] + ux * (c - zone.door.w / 2), p[1] + uy * (c - zone.door.w / 2)], bb = [p[0] + ux * (c + zone.door.w / 2), p[1] + uy * (c + zone.door.w / 2)];
       h += `<line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#f8fafc" stroke-width="0.2"/><line x1="${a[0]}" y1="${a[1]}" x2="${bb[0]}" y2="${bb[1]}" stroke="#60a5fa" stroke-width="0.06" stroke-dasharray="0.15 0.08"/>`;
-      if (!opts.mini) h += `<text x="${(a[0] + bb[0]) / 2}" y="${(a[1] + bb[1]) / 2 + 0.55}" font-size="0.32" text-anchor="middle" fill="#2563eb" font-weight="700">Вход</text>`;
+      if (!opts.mini) {
+        const ccx = pts.reduce((s2, v) => s2 + v[0], 0) / pts.length, ccy = pts.reduce((s2, v) => s2 + v[1], 0) / pts.length;
+        const mx = (a[0] + bb[0]) / 2, my = (a[1] + bb[1]) / 2; const dl = Math.hypot(ccx - mx, ccy - my) || 1;
+        h += `<text x="${mx + (ccx - mx) / dl * FS * 1.4}" y="${my + (ccy - my) / dl * FS * 1.4}" font-size="${FS * 1.05}" text-anchor="middle" dominant-baseline="middle" fill="#2563eb" font-weight="700">⬆ Вход</text>`;
+      }
     }
   }
   // размеры стен
@@ -504,7 +509,7 @@ function svgPlan(host, opts) {
       const nx = -(q[1] - p[1]) / len, ny = (q[0] - p[0]) / len;
       const cx = pts.reduce((s, v) => s + v[0], 0) / pts.length, cy = pts.reduce((s, v) => s + v[1], 0) / pts.length;
       const sg = ((mx - cx) * nx + (my - cy) * ny) > 0 ? 1 : -1;
-      h += `<text x="${mx + nx * sg * 0.45}" y="${my + ny * sg * 0.45}" font-size="0.26" fill="#64748b" text-anchor="middle" dominant-baseline="middle" transform="rotate(${a2} ${mx + nx * sg * 0.45} ${my + ny * sg * 0.45})">${fmt(r2(len))} м</text>`;
+      h += `<text x="${mx + nx * sg * FS * 1.4}" y="${my + ny * sg * FS * 1.4}" font-size="${FS * 0.85}" fill="#64748b" text-anchor="middle" dominant-baseline="middle" transform="rotate(${a2} ${mx + nx * sg * FS * 1.4} ${my + ny * sg * FS * 1.4})">${fmt(r2(len))} м</text>`;
     });
   }
   // мебель
@@ -525,11 +530,12 @@ function svgPlan(host, opts) {
         h += `<rect x="${-fx.w / 2 + 0.03 + k * cw + cw * 0.08}" y="${fx.d / 2 - 0.13}" width="${cw * 0.84}" height="0.09" rx="0.02" fill="${allEmpty ? '#e2e8f0' : ST_COLOR[st]}"/>`;
       }
     }
-    if (!opts.mini && fx.type !== 'plant') {
+    if (!opts.mini && fx.type !== 'plant' && fx.type !== 'mirror') {
       const label = fx.name.length > 16 ? fx.name.slice(0, 15) + '…' : fx.name;
+      const fs = Math.min(FS, fx.w / (label.length * 0.62), fx.d * 0.62 + FS * 0.25);
       const rotBack = (fx.rot % 360 + 360) % 360;
       const flip = rotBack > 90 && rotBack < 270 ? 180 : 0;
-      h += `<text x="0" y="${t.shelves ? -0.02 : 0.05}" font-size="${Math.min(0.26, fx.d * 0.55 + 0.05)}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-weight="700" transform="rotate(${flip})" pointer-events="none">${esc(label)}</text>`;
+      h += `<text x="0" y="${t.shelves ? -0.02 : 0.05}" font-size="${fs}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-weight="700" transform="rotate(${flip})" pointer-events="none">${esc(label)}</text>`;
     }
     if (sel && S.edit && !opts.mini) {
       h += `<line x1="0" y1="${-fx.d / 2}" x2="0" y2="${-fx.d / 2 - 0.45}" stroke="#2563eb" stroke-width="0.03"/><circle data-rot="${fx.id}" cx="0" cy="${-fx.d / 2 - 0.5}" r="0.13" fill="#fff" stroke="#2563eb" stroke-width="0.05" style="cursor:grab"/>`;
@@ -881,7 +887,7 @@ function openPicker(fx, sl) {
   const draw = (arr, remote) => {
     list.innerHTML = arr.length ? arr.slice(0, 60).map(p => row(p, placed.has(p.id) ? ' · уже на витрине' : (p.sold30 != null ? ` · продано 30 дн.: ${p.sold30}` : ''))).join('') : `<div class="pg-empty">${remote ? 'Ничего не найдено' : 'Нет товаров в наличии'}</div>`;
     list.querySelectorAll('[data-pid]').forEach(el => el.addEventListener('click', () => {
-      const pid = el.dataset.pid; const stub = (remote || []).find ? remote.find(x => x.id === pid) : null;
+      const pid = el.dataset.pid; const stub = Array.isArray(remote) ? remote.find(x => x.id === pid) : null;
       assign(sl, pid, stub);
     }));
   };

@@ -41,9 +41,11 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-kpi b{font-size:20px;font-weight:800}
 .pg-kpi.bad b{color:var(--out)}.pg-kpi.warn b{color:#b45309}
 .pg-main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:12px;padding:0 14px 14px;min-height:0}
-.pg-stage{position:relative;min-width:0;background:linear-gradient(180deg,#f8fafc,#e9eef5);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);min-height:360px}
+.pg-stage{position:relative;min-width:0;background:radial-gradient(120% 90% at 50% 35%,#f7faff 0%,#e8eef7 60%,#dbe4f0 100%);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);min-height:360px}
 .pg-3d,.pg-2d{position:absolute;inset:0}
 .pg-3d canvas{display:block;max-width:100%}
+.pg-3d{z-index:0}
+.pg-stage.v2d .pg-tools{display:none!important}
 .pg-2d{display:none;background:#f8fafc}
 .pg-stage.v2d .pg-3d,.pg-stage.v2d .pg-inset{display:none}
 .pg-stage.v2d .pg-2d{display:block}
@@ -132,3 +134,17 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
   .pg-legend{max-width:calc(100% - 180px);font-size:11px}
   .pg-brand-t small{display:none}
 }
+
+/* 3D: метки категорий и панель действий (как на референсе) */
+.pg-cat{display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.96);border-radius:14px;padding:8px 13px 8px 8px;box-shadow:0 8px 24px rgba(15,23,42,.14);pointer-events:auto;cursor:pointer;white-space:nowrap;border:1px solid rgba(255,255,255,.9)}
+.pg-cat .ic{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:19px;font-weight:800;color:#0f766e}
+.pg-cat b{display:block;font-size:13px;color:#0f172a;line-height:1.2}
+.pg-cat small{display:block;font-size:11.5px;color:#64748b}
+.pg-cat:hover{box-shadow:0 0 0 3px rgba(37,99,235,.25),0 8px 24px rgba(15,23,42,.14)}
+.pg-door{background:#fff;color:#1d4ed8}
+.pg-tools{position:absolute;z-index:4;transform:translate(-50%,0);display:flex;background:#fff;border-radius:14px;box-shadow:0 10px 28px rgba(15,23,42,.18);padding:4px;pointer-events:auto;gap:2px}
+.pg-tools button{border:0;background:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 10px;border-radius:10px;cursor:pointer;font-size:11.5px;font-weight:600;color:#1d4ed8}
+.pg-tools button i{font-style:normal;font-size:17px;line-height:1}
+.pg-tools button:hover{background:#eff6ff}
+.pg-tools button.del{color:#dc2626}.pg-tools button.del:hover{background:#fef2f2}
+@media (max-width:900px){.pg-cat{padding:5px 8px 5px 5px;gap:6px}.pg-cat .ic{width:24px;height:24px;font-size:14px}.pg-cat b{font-size:11px}.pg-cat small{display:none}.pg-tools button{padding:5px 6px;font-size:10px}}

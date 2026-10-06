@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.81';
+const RMK_VERSION = '1.2.82';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.82', date: '07.10.2026', title: 'Инкассация смены: квитанция кассира и журнал',
+    items: [
+      'Касса: перед закрытием смены кассир заполняет квитанцию инкассации — пересчитанные наличные, размен, номер пакета; переводы DC/Alif кошелька на общий кошелёк (сумма + скриншот или номер операции).',
+      'Касса сама показывает ожидаемые суммы по каждому способу оплаты и подсвечивает недостачу/излишек; при расхождении комментарий обязателен.',
+      'Новый раздел «Инкассация»: журнал по сменам, смены без квитанции, расхождения, скриншоты переводов, кнопки «Принять» / «Проблема».',
+    ],
+  },
   {
     v: '1.2.81', date: '30.09.2026', title: 'Смена: детали, время на продажи и закрытие администратором',
     items: [
@@ -997,6 +1005,7 @@ const VIEW_META = {
   stats:     { title: 'Статистика', sub: 'Динамика продаж и топы за период' },
   monitoring:{ title: 'Мониторинг магазинов', sub: 'Статус касс и смен онлайн' },
   cashreport:{ title: 'Отчёт по снятию ДС', sub: 'Наличные к инкассации по закрытым сменам' },
+  incass:    { title: 'Инкассация', sub: 'Квитанции кассиров при закрытии смены: наличные в пакетах, переводы кошельков, расхождения' },
   shiftreports:{ title: 'Отчёты по продажам за день', sub: 'Отчёт по каждой закрытой смене: чеки, способы оплаты, нал/безнал' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
   inventory: { title: 'Инвентаризация', sub: 'Пересчёт склада: сессии, акт расхождений и применение изменений' },
@@ -1007,7 +1016,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1141,6 +1150,7 @@ function renderView(force) {
   else if (v === 'monitoring') renderMonitoring(force);
   else if (v === 'cashreport') renderCashReport(force);
   else if (v === 'shiftreports') renderShiftReports(force);
+  else if (v === 'incass') renderIncass(force);
   else if (v === 'transfer') renderTransfer(force);
   else if (v === 'inventory') renderInventory(force);
   else if (v === 'warehouse') renderWarehouse(force);
@@ -4876,6 +4886,144 @@ function cashExportXlsx(rep, buckets, per) {
 //  Список суточных отчётов закрытых смен; клик — все чеки дня + способы оплаты.
 // ══════════════════════════════════════════════════
 const srReportCache = {};  // id -> детали отчёта (чеки)
+
+// ═════════════ ИНКАССАЦИЯ — журнал квитанций по сменам ═════════════
+let incRowsCache = [];
+function incStatusPill(r) {
+  const i = r.incass;
+  if (!i) {
+    if (r.shiftStatus === 'open') return '<span class="pill gray">Смена открыта</span>';
+    const s = r.noIncassSales || {};
+    if (!s.receipts && !s.net) return '<span class="pill gray">Без продаж</span>';
+    return '<span class="pill red">Нет квитанции</span>';
+  }
+  if (i.review && i.review.status === 'accepted') return '<span class="pill g">Принято ✓</span>';
+  if (i.review && i.review.status === 'problem') return '<span class="pill red">Проблема</span>';
+  if (i.status === 'diff') return '<span class="pill amber">Расхождение</span>';
+  return '<span class="pill blue">Сдано</span>';
+}
+function incDiffHTML(n) {
+  const v = Number(n) || 0;
+  if (Math.abs(v) < 0.01) return '<span class="muted">0</span>';
+  return `<b style="color:var(--red)">${v > 0 ? '+' : '−'}${fmtNum(Math.abs(v))}</b>`;
+}
+async function renderIncass(force) {
+  const box = $('incBody');
+  box.innerHTML = `<div class="loading">⏳ Загружаю инкассации…</div>`;
+  try {
+    const d = await posApi(`?action=incass-list&from=${state.from}&to=${state.to}${kassaQS()}`, { method: 'GET' });
+    const rows = d.rows || [];
+    incRowsCache = rows;
+    const per = state.from === state.to ? state.from : state.from + ' — ' + state.to;
+    const withInc = rows.filter(r => r.incass);
+    const missing = rows.filter(r => !r.incass && r.shiftStatus !== 'open' && ((r.noIncassSales || {}).receipts || (r.noIncassSales || {}).net));
+    const diffs = withInc.filter(r => r.incass.status === 'diff');
+    const bagSum = withInc.reduce((a, r) => a + (Number(r.incass.cash && r.incass.cash.bagAmount) || 0), 0);
+    const walSum = withInc.reduce((a, r) => a + (r.incass.wallets || []).reduce((x, w) => x + (Number(w.sent) || 0), 0), 0);
+    const diffSum = withInc.reduce((a, r) => a + (Number(r.incass.totalDiff) || 0), 0);
+    box.innerHTML = `
+      <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">
+        ${kpi('💵','Наличные в пакетах', money(bagSum),'g','за '+per)}
+        ${kpi('👛','Переведено с кошельков', money(walSum),'blue','DC / Alif кошелёк')}
+        ${kpi('⚠','Расхождения', money(diffSum), diffs.length ? 'r' : 'gray', fmtInt(diffs.length)+' смен')}
+        ${kpi('🧾','Квитанций', fmtInt(withInc.length)+' / '+fmtInt(rows.length), missing.length ? 'r' : 'gray', missing.length ? ('без квитанции: '+fmtInt(missing.length)) : 'все смены сданы')}
+      </div>
+      <div class="card card-pad">
+        <div class="card-h-row"><h3>Журнал инкассаций</h3><span class="muted">${fmtInt(rows.length)} смен</span></div>
+        ${rows.length ? `<div class="tbl-wrap"><table class="tbl sr-tbl">
+          <thead><tr><th style="width:26px"></th><th>Дата</th><th>Касса / Магазин</th><th>Продавец</th><th>Сдано</th>
+            <th class="r">Наличные по кассе</th><th class="r">Пересчитано</th><th>Пакет</th><th class="r">Кошельки</th><th class="r">Расхождение</th><th>Статус</th></tr></thead>
+          <tbody>${rows.map((r, i) => incRowHTML(r, i)).join('')}</tbody>
+        </table></div>` : `<div class="tbl-empty">Нет смен за период</div>`}
+      </div>`;
+    box.querySelectorAll('tr.inc-row').forEach(tr => tr.addEventListener('click', () => incToggle(tr)));
+    bumpSync();
+  } catch (e) {
+    box.innerHTML = errBar('Не удалось загрузить инкассации: ' + (e.message || e));
+  }
+}
+function incRowHTML(r, i) {
+  const x = r.incass;
+  const wSent = x ? (x.wallets || []).reduce((a, w) => a + (Number(w.sent) || 0), 0) : 0;
+  const wExp = x ? (x.wallets || []).reduce((a, w) => a + (Number(w.expected) || 0), 0) : 0;
+  const ns = r.noIncassSales || {};
+  return `<tr class="sr-row inc-row" data-idx="${i}">
+    <td class="c"><span class="caret">›</span></td>
+    <td><b>${esc(r.date || '')}</b></td>
+    <td><b>${esc(r.kassaName || '—')}</b><div class="muted" style="font-size:12px">${esc(r.shopName || '')}</div></td>
+    <td>${esc((x && x.submittedBy) || r.sellerName || '—')}</td>
+    <td>${x ? dushTime(x.submittedAt, true) : (r.closedAt ? '<span class="muted">закрыта ' + dushTime(r.closedAt, true) + '</span>' : '—')}</td>
+    <td class="r">${x ? money(x.cash.expected) : (ns.receipts ? '<span class="muted">выручка ' + fmtNum(ns.net) + '</span>' : '—')}</td>
+    <td class="r strong">${x ? money(x.cash.counted) : '—'}</td>
+    <td>${x ? (x.cash.bagAmount > 0 ? `№ <b>${esc(x.cash.bagNo || '—')}</b> · ${fmtNum(x.cash.bagAmount)}` : '<span class="muted">—</span>') + (x.cash.floatLeft > 0 ? `<div class="muted" style="font-size:12px">размен ${fmtNum(x.cash.floatLeft)}</div>` : '') : '—'}</td>
+    <td class="r">${x ? (x.wallets.length ? `${fmtNum(wSent)}<div class="muted" style="font-size:12px">из ${fmtNum(wExp)}</div>` : '<span class="muted">—</span>') : '—'}</td>
+    <td class="r">${x ? incDiffHTML(x.totalDiff) : '—'}</td>
+    <td>${incStatusPill(r)}</td>
+  </tr>
+  <tr class="sr-det" id="incDet-${i}" style="display:none"><td colspan="11"><div id="incDetBody-${i}"></div></td></tr>`;
+}
+function incToggle(tr) {
+  const i = tr.dataset.idx;
+  const det = $('incDet-' + i), body = $('incDetBody-' + i), caret = tr.querySelector('.caret');
+  if (det.style.display !== 'none') { det.style.display = 'none'; tr.classList.remove('open'); if (caret) caret.textContent = '›'; return; }
+  det.style.display = ''; tr.classList.add('open'); if (caret) caret.textContent = '‹';
+  body.innerHTML = incDetailHTML(incRowsCache[i], i);
+  body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv); }));
+}
+function incDetailHTML(r, i) {
+  const x = r.incass;
+  if (!x) {
+    const ns = r.noIncassSales || {};
+    return `<div class="rc-det-empty" style="padding:12px">${r.shiftStatus === 'open' ? 'Смена ещё открыта — квитанция будет при закрытии.' :
+      `Смена закрыта без квитанции инкассации. Чеков: ${fmtInt(ns.receipts || 0)}, выручка: ${money(ns.net || 0)}. Посмотрите разбивку в «Отчёты продаж за день».`}</div>`;
+  }
+  const wl = (x.wallets || []).map(w => `<tr>
+      <td>👛 ${esc(w.label)}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
+      <td>${esc(w.txn || '—')}</td>
+      <td>${w.photoUrl ? `<a href="${esc(w.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(w.photoUrl)}" alt="скриншот" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb"></a>` : '<span class="muted">нет</span>'}</td>
+    </tr>`).join('');
+  const bank = ((x.expected && x.expected.bank) || []).map(b => `${esc(b.label)}: <b>${fmtNum(b.amount)} ${CUR}</b>`).join(' · ');
+  const rv = x.review;
+  return `<div style="padding:12px 14px">
+    <table class="tbl" style="margin-bottom:10px">
+      <thead><tr><th>Способ</th><th class="r">По кассе</th><th class="r">Сдано</th><th class="r">Разница</th><th>Номер операции / пакета</th><th>Скриншот</th></tr></thead>
+      <tbody>
+        <tr><td>💵 Наличные${x.cash.floatLeft > 0 ? ` <span class="muted">(размен ${fmtNum(x.cash.floatLeft)})</span>` : ''}</td><td class="r">${money(x.cash.expected)}</td><td class="r strong">${money(x.cash.counted)}</td><td class="r">${incDiffHTML(x.cash.diff)}</td>
+          <td>${x.cash.bagAmount > 0 ? `пакет № <b>${esc(x.cash.bagNo || '—')}</b> — ${money(x.cash.bagAmount)}` : '—'}</td><td></td></tr>
+        ${wl}
+      </tbody>
+    </table>
+    ${bank ? `<div class="muted" style="margin-bottom:8px">🏦 На счёт банка (без перевода): ${bank}</div>` : ''}
+    ${x.comment ? `<div style="margin-bottom:8px">💬 <b>Комментарий кассира:</b> ${esc(x.comment)}</div>` : ''}
+    <div class="muted" style="font-size:12.5px;margin-bottom:10px">Сдал: ${esc(x.submittedBy || '—')} · ${dushTime(x.submittedAt, true)}${x.edits ? ` · исправлялась ${fmtInt(x.edits)} раз` : ''} · чеков ${fmtInt(x.receipts || 0)}</div>
+    ${rv ? `<div style="margin-bottom:10px">${rv.status === 'accepted' ? '✅ Принято' : '⛔ Проблема'}: ${esc(rv.by || '')} · ${dushTime(rv.at, true)}${rv.note ? ' — ' + esc(rv.note) : ''}</div>` : ''}
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${!rv || rv.status !== 'accepted' ? `<button class="btn btn-primary btn-sm" data-increv="accepted">✓ Принять</button>` : ''}
+      ${!rv || rv.status !== 'problem' ? `<button class="btn btn-sm" data-increv="problem">⛔ Отметить проблему</button>` : ''}
+      ${rv ? `<button class="btn btn-sm" data-increv="reset">↺ Снять отметку</button>` : ''}
+    </div>
+  </div>`;
+}
+async function incReview(i, status) {
+  const r = incRowsCache[i];
+  if (!r || !r.incass) return;
+  let note = '';
+  if (status === 'problem') { note = prompt('Опишите проблему (недостача, нет скриншота и т.п.):', '') || ''; if (!note.trim()) return; }
+  if (status === 'accepted' && r.incass.status === 'diff') { note = prompt('Есть расхождение. Комментарий к приёмке (необязательно):', '') || ''; }
+  try {
+    const d = await posApi('?action=incass-review', { method: 'POST', body: JSON.stringify({ shiftId: r.shiftId, status, note, by: state.user || '' }) });
+    r.incass = d.incass;
+    const tr = document.querySelector(`tr.inc-row[data-idx="${i}"]`);
+    if (tr) { tr.querySelector('td:last-child').innerHTML = incStatusPill(r); }
+    const body = $('incDetBody-' + i);
+    if (body) {
+      body.innerHTML = incDetailHTML(r, i);
+      body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv); }));
+    }
+  } catch (e) {
+    alert('Не удалось сохранить: ' + (e.message || e));
+  }
+}
 
 async function renderShiftReports(force) {
   const box = $('srBody');

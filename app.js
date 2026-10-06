@@ -12422,7 +12422,9 @@ function posHideBusy() {
 
 async function posCloseShift() {
     if (!POS.shift) return;
-    if (!confirm('Закрыть кассовую смену?')) return;
+    // Инкассация: квитанция (наличные в пакет, переводы кошельков) — обязательна перед закрытием.
+    const incOk = await posIncassFlow(POS.shift);
+    if (!incOk) return;
     posError('');
     posShowBusy('Смена закрывается…', 'Подождите, идёт закрытие смены и подсчёт выручки.');
     try {
@@ -12466,6 +12468,185 @@ async function posCloseShift() {
         posHideBusy();
         posError('Не удалось закрыть смену: ' + e.message);
     }
+}
+
+// ═════════════ ИНКАССАЦИЯ СМЕНЫ (квитанция кассира перед закрытием) ═════════════
+// Наличные → пакет курьеру (номер пакета), DC/Alif кошелёк → перевод на общий кошелёк
+// (сумма + скриншот или номер операции). QR/прочее — только информация (идёт на счёт банка).
+// Сохраняется в backend ?action=incass-save, затем смена закрывается как обычно.
+function posIncNum(v) { const n = Number(String(v == null ? '' : v).replace(',', '.').replace(/\s+/g, '')); return Number.isFinite(n) ? n : NaN; }
+function posIncFmt(n) { return (Math.round((Number(n) || 0) * 100) / 100).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' с.'; }
+function posIncStyle() {
+    if (document.getElementById('posIncStyle')) return;
+    const st = document.createElement('style');
+    st.id = 'posIncStyle';
+    st.textContent = `
+.inc-ov{position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:10050;display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:16px 10px}
+.inc-m{background:#fff;border-radius:16px;width:100%;max-width:520px;box-shadow:0 20px 50px rgba(0,0,0,.25);font-size:15px;color:#0f172a}
+.inc-h{padding:16px 18px 10px;border-bottom:1px solid #e5e7eb}
+.inc-h h3{margin:0;font-size:19px}
+.inc-h .inc-sub{color:#64748b;font-size:13px;margin-top:4px}
+.inc-b{padding:12px 18px}
+.inc-sec{border:1px solid #e5e7eb;border-radius:12px;padding:12px;margin-bottom:12px}
+.inc-sec h4{margin:0 0 8px;font-size:15px;display:flex;justify-content:space-between;gap:8px}
+.inc-sec h4 span{color:#0f766e;white-space:nowrap}
+.inc-row{display:flex;flex-direction:column;gap:4px;margin-bottom:8px}
+.inc-row label{font-size:12.5px;color:#475569}
+.inc-row input,.inc-row textarea{font-size:16px;padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;width:100%;box-sizing:border-box;font-family:inherit}
+.inc-row input:focus,.inc-row textarea:focus{outline:none;border-color:#0f766e;box-shadow:0 0 0 3px rgba(15,118,110,.15)}
+.inc-calc{display:flex;justify-content:space-between;font-size:14px;padding:6px 2px}
+.inc-diff{font-size:13.5px;font-weight:600;padding:6px 10px;border-radius:8px;margin-top:4px}
+.inc-diff.ok{background:#ecfdf5;color:#047857}
+.inc-diff.bad{background:#fef2f2;color:#b91c1c}
+.inc-info{background:#f8fafc;color:#475569;font-size:13px}
+.inc-photo{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.inc-photo .inc-pbtn{background:#f1f5f9;border:1px dashed #94a3b8;border-radius:10px;padding:9px 12px;font-size:14px;cursor:pointer}
+.inc-photo img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb}
+.inc-photo .inc-pst{font-size:12.5px;color:#64748b}
+.inc-err{background:#fef2f2;color:#b91c1c;border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px;display:none}
+.inc-f{display:flex;gap:10px;padding:12px 18px 18px}
+.inc-f button{flex:1;font-size:16px;padding:13px;border-radius:12px;border:0;cursor:pointer;font-weight:600}
+.inc-cancel{background:#f1f5f9;color:#334155}
+.inc-ok{background:#0f766e;color:#fff}
+.inc-ok:disabled{opacity:.6;cursor:default}`;
+    document.head.appendChild(st);
+}
+
+async function posIncassFlow(shift) {
+    posIncStyle();
+    let d;
+    try {
+        const r = await posApi(`?action=incass-expected&shiftId=${encodeURIComponent(shift.id)}`, { method: 'GET' });
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        d = r.data;
+    } catch (e) {
+        return confirm('Не удалось загрузить данные для инкассации: ' + (e.message || e)
+            + '\n\nЗакрыть смену БЕЗ квитанции инкассации? Администратор увидит смену как «без инкассации».');
+    }
+    const exp = d.expected || {};
+    const prev = d.incass || null;
+    const wallets = exp.wallets || [];
+    const bank = exp.bank || [];
+    const pv = (id, f) => { const w = prev && (prev.wallets || []).find(x => x.id === id); return w ? w[f] : null; };
+    const photos = {};
+    wallets.forEach(w => { photos[w.id] = pv(w.id, 'photoUrl') || ''; });
+
+    const ov = document.createElement('div');
+    ov.className = 'inc-ov';
+    ov.innerHTML = `<div class="inc-m" role="dialog" aria-modal="true">
+      <div class="inc-h"><h3>💼 Инкассация смены</h3>
+        <div class="inc-sub">${posEsc(shift.kassa_name || '')} · ${posEsc(shift.seller_name || '')}<br>
+        Чеков: ${Number(exp.receipts) || 0} · Выручка: ${posIncFmt((exp.sales || 0) - (exp.returns || 0))}</div></div>
+      <div class="inc-b">
+        <div class="inc-sec">
+          <h4>💵 Наличные <span>по кассе: ${posIncFmt(exp.cash)}</span></h4>
+          <div class="inc-row"><label>Пересчитано наличных, с.</label><input id="incCash" inputmode="decimal" placeholder="Пересчитайте и введите сумму" value="${prev ? posEsc(String(prev.cash.counted)) : ''}"></div>
+          <div class="inc-row"><label>Оставлено в кассе на размен, с.</label><input id="incFloat" inputmode="decimal" value="${prev ? posEsc(String(prev.cash.floatLeft || 0)) : '0'}"></div>
+          <div class="inc-calc"><span>В пакет курьеру:</span><b id="incBag">—</b></div>
+          <div class="inc-row"><label>Номер пакета / конверта</label><input id="incBagNo" placeholder="например, 0457" value="${prev ? posEsc(prev.cash.bagNo || '') : ''}"></div>
+          <div class="inc-diff" id="incCashDiff" style="display:none"></div>
+        </div>
+        ${wallets.map(w => `<div class="inc-sec" data-w="${posEsc(w.id)}">
+          <h4>👛 ${posEsc(w.label)} <span>к переводу: ${posIncFmt(w.amount)}</span></h4>
+          <div class="inc-row"><label>Переведено на общий кошелёк, с.</label><input class="incSent" inputmode="decimal" value="${posEsc(String(pv(w.id, 'sent') != null ? pv(w.id, 'sent') : w.amount))}"></div>
+          <div class="inc-row"><label>Номер операции (если есть)</label><input class="incTxn" value="${posEsc(pv(w.id, 'txn') || '')}"></div>
+          <div class="inc-photo"><label class="inc-pbtn">📷 Скриншот перевода<input type="file" accept="image/*" class="incFile" style="display:none"></label>
+            <img class="incImg" style="${photos[w.id] ? '' : 'display:none'}" src="${posEsc(photos[w.id])}" alt="скриншот"><span class="inc-pst">${photos[w.id] ? 'прикреплён' : ''}</span></div>
+          <div class="inc-diff incWDiff" style="display:none"></div>
+        </div>`).join('')}
+        ${bank.length ? `<div class="inc-sec inc-info">🏦 Поступает на счёт банка, переводить не нужно:<br>${bank.map(b => `${posEsc(b.label)}: <b>${posIncFmt(b.amount)}</b>`).join(' · ')}</div>` : ''}
+        <div class="inc-row"><label id="incCommentLbl">Комментарий</label><textarea id="incComment" rows="2" placeholder="Причина расхождения, если есть">${prev ? posEsc(prev.comment || '') : ''}</textarea></div>
+        <div class="inc-err" id="incErr"></div>
+      </div>
+      <div class="inc-f"><button type="button" class="inc-cancel" id="incCancel">Отмена</button><button type="button" class="inc-ok" id="incOk">Сдать и закрыть смену</button></div>
+    </div>`;
+    document.body.appendChild(ov);
+    const $i = (id) => ov.querySelector('#' + id);
+    const showErr = (m) => { const e = $i('incErr'); e.textContent = m || ''; e.style.display = m ? 'block' : 'none'; if (m) e.scrollIntoView({ block: 'nearest' }); };
+
+    const diffBox = (el, diff, label) => {
+        if (!Number.isFinite(diff)) { el.style.display = 'none'; return false; }
+        el.style.display = '';
+        if (Math.abs(diff) < 0.01) { el.className = el.className.replace(/\b(ok|bad)\b/g, '').trim() + ' ok'; el.textContent = '✓ ' + label + ' сходится'; return false; }
+        el.className = el.className.replace(/\b(ok|bad)\b/g, '').trim() + ' bad';
+        el.textContent = (diff < 0 ? '⚠ Недостача ' : '⚠ Излишек ') + posIncFmt(Math.abs(diff));
+        return true;
+    };
+    const recalc = () => {
+        const c = posIncNum($i('incCash').value), f = posIncNum($i('incFloat').value || '0');
+        const cashFilled = String($i('incCash').value).trim() !== '';
+        $i('incBag').textContent = (cashFilled && Number.isFinite(c) && Number.isFinite(f)) ? posIncFmt(c - f) : '—';
+        let anyDiff = cashFilled ? diffBox($i('incCashDiff'), c - (Number(exp.cash) || 0), 'Наличные') : (diffBox($i('incCashDiff'), NaN), false);
+        ov.querySelectorAll('[data-w]').forEach(sec => {
+            const w = wallets.find(x => x.id === sec.dataset.w);
+            const s = posIncNum(sec.querySelector('.incSent').value || '0');
+            if (diffBox(sec.querySelector('.incWDiff'), s - (Number(w.amount) || 0), 'Перевод')) anyDiff = true;
+        });
+        $i('incCommentLbl').textContent = anyDiff ? 'Комментарий — обязательно: причина расхождения' : 'Комментарий';
+        return anyDiff;
+    };
+    ov.querySelectorAll('input,textarea').forEach(el => el.addEventListener('input', recalc));
+    recalc();
+
+    ov.querySelectorAll('[data-w]').forEach(sec => {
+        const id = sec.dataset.w;
+        sec.querySelector('.incFile').addEventListener('change', async (ev) => {
+            const file = ev.target.files && ev.target.files[0];
+            if (!file) return;
+            const st = sec.querySelector('.inc-pst'), img = sec.querySelector('.incImg');
+            st.textContent = '⏳ загружаю…';
+            try {
+                const dataUrl = await compressImageFile(file, 1200, 0.72);
+                const r = await posApi('?action=incass-photo', { method: 'POST', body: JSON.stringify({ dataUrl }) });
+                if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+                photos[id] = r.data.url;
+                img.src = r.data.url; img.style.display = '';
+                st.textContent = '✓ прикреплён';
+            } catch (e) {
+                st.textContent = '⚠ не загрузился: ' + (e.message || e);
+            }
+            ev.target.value = '';
+        });
+    });
+
+    return await new Promise((resolve) => {
+        const done = (v) => { ov.remove(); resolve(v); };
+        $i('incCancel').addEventListener('click', () => done(false));
+        $i('incOk').addEventListener('click', async () => {
+            showErr('');
+            const cashRaw = String($i('incCash').value).trim();
+            if (!cashRaw) return showErr('Пересчитайте наличные и введите сумму (если наличных нет — введите 0).');
+            const c = posIncNum(cashRaw), f = posIncNum($i('incFloat').value || '0');
+            if (!Number.isFinite(c) || !Number.isFinite(f)) return showErr('Проверьте суммы наличных — нужны числа.');
+            if (f > c) return showErr('Размен не может быть больше пересчитанных наличных.');
+            if (c - f > 0 && !$i('incBagNo').value.trim()) return showErr('Укажите номер пакета (конверта) с наличными.');
+            const ws = [];
+            for (const sec of ov.querySelectorAll('[data-w]')) {
+                const w = wallets.find(x => x.id === sec.dataset.w);
+                const sent = posIncNum(sec.querySelector('.incSent').value || '0');
+                const txn = sec.querySelector('.incTxn').value.trim();
+                if (!Number.isFinite(sent) || sent < 0) return showErr(w.label + ': проверьте сумму перевода.');
+                if (sent > 0 && !txn && !photos[w.id]) return showErr(w.label + ': прикрепите скриншот перевода или укажите номер операции.');
+                ws.push({ id: w.id, sent, txn, photoUrl: photos[w.id] || '' });
+            }
+            const anyDiff = recalc();
+            const comment = $i('incComment').value.trim();
+            if (anyDiff && !comment) return showErr('Есть расхождение — напишите причину в комментарии.');
+            const btn = $i('incOk');
+            btn.disabled = true; btn.textContent = 'Сохраняю…';
+            try {
+                const r = await posApi('?action=incass-save', { method: 'POST', body: JSON.stringify({
+                    shiftId: shift.id, cashCounted: c, floatLeft: f, bagNo: $i('incBagNo').value.trim(),
+                    wallets: ws, comment, by: shift.seller_name || currentUser || '',
+                }) });
+                if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+                done(true);
+            } catch (e) {
+                btn.disabled = false; btn.textContent = 'Сдать и закрыть смену';
+                showErr('Не удалось сохранить квитанцию: ' + (e.message || e));
+            }
+        });
+    });
 }
 
 // Рендер итогов закрытой смены: общая выручка + разбивка по каждому способу оплаты.

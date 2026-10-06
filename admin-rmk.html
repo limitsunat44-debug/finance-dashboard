@@ -6,7 +6,7 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20261003-083621">
+  <link rel="stylesheet" href="admin-rmk.css?v=20261006-210555">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -17,7 +17,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20261003-083621"></script>
+  <script src="fonts-dejavu.js?v=20261006-210555"></script>
 </head>
 <body>
 
@@ -66,7 +66,7 @@
         <button class="sb-item" data-view="shift"><span class="sb-ic">▤</span> Смена</button>
         <button class="sb-item" data-view="receipts"><span class="sb-ic">🧾</span> Чеки продаж</button>
         <button class="sb-item" data-view="returns"><span class="sb-ic">↩</span> Возвраты</button>
-        <button class="sb-item soon" data-view="cashbox"><span class="sb-ic">🗄</span> Денежный ящик</button>
+        <button class="sb-item" data-view="incass"><span class="sb-ic">💼</span> Инкассация</button>
         <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
         <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
         <button class="sb-item" data-view="buyers"><span class="sb-ic">👥</span> Покупатели</button>
@@ -232,6 +232,11 @@
           <div id="cashBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ИНКАССАЦИЯ ═══ -->
+        <section class="view" id="view-incass">
+          <div id="incBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <!-- ═══ ОТЧЁТЫ ПО ПРОДАЖАМ ЗА ДЕНЬ ═══ -->
         <section class="view" id="view-shiftreports">
           <div id="srBody"><div class="loading">⏳ Загрузка…</div></div>
@@ -285,6 +290,6 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20261003-083621"></script>
+  <script src="admin-rmk.js?v=20261006-210555"></script>
 </body>
 </html>

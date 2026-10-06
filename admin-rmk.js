@@ -4975,7 +4975,7 @@ function incDetailHTML(r, i) {
   if (!x) {
     const ns = r.noIncassSales || {};
     return `<div class="rc-det-empty" style="padding:12px">${r.shiftStatus === 'open' ? 'Смена ещё открыта — квитанция будет при закрытии.' :
-      `Смена закрыта без квитанции инкассации. Чеков: ${fmtInt(ns.receipts || 0)}, выручка: ${money(ns.net || 0)}. Посмотрите разбивку в «Отчёты продаж за день».`}</div>`;
+      `Смена закрыта без квитанции инкассации. Чеков: ${fmtInt(ns.receipts || 0)}, выручка: ${money(ns.net || 0)} Посмотрите разбивку в «Отчёты продаж за день».`}</div>`;
   }
   const wl = (x.wallets || []).map(w => `<tr>
       <td>👛 ${esc(w.label)}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>

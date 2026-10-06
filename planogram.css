@@ -40,9 +40,10 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-kpi small{display:block;color:var(--tx2);font-size:12px;font-weight:600}
 .pg-kpi b{font-size:20px;font-weight:800}
 .pg-kpi.bad b{color:var(--out)}.pg-kpi.warn b{color:#b45309}
-.pg-main{flex:1;display:grid;grid-template-columns:1fr 370px;gap:12px;padding:0 14px 14px;min-height:0}
-.pg-stage{position:relative;background:linear-gradient(180deg,#f8fafc,#e9eef5);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);min-height:360px}
+.pg-main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 370px;gap:12px;padding:0 14px 14px;min-height:0}
+.pg-stage{position:relative;min-width:0;background:linear-gradient(180deg,#f8fafc,#e9eef5);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);min-height:360px}
 .pg-3d,.pg-2d{position:absolute;inset:0}
+.pg-3d canvas{display:block;max-width:100%}
 .pg-2d{display:none;background:#f8fafc}
 .pg-stage.v2d .pg-3d,.pg-stage.v2d .pg-inset{display:none}
 .pg-stage.v2d .pg-2d{display:block}
@@ -122,7 +123,9 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-toast.err{background:#b91c1c}
 @media (max-width:900px){
   #app{height:auto;min-height:100vh}
-  .pg-main{grid-template-columns:1fr}
+  .pg-main{grid-template-columns:minmax(0,1fr);padding:0 8px 10px}
+  .pg-top{padding:8px}.pg-kpis{padding:8px}
+  .pg-label{padding:3px 6px;font-size:11px}.pg-label small{display:none}.pg-label b{font-size:11px}
   .pg-stage{height:62vh}
   .pg-panel{overflow:visible}
   .pg-inset{width:150px;height:105px}

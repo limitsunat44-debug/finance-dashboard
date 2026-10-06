@@ -309,7 +309,9 @@ function build3d(resetCam) {
   G.sun.position.set(cx + 6, 14, cy + 4); G.sun.target.position.set(cx, 0, cy);
   if (resetCam || !G.built) {
     const b = polyBounds(pts); const span = Math.max(b.x1 - b.x0, b.y1 - b.y0);
-    G.cam.position.set(cx - span * 0.15, span * 0.95, b.y1 + span * 0.75);
+    const host = $('pg3d'); const asp = host.clientWidth && host.clientHeight ? host.clientWidth / host.clientHeight : 1.5;
+    const k = asp < 1 ? 1.9 : asp < 1.3 ? 1.35 : 1;
+    G.cam.position.set(cx - span * 0.15 * k, span * 0.95 * k, b.y1 + span * 0.75 * k);
     G.ctl.target.set(cx, 0.6, cy); G.ctl.update();
   }
   G.built = true;

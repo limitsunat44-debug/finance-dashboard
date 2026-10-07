@@ -13384,6 +13384,7 @@ function pmobRemoveClient() {
 // Ручной ввод последних 6 цифр дисконтной карты (когда камера не считывает).
 // Проходит ту же логику pmobCardHandleCode → posLookupClient (backend резолвит карту по ILIKE «%цифры»).
 async function pmobCardManualApply() {
+    if (POS.mobCamMode === 'shelf') return posShelfManual();
     const inp = pmobEl('pmobCardManualInp');
     const raw = inp ? String(inp.value || '') : '';
     const digits = raw.replace(/\D+/g, '');
@@ -13524,9 +13525,23 @@ async function pmobOpenScan(mode) {
     // Ручной ввод последних 6 цифр карты — только в режиме дисконтной карты
     // (запасной вариант, если камера не считывает штрихкод).
     const man = pmobEl('pmobCardManual');
-    if (man) man.style.display = POS.mobCamMode === 'card' ? '' : 'none';
+    if (man) man.style.display = (POS.mobCamMode === 'card' || POS.mobCamMode === 'shelf') ? '' : 'none';
     const manInp = pmobEl('pmobCardManualInp');
-    if (manInp) manInp.value = '';
+    if (manInp) {
+        manInp.value = '';
+        const shelf = POS.mobCamMode === 'shelf';
+        manInp.type = shelf ? 'text' : 'tel';
+        manInp.setAttribute('inputmode', shelf ? (POS_SHELF.open ? 'numeric' : 'text') : 'numeric');
+        manInp.setAttribute('maxlength', shelf ? '24' : '12');
+        manInp.setAttribute('autocapitalize', 'off');
+        manInp.placeholder = shelf ? (POS_SHELF.open ? 'Штрихкод пары' : 'Напр. fzqlpk2j-6') : 'Напр. 123456';
+    }
+    const manLbl = man ? man.querySelector('.pmob-cam-manual-lbl') : null;
+    if (manLbl) {
+        manLbl.textContent = POS.mobCamMode === 'shelf'
+            ? (POS_SHELF.open ? 'Камера не считывает? Введите штрихкод пары' : 'Камера не считывает? Введите код под QR полки')
+            : 'Камера не считывает? Введите последние 6 цифр карты';
+    }
     await pmobStartCamera();
 }
 
@@ -13538,7 +13553,9 @@ async function pmobOpenScan(mode) {
 // ═══════════════════════════════════════════════════════════════════
 const POS_SHELF = { open: false, w: null, sid: null, view: null, busy: false, msg: '' };
 function posShelfParse(code) {
-    const s = String(code || '');
+    const s = String(code || '').trim();
+    const mp = s.match(/\/s\/([0-9a-fA-F]{6,36})\/([A-Za-z0-9_]+-\d{1,2})(?:[/?#]|$)/);
+    if (mp) return { w: mp[1].toLowerCase(), sid: mp[2] };
     if (!/shelf\.html/i.test(s)) return null;
     const m1 = s.match(/[?&]s=([A-Za-z0-9_]+-\d{1,2})/), m2 = s.match(/[?&]w=([0-9a-fA-F-]{6,36})/);
     return (m1 && m2) ? { w: m2[1].toLowerCase(), sid: m1[1] } : null;
@@ -13642,6 +13659,7 @@ function posShelfClose() {
 async function posShelfBind(code) {
     if (!POS_SHELF.open || POS_SHELF.busy) return;
     if (posShelfParse(code)) return posShelfOpen(posShelfParse(code));
+    if (/^[A-Za-z0-9_]{3,40}-\d{1,2}$/.test(code) && /[a-z]/i.test(code)) return posShelfOpen({ w: '', sid: code });
     POS_SHELF.busy = true;
     const inp = document.getElementById('posShelfInp'); if (inp) inp.value = '';
     try {
@@ -13669,6 +13687,17 @@ async function posShelfUnbind(o) {
         POS_SHELF.view = r.data.view || POS_SHELF.view; POS_SHELF.msg = '🗑 Убрано с полки'; POS_SHELF.msgCls = 'ok';
     } catch (e) { POS_SHELF.msg = '⛔ ' + posEsc((e && e.message) || e); POS_SHELF.msgCls = 'err'; }
     posShelfRender();
+}
+// Ручной ввод в режиме «Полка»: код под QR (fzqlpk2j-6) → открыть полку; цифры → привязать пару
+async function posShelfManual() {
+    const inp = pmobEl('pmobCardManualInp');
+    const v = inp ? String(inp.value || '').trim() : '';
+    if (!v) return;
+    if (inp) inp.value = '';
+    const ref = posShelfParse(v) || (/^[A-Za-z0-9_]{3,40}-\d{1,2}$/.test(v) ? { w: '', sid: v } : null);
+    if (ref) { await pmobCloseScan(); await posShelfOpen(ref); return; }
+    if (POS_SHELF.open && /^\d{6,20}$/.test(v)) { await posShelfBind(v); return; }
+    if (typeof pmobToast === 'function') pmobToast('Не похоже на код', POS_SHELF.open ? 'Введите штрихкод пары (цифры)' : 'Код полки — под QR, например fzqlpk2j-6', true);
 }
 // Скан камерой в режиме «Полка»: QR полки → открыть полку; штрихкод пары → привязать (камера остаётся открытой)
 async function posShelfCamCode(code) {
@@ -13698,8 +13727,14 @@ async function pmobStartCamera() {
     }
     if (POS.camOn) await posStopCamera();
     try {
-        POS.html5qr = new Html5Qrcode('pmobReader', { verbose: false });
-        const cfg = { fps: 10, qrbox: { width: 260, height: 160 } };
+        const shelfMode = POS.mobCamMode === 'shelf';
+        // Режим «Полка»: QR квадратный и крупный — большая квадратная рамка + нативный детектор, если есть.
+        POS.html5qr = new Html5Qrcode('pmobReader', shelfMode
+            ? { verbose: false, experimentalFeatures: { useBarCodeDetectorIfSupported: true } }
+            : { verbose: false });
+        const cfg = shelfMode
+            ? { fps: 15, qrbox: (vw, vh) => { const m = Math.max(160, Math.floor(Math.min(vw, vh) * 0.85)); return { width: m, height: m }; } }
+            : { fps: 10, qrbox: { width: 260, height: 160 } };
         // Форматы указываем ТОЛЬКО если библиотека их экспортирует.
         // Если Html5QrcodeSupportedFormats недоступен (гонка загрузки скрипта) —
         // запускаем БЕЗ ограничения (авто-детект всех символик), а не падаем.

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Полка · РМК</title>
-<link rel="icon" href="favicon-32.png">
+<link rel="icon" href="/favicon-32.png">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
 <style>
   *{box-sizing:border-box}
@@ -48,7 +48,8 @@
   const LBL = { ok: 'На витрине', restock: 'Нет на витрине — есть на складе', out: 'Нет в магазине' };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const q = new URLSearchParams(location.search);
-  const w = q.get('w') || '', s = q.get('s') || '';
+  const mp = location.pathname.match(/\/s\/([0-9a-fA-F]{6,36})\/([A-Za-z0-9_]+-\d{1,2})/);
+  const w = (mp && mp[1]) || q.get('w') || '', s = (mp && mp[2]) || q.get('s') || '';
   const $ = (id) => document.getElementById(id);
   if (!w || !s) { $('st').innerHTML = '<span class="err">В ссылке нет кода полки</span>'; return; }
   fetch(`${API}?action=planogram-shelf&w=${encodeURIComponent(w)}&s=${encodeURIComponent(s)}`, { headers: { 'X-Provision-Secret': SECRET } })

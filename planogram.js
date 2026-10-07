@@ -60,9 +60,9 @@ function toast(msg, err) {
 // ─────────── QR полок ───────────
 // id полки = <id шкафа>-<номер полки, 1 = нижняя>. QR открывает состав полки (shelf.html),
 // а касса РМК по этому QR включает привязку товара к полке.
-const SHELF_URL = 'https://finance-orto.vercel.app/shelf.html';
+const SHELF_URL = 'https://finance-orto.vercel.app/s';
 const shelfSid = (fx, si) => `${fx.id}-${si + 1}`;
-const shelfUrl = (fx, si) => `${SHELF_URL}?w=${S.wh.slice(0, 8)}&s=${shelfSid(fx, si)}`;
+const shelfUrl = (fx, si) => `${SHELF_URL}/${S.wh.slice(0, 8)}/${shelfSid(fx, si)}`;
 const shelfPos = (fx, si) => { const n = (fx.shelves || []).length; return n > 1 ? (si === 0 ? ' · низ' : si === n - 1 ? ' · верх' : '') : ''; };
 const shelfName = (fx, si) => `${fx.name} · Полка ${si + 1}`;
 const storeName = () => (STORES.find(s => s.wh === S.wh) || {}).name || '';
@@ -70,7 +70,7 @@ const QRM = new Map();
 function qrMatrix(text) {
   if (QRM.has(text)) return QRM.get(text);
   if (!window.qrcode) return null;
-  const q = window.qrcode(0, 'M'); q.addData(text); q.make();
+  const q = window.qrcode(0, 'L'); q.addData(text); q.make();
   const n = q.getModuleCount(); const m = [];
   for (let r = 0; r < n; r++) { const row = []; for (let c = 0; c < n; c++) row.push(q.isDark(r, c)); m.push(row); }
   QRM.set(text, m); return m;

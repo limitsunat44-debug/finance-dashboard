@@ -11006,6 +11006,10 @@ async function posHandleScannedCode(code) {
     if (!code) return;
     const inp = document.getElementById('posScanInput');
     if (inp) inp.value = '';
+    // QR полки планограммы → лист полки (привязка товаров); пока лист открыт — сканы идут в привязку.
+    const shelfRef = posShelfParse(code);
+    if (shelfRef) { if (inp) inp.value = ''; await posShelfOpen(shelfRef); return; }
+    if (POS_SHELF.open) { await posShelfBind(code); return; }
     // Reward-код orto.cards (RW-...) — не товар и не карта: применяем как скидку на чек.
     if (posIsRewardCode(code)) { await posApplyRewardCode(code); return; }
     const hint = document.getElementById('posScanHint');
@@ -13504,16 +13508,18 @@ function pmobRemoveDoctor() {
 
 // ── Экран 2: сканирование (один экран на три режима: чек / возврат / карта) ──
 async function pmobOpenScan(mode) {
-    POS.mobCamMode = (mode === 'return' || mode === 'card') ? mode : 'cart';
+    POS.mobCamMode = (mode === 'return' || mode === 'card' || mode === 'shelf') ? mode : 'cart';
     const scr = pmobEl('pmobScreenScan');
     if (scr) { scr.style.display = ''; scr.classList.toggle('ret', POS.mobCamMode === 'return'); }
     const ttl = pmobEl('pmobCamTitle');
-    if (ttl) ttl.textContent = POS.mobCamMode === 'card' ? 'Сканирование карты' : 'Сканирование';
+    if (ttl) ttl.textContent = POS.mobCamMode === 'card' ? 'Сканирование карты' : POS.mobCamMode === 'shelf' ? 'Полка: привязка товара' : 'Сканирование';
     const cap = pmobEl('pmobCamCap');
     if (cap) {
         cap.textContent = POS.mobCamMode === 'card'
             ? 'Наведите камеру на штрихкод дисконтной карты'
-            : 'Наведите камеру на штрихкод товара';
+            : POS.mobCamMode === 'shelf'
+                ? (POS_SHELF.open ? 'Сканируйте этикетки пар — каждая привяжется к полке. «←» — вернуться к полке' : 'Наведите камеру на QR-код полки')
+                : 'Наведите камеру на штрихкод товара';
     }
     // Ручной ввод последних 6 цифр карты — только в режиме дисконтной карты
     // (запасной вариант, если камера не считывает штрихкод).
@@ -13524,7 +13530,161 @@ async function pmobOpenScan(mode) {
     await pmobStartCamera();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+//  ПОЛКИ ПЛАНОГРАММЫ: скан QR полки → состав полки → привязка пар сканом
+//  QR: https://finance-orto.vercel.app/shelf.html?w=<склад8>&s=<шкаф>-<полка>
+//  Пока открыт лист полки, каждый скан этикетки пары привязывает её к этой полке
+//  (учёт по модели; пара, проданная с полки, подсвечивается «нет на витрине — есть на складе»).
+// ═══════════════════════════════════════════════════════════════════
+const POS_SHELF = { open: false, w: null, sid: null, view: null, busy: false, msg: '' };
+function posShelfParse(code) {
+    const s = String(code || '');
+    if (!/shelf\.html/i.test(s)) return null;
+    const m1 = s.match(/[?&]s=([A-Za-z0-9_]+-\d{1,2})/), m2 = s.match(/[?&]w=([0-9a-fA-F-]{6,36})/);
+    return (m1 && m2) ? { w: m2[1].toLowerCase(), sid: m1[1] } : null;
+}
+function posShelfBy() {
+    const sh = POS.shift || {};
+    return String(sh.cashier_name || sh.seller_name || sh.opened_by || (POS.chosen && POS.chosen.name) || 'касса').slice(0, 60);
+}
+function posShelfCss() {
+    if (document.getElementById('posShelfCss')) return;
+    const st = document.createElement('style'); st.id = 'posShelfCss';
+    st.textContent = `
+.psh{position:fixed;inset:0;z-index:4000;background:#f1f5f9;display:flex;flex-direction:column;font-family:inherit;color:#0f172a}
+.psh.in-mob{position:absolute;z-index:4}
+.psh-h{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 10px;background:#fff;border-bottom:1px solid #e2e8f0}
+.psh-h button{width:38px;height:38px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;font-size:18px;flex:none}
+.psh-h b{font-size:16px;display:block;line-height:1.2}.psh-h small{color:#64748b;font-size:12px}
+.psh-b{flex:1;overflow:auto;padding:12px 14px calc(env(safe-area-inset-bottom,0px) + 20px)}
+.psh-cam{width:100%;padding:15px;border:0;border-radius:14px;background:#0f172a;color:#fff;font-size:16px;font-weight:700}
+.psh-row{display:flex;gap:8px;margin-top:10px}
+.psh-row input{flex:1;min-width:0;padding:12px;border:1px solid #cbd5e1;border-radius:12px;font-size:15px}
+.psh-row button{padding:0 14px;border:0;border-radius:12px;background:#2563eb;color:#fff;font-weight:700}
+.psh-msg{margin-top:10px;padding:10px 12px;border-radius:12px;font-size:13.5px;line-height:1.4}
+.psh-msg.ok{background:#dcfce7;color:#166534}.psh-msg.err{background:#fee2e2;color:#991b1b}.psh-msg.warn{background:#fef3c7;color:#92400e}
+.psh-t{font-size:13px;font-weight:800;color:#475569;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.03em}
+.psh-it{display:flex;gap:10px;background:#fff;border-radius:12px;padding:10px;margin-bottom:8px}
+.psh-it img,.psh-ph{width:52px;height:52px;border-radius:10px;object-fit:cover;background:#f1f5f9;flex:none;display:flex;align-items:center;justify-content:center;font-size:22px}
+.psh-it b{font-size:14px;display:block}.psh-it small{color:#64748b;font-size:12px}
+.psh-pill{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:999px;margin-top:4px}
+.psh-pill.ok{background:#dcfce7;color:#166534}.psh-pill.restock{background:#ede9fe;color:#5b21b6}.psh-pill.out{background:#fee2e2;color:#991b1b}
+.psh-u{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.psh-u span{font-size:11.5px;padding:3px 7px;border-radius:7px;background:#dcfce7;color:#166534;font-weight:600}
+.psh-u span.sold{background:#ede9fe;color:#5b21b6;text-decoration:line-through}.psh-u span.gone{background:#fee2e2;color:#991b1b}
+.psh-u span button{border:0;background:none;color:inherit;font-weight:800;margin-left:4px;padding:0}
+.psh-rm{margin-left:auto;align-self:flex-start;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:9px;padding:5px 9px;font-size:12px;font-weight:700}
+.psh-done{width:100%;margin-top:14px;padding:14px;border-radius:14px;border:1px solid #cbd5e1;background:#fff;font-size:15px;font-weight:700}
+.psh-empty{color:#64748b;font-size:13px;background:#fff;border-radius:12px;padding:12px}`;
+    document.head.appendChild(st);
+}
+function posShelfEl() {
+    let el = document.getElementById('posShelf');
+    if (el) return el;
+    posShelfCss();
+    el = document.createElement('div'); el.id = 'posShelf'; el.className = 'psh'; el.style.display = 'none';
+    const scr = document.getElementById('pmobScreenScan');
+    if (POS.isMobile && scr && scr.parentElement) { el.classList.add('in-mob'); scr.parentElement.appendChild(el); }
+    else document.body.appendChild(el);
+    return el;
+}
+function posShelfRender() {
+    const el = posShelfEl(); const v = POS_SHELF.view;
+    if (!POS_SHELF.open) { el.style.display = 'none'; return; }
+    el.style.display = 'flex';
+    const name = v ? `${v.fixture.name} · Полка ${v.shelf.n}` : 'Полка';
+    const msg = POS_SHELF.msg ? `<div class="psh-msg ${POS_SHELF.msgCls || 'ok'}">${POS_SHELF.msg}</div>` : '';
+    const items = (v && v.items) || [];
+    const LBL = { ok: 'На витрине', restock: 'Нет на витрине — есть на складе', out: 'Нет в магазине' };
+    el.innerHTML = `<div class="psh-h"><button type="button" data-a="close" aria-label="Закрыть">←</button><div style="min-width:0"><b>📍 ${posEsc(name)}</b><small>${v ? `${posEsc(v.fixture.category || '')}${v.fixture.category ? ' · ' : ''}${items.length} моделей · свободно мест ${v.shelf.free}` : '⏳ загружаю…'}</small></div></div>
+      <div class="psh-b">
+        ${POS.isMobile ? `<button type="button" class="psh-cam" data-a="cam">📷 Сканировать товар на полку</button>` : ''}
+        <div class="psh-row"><input id="posShelfInp" inputmode="numeric" autocomplete="off" placeholder="Штрихкод пары (сканер или вручную)"><button type="button" data-a="bind">Привязать</button></div>
+        ${msg}
+        <div class="psh-t">На полке (${items.length})</div>
+        ${items.map(i => `<div class="psh-it">${i.photo ? `<img src="${posEsc(i.photo)}" alt="">` : '<div class="psh-ph">👟</div>'}<div style="min-width:0;flex:1">
+            <b>${posEsc(i.name)}</b><small>в магазине ${i.here} пар${i.scanned ? ` · на полке ${i.onShelf}` : ' · привязано вручную'}</small>
+            <div><span class="psh-pill ${i.status}">${LBL[i.status] || ''}</span></div>
+            ${i.units.length ? `<div class="psh-u">${i.units.map(u => `<span class="${u.onShelf ? '' : (u.st === 'sold' ? 'sold' : 'gone')}">${posEsc(u.size)} · №${posEsc(String(u.bc).slice(-4))}<button type="button" data-a="unu" data-bc="${posEsc(u.bc)}" title="Отвязать пару">×</button></span>`).join('')}</div>` : ''}
+          </div><button type="button" class="psh-rm" data-a="unp" data-p="${posEsc(i.p)}">Убрать</button></div>`).join('') || '<div class="psh-empty">На полке пока нет товаров. Сканируйте этикетки пар, которые стоят на этой полке.</div>'}
+        <button type="button" class="psh-done" data-a="close">Готово</button>
+      </div>`;
+    el.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', (e) => {
+        e.preventDefault();
+        const a = b.dataset.a;
+        if (a === 'close') return posShelfClose();
+        if (a === 'cam') return pmobOpenScan('shelf');
+        if (a === 'bind') { const i = document.getElementById('posShelfInp'); const c = i ? i.value.trim() : ''; if (c) posShelfBind(c); return; }
+        if (a === 'unu') return posShelfUnbind({ barcode: b.dataset.bc });
+        if (a === 'unp') { if (confirm('Убрать эту модель с полки?')) posShelfUnbind({ p: b.dataset.p }); }
+    }));
+    const inp = document.getElementById('posShelfInp');
+    if (inp) {
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const c = inp.value.trim(); if (c) posShelfBind(c); } });
+        if (!POS.isMobile) setTimeout(() => inp.focus(), 30);
+    }
+}
+async function posShelfOpen(ref) {
+    POS_SHELF.open = true; POS_SHELF.w = ref.w; POS_SHELF.sid = ref.sid; POS_SHELF.view = null;
+    POS_SHELF.msg = 'Сканируйте этикетки пар, которые стоят на этой полке.'; POS_SHELF.msgCls = 'ok';
+    posShelfRender();
+    try {
+        const r = await posApiTimeout(`?action=planogram-shelf&w=${encodeURIComponent(ref.w)}&s=${encodeURIComponent(ref.sid)}`, { method: 'GET' }, 12000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        POS_SHELF.view = r.data;
+    } catch (e) { POS_SHELF.msg = '⛔ ' + posEsc((e && e.message) || e); POS_SHELF.msgCls = 'err'; }
+    posShelfRender();
+}
+function posShelfClose() {
+    POS_SHELF.open = false; POS_SHELF.view = null; POS_SHELF.msg = '';
+    posShelfRender();
+}
+async function posShelfBind(code) {
+    if (!POS_SHELF.open || POS_SHELF.busy) return;
+    if (posShelfParse(code)) return posShelfOpen(posShelfParse(code));
+    POS_SHELF.busy = true;
+    const inp = document.getElementById('posShelfInp'); if (inp) inp.value = '';
+    try {
+        const r = await posApiTimeout('?action=planogram-bind', { method: 'POST', body: JSON.stringify({ w: POS_SHELF.w, sid: POS_SHELF.sid, barcode: code, by: posShelfBy() }) }, 15000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        const d = r.data; POS_SHELF.view = d.view || POS_SHELF.view;
+        const what = `${posEsc(d.name)}${d.size && d.size !== '—' ? ' · р. ' + posEsc(d.size) : ''} · №${posEsc(String(code).slice(-4))}`;
+        if (d.already) { POS_SHELF.msg = `ℹ️ Уже на этой полке: <b>${what}</b>`; POS_SHELF.msgCls = 'ok'; }
+        else {
+            POS_SHELF.msg = `✅ Привязано: <b>${what}</b>${d.movedFrom ? `<br>Перенесено с: ${posEsc(d.movedFrom)}` : ''}${d.warn ? `<br>⚠ ${posEsc(d.warn)}` : ''}`;
+            POS_SHELF.msgCls = d.warn ? 'warn' : 'ok';
+        }
+        try { if (navigator.vibrate) navigator.vibrate(60); } catch (_) {}
+        if (POS.isMobile && typeof pmobToast === 'function') pmobToast(d.already ? 'Уже на полке' : 'Привязано к полке', `${d.name}${d.size && d.size !== '—' ? ' · р. ' + d.size : ''}`, !!d.warn);
+    } catch (e) {
+        POS_SHELF.msg = '⛔ ' + posEsc((e && e.message) || e); POS_SHELF.msgCls = 'err';
+        if (POS.isMobile && typeof pmobToast === 'function') pmobToast('Не привязано', String((e && e.message) || e), true);
+    } finally { POS_SHELF.busy = false; }
+    posShelfRender();
+}
+async function posShelfUnbind(o) {
+    try {
+        const r = await posApiTimeout('?action=planogram-unbind', { method: 'POST', body: JSON.stringify({ w: POS_SHELF.w, sid: POS_SHELF.sid, by: posShelfBy(), ...o }) }, 15000);
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        POS_SHELF.view = r.data.view || POS_SHELF.view; POS_SHELF.msg = '🗑 Убрано с полки'; POS_SHELF.msgCls = 'ok';
+    } catch (e) { POS_SHELF.msg = '⛔ ' + posEsc((e && e.message) || e); POS_SHELF.msgCls = 'err'; }
+    posShelfRender();
+}
+// Скан камерой в режиме «Полка»: QR полки → открыть полку; штрихкод пары → привязать (камера остаётся открытой)
+async function posShelfCamCode(code) {
+    const ref = posShelfParse(code);
+    if (ref) {
+        await pmobCloseScan();
+        await posShelfOpen(ref);
+        return;
+    }
+    if (!POS_SHELF.open) { if (typeof pmobToast === 'function') pmobToast('Сначала QR полки', 'Наведите камеру на QR-код на кромке полки', true); return; }
+    await posShelfBind(code);
+}
+
 function pmobDispatchScan(code) {
+    if (POS.mobCamMode === 'shelf') return posShelfCamCode(code);
+    if (posShelfParse(code)) return posShelfCamCode(code);
     if (POS.mobCamMode === 'return') return pmobRetHandleCode(code);
     if (POS.mobCamMode === 'card') return pmobCardHandleCode(code);
     return posHandleScannedCode(code);
@@ -15265,6 +15425,7 @@ function pmobBindEvents() {
     on('pmobMoreCloseShift', posCloseShift);
     on('pmobMoreReturn', posOpenReturn);
     on('pmobMoreSearch', pmobOpenSearch);
+    on('pmobMoreShelf', () => pmobOpenScan('shelf'));
     on('pmobMoreHistory', pmobOpenHistory);
     on('pmobHistBack', () => pmobShow('more'));
     // БОНУС: Мой заработок + блок «Мои продажи»

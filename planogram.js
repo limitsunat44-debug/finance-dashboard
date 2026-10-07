@@ -34,8 +34,8 @@ const TYPES = {
   mirror:  { label: 'Зеркало',           shelves: false, w: 0.6, d: 0.08, h: 1.8, color: '#dbeafe' },
   plant:   { label: 'Растение',          shelves: false, w: 0.5, d: 0.5, h: 1.3, color: '#16a34a' },
 };
-const ST_COLOR = { ok: '#16a34a', low: '#f59e0b', out: '#dc2626', slow: '#64748b', empty: '#cbd5e1' };
-const ST_LABEL = { ok: 'Хорошо', low: 'Мало остатков', out: 'Нет в магазине', slow: 'Нет продаж 30 дн.', empty: 'Пустое место' };
+const ST_COLOR = { ok: '#16a34a', low: '#f59e0b', out: '#dc2626', restock: '#7c3aed', slow: '#64748b', empty: '#cbd5e1' };
+const ST_LABEL = { ok: 'Хорошо', low: 'Мало остатков', out: 'Нет в магазине', restock: 'Нет на витрине — есть на складе', slow: 'Нет продаж 30 дн.', empty: 'Пустое место' };
 const CATS = ['Женская обувь', 'Мужская обувь', 'Детская обувь', 'Обувь для мальчиков', 'Обувь для девочек', 'Ортопедические стельки', 'Ортопедические товары', 'Аксессуары', 'Акция / скидки'];
 
 // ─────────── helpers ───────────
@@ -57,6 +57,107 @@ function toast(msg, err) {
   clearTimeout(toastT); toastT = setTimeout(() => { t.className = 'pg-toast'; }, 2600);
 }
 
+// ─────────── QR полок ───────────
+// id полки = <id шкафа>-<номер полки, 1 = нижняя>. QR открывает состав полки (shelf.html),
+// а касса РМК по этому QR включает привязку товара к полке.
+const SHELF_URL = 'https://finance-orto.vercel.app/shelf.html';
+const shelfSid = (fx, si) => `${fx.id}-${si + 1}`;
+const shelfUrl = (fx, si) => `${SHELF_URL}?w=${S.wh.slice(0, 8)}&s=${shelfSid(fx, si)}`;
+const shelfPos = (fx, si) => { const n = (fx.shelves || []).length; return n > 1 ? (si === 0 ? ' · низ' : si === n - 1 ? ' · верх' : '') : ''; };
+const shelfName = (fx, si) => `${fx.name} · Полка ${si + 1}`;
+const storeName = () => (STORES.find(s => s.wh === S.wh) || {}).name || '';
+const QRM = new Map();
+function qrMatrix(text) {
+  if (QRM.has(text)) return QRM.get(text);
+  if (!window.qrcode) return null;
+  const q = window.qrcode(0, 'M'); q.addData(text); q.make();
+  const n = q.getModuleCount(); const m = [];
+  for (let r = 0; r < n; r++) { const row = []; for (let c = 0; c < n; c++) row.push(q.isDark(r, c)); m.push(row); }
+  QRM.set(text, m); return m;
+}
+function drawQr(ctx, text, x, y, size) {
+  const m = qrMatrix(text); if (!m) return;
+  const n = m.length + 2; const cell = Math.max(1, Math.floor(size / n)); const off = Math.floor((size - cell * n) / 2) + cell;
+  ctx.fillStyle = '#fff'; ctx.fillRect(x, y, size, size);
+  ctx.fillStyle = '#000';
+  m.forEach((row, r) => row.forEach((d, c) => { if (d) ctx.fillRect(x + off + c * cell, y + off + r * cell, cell, cell); }));
+}
+const QRURL = new Map();
+function qrDataUrl(text) {
+  if (QRURL.has(text)) return QRURL.get(text);
+  const c = document.createElement('canvas'); c.width = c.height = 240;
+  drawQr(c.getContext('2d'), text, 0, 0, 240);
+  const u = c.toDataURL('image/png'); QRURL.set(text, u); return u;
+}
+function fitFont(ctx, text, maxW, size, weight) {
+  let s = size;
+  do { ctx.font = `${weight} ${s}px Manrope, Arial, sans-serif`; if (ctx.measureText(text).width <= maxW) break; s -= 1; } while (s > 6);
+  return s;
+}
+// Этикетка 40×52 мм: сверху название шкафа и «Полка N», ниже QR, внизу магазин и код полки. k — пикселей на мм.
+function labelCanvas(fx, si, k) {
+  const W = 40, H = 52;
+  const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  x.strokeStyle = '#0f172a'; x.lineWidth = Math.max(1, k * 0.35);
+  x.strokeRect(k * 0.6, k * 0.6, c.width - k * 1.2, c.height - k * 1.2);
+  x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.fillStyle = '#0f172a';
+  fitFont(x, fx.name, k * 35, Math.round(k * 4.4), 700); x.fillText(fx.name, c.width / 2, k * 6.6);
+  const t2 = `Полка ${si + 1}${shelfPos(fx, si)}`;
+  fitFont(x, t2, k * 35, Math.round(k * 6.2), 800); x.fillText(t2, c.width / 2, k * 13.8);
+  drawQr(x, shelfUrl(fx, si), Math.round(k * 5), Math.round(k * 15.2), Math.round(k * 30));
+  x.fillStyle = '#475569';
+  const t3 = `${storeName()} · ${shelfSid(fx, si)}`;
+  fitFont(x, t3, k * 36, Math.round(k * 2.4), 600); x.fillText(t3, c.width / 2, k * 49.4);
+  return c;
+}
+function fileSafe(s) { return String(s).replace(/[\\/:*?"<>|«»]+/g, '').replace(/\s+/g, ' ').trim(); }
+function downloadPng(fx, si) {
+  const c = labelCanvas(fx, si, 16);
+  c.toBlob(b => { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = fileSafe(`QR ${fx.name} - полка ${si + 1}.png`); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }, 'image/png');
+}
+let jspdfP = null;
+function loadJsPdf() {
+  if (window.jspdf && window.jspdf.jsPDF) return Promise.resolve(window.jspdf.jsPDF);
+  if (!jspdfP) jspdfP = new Promise((res, rej) => { const s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'; s.onload = () => res(window.jspdf.jsPDF); s.onerror = () => { jspdfP = null; rej(new Error('Не загрузилась библиотека PDF')); }; document.head.appendChild(s); });
+  return jspdfP;
+}
+// A4: сетка 4×5 этикеток 40×52 мм, пунктир — линии реза.
+async function downloadPdf(list, title) {
+  if (!list.length) return toast('Нет полок для печати', true);
+  toast('Готовлю PDF с QR полок…');
+  try {
+    const JsPDF = await loadJsPdf();
+    const doc = new JsPDF({ unit: 'mm', format: 'a4' });
+    doc.setProperties({ title: `QR полок — ${title}`, author: 'РМК · Планограмма' });
+    const LW = 40, LH = 52, GX = 5, GY = 4, CO = 4, RO = 5;
+    const mx = (210 - (CO * LW + (CO - 1) * GX)) / 2, my = (297 - (RO * LH + (RO - 1) * GY)) / 2;
+    list.forEach(([fx, si], i) => {
+      const k = i % (CO * RO); if (i && !k) doc.addPage();
+      const x = mx + (k % CO) * (LW + GX), y = my + Math.floor(k / CO) * (LH + GY);
+      doc.addImage(labelCanvas(fx, si, 12).toDataURL('image/png'), 'PNG', x, y, LW, LH, undefined, 'FAST');
+      doc.setDrawColor(170); doc.setLineWidth(0.15); doc.setLineDashPattern([1, 1], 0); doc.rect(x - 1, y - 1, LW + 2, LH + 2); doc.setLineDashPattern([], 0);
+    });
+    doc.save(fileSafe(`QR полок - ${title}.pdf`));
+  } catch (e) { toast('PDF не создан: ' + e.message, true); }
+}
+function shelvesOf(fxs) { const out = []; fxs.forEach(fx => (fx.shelves || []).forEach((_, si) => out.push([fx, si]))); return out; }
+// модели «нет на витрине — есть на складе»: привязанная сканом пара продана/ушла, а модель ещё есть в магазине
+function restockSlots() {
+  const out = [];
+  zoneFx('hall').forEach(fx => (fx.shelves || []).forEach((sh, si) => sh.slots.forEach((sl, ki) => { if (slotStatus(sl) === 'restock') out.push({ fx, si, ki, sl, p: S.products.get(sl.p) }); })));
+  return out;
+}
+function stockPlace(pid) {
+  for (const fx of zoneFx('stock')) for (let si = 0; si < (fx.shelves || []).length; si++) if (fx.shelves[si].slots.some(s => s.p === pid)) return `${fx.name} · полка ${si + 1}`;
+  return '';
+}
+function notOnDisplay() {
+  const hall = placedIds('hall');
+  return [...S.products.values()].filter(p => p.here > 0 && !hall.has(p.id)).sort((a, b) => (b.sold30 - a.sold30) || (b.here - a.here));
+}
+
 // ─────────── auth (тот же вход, что в РМК Администратор) ───────────
 let USER = '';
 try { const a = JSON.parse(localStorage.getItem(LS_AUTH) || 'null'); USER = a && a.user || ''; } catch (_) {}
@@ -69,6 +170,8 @@ const S = {
   sel: null,            // {k:'fx',fid} | {k:'slot',fid,si,ki}
   products: new Map(),  // productId -> {id,name,here,sizes,sold30,sold7,photo,category,price}
   detail: {},           // productId -> warehouses[]
+  units: {},            // штрихкод привязанной сканом пары -> {st, here, size}
+  showQr: localStorage.getItem('pg_show_qr') !== '0',
 };
 
 // ─────────── default layout (Айни, по эскизу) ───────────
@@ -112,6 +215,10 @@ function defaultLayout() {
 function slotStatus(slot) {
   if (!slot || !slot.p) return 'empty';
   const p = S.products.get(slot.p);
+  if (Array.isArray(slot.u) && slot.u.length) {
+    const live = slot.u.filter(bc => S.units[bc] && S.units[bc].here).length;
+    if (!live) return p && p.here > 0 ? 'restock' : 'out';
+  }
   if (!p || !p.here) return 'out';
   if (p.here <= 2) return 'low';
   if (!p.sold30) return 'slow';
@@ -120,15 +227,15 @@ function slotStatus(slot) {
 function zoneFx(zone) { return S.layout.fixtures.filter(f => f.zone === zone); }
 function fxById(id) { return S.layout.fixtures.find(f => f.id === id); }
 function fxStats(fx) {
-  const ids = new Set(); let empty = 0, low = 0, out = 0, slots = 0;
+  const ids = new Set(); let empty = 0, low = 0, out = 0, slots = 0, restock = 0;
   (fx.shelves || []).forEach(sh => sh.slots.forEach(sl => {
     slots++; const st = slotStatus(sl);
     if (st === 'empty') empty++; else ids.add(sl.p);
-    if (st === 'low') low++; if (st === 'out') out++;
+    if (st === 'low') low++; if (st === 'out') out++; if (st === 'restock') restock++;
   }));
   let pairs = 0, sold30 = 0;
   ids.forEach(id => { const p = S.products.get(id); if (p) { pairs += p.here || 0; sold30 += p.sold30 || 0; } });
-  return { models: ids.size, pairs, sold30, empty, low, out, slots };
+  return { models: ids.size, pairs, sold30, empty, low, out, slots, restock };
 }
 function placedIds(zone) {
   const s = new Set();
@@ -136,7 +243,7 @@ function placedIds(zone) {
   return s;
 }
 function worstStatus(list) {
-  const order = ['out', 'low', 'slow', 'ok', 'empty'];
+  const order = ['out', 'restock', 'low', 'slow', 'ok', 'empty'];
   let best = 'empty';
   list.forEach(st => { if (order.indexOf(st) < order.indexOf(best)) best = st; });
   return best;
@@ -168,6 +275,7 @@ async function loadStock() {
   const ids = [...placedIds()].join(',');
   const d = await api(`?action=planogram-data&wh=${S.wh}${ids ? '&ids=' + ids : ''}`);
   S.products = new Map((d.products || []).map(p => [p.id, p]));
+  S.units = d.units || {};
 }
 function setDirty(v) {
   S.dirty = v;
@@ -191,6 +299,7 @@ function changed(rebuild3d = true) { setDirty(true); renderAll(rebuild3d); }
 
 // ═══════════════════════ 3D ═══════════════════════
 const G = { renderer: null, label: null, scene: null, cam: null, ctl: null, root: null, walls: [], pick: [], tex: new Map(), drag: null, built: false };
+if (/[?&]debug=1/.test(location.search)) window.__pg = { G, S };
 const SHARED_GEO = new Set();
 function init3d() {
   const host = $('pg3d');
@@ -644,6 +753,14 @@ function buildFx(fx) {
           }
         });
       });
+      if (S.showQr) {
+        const key = 'qrM' + shelfSid(fx, si) + '|' + fx.name + '|' + n;
+        const qm = pmat(key, () => { const tx = new THREE.CanvasTexture(labelCanvas(fx, si, 6)); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return new THREE.MeshBasicMaterial({ map: tx, toneMapped: false }); });
+        const qw = Math.min(0.12, W * 0.1), qh = qw * 1.3;
+        const qp = new THREE.Mesh(new THREE.PlaneGeometry(qw, qh), qm);
+        qp.position.set(-W / 2 + 0.02 + qw / 2 + 0.012, y - qh / 2 - 0.012, D / 2 + 0.014);
+        qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
+      }
     });
     if (sel) {
       const el = document.createElement('div');
@@ -721,7 +838,7 @@ function addGizmo(g, fx, W, D, Hh) {
 function fxAction(fx, a) {
   if (a === 'move') return toast('Зажмите объект и тяните по полу');
   if (a === 'rot') { fx.rot = (fx.rot + 90) % 360; return changed(true); }
-  if (a === 'dup') { const c = clone(fx); c.id = uid('f'); c.x = r2(c.x + 0.4); c.y = r2(c.y + 0.4); c.name = fx.name + ' (копия)'; (c.shelves || []).forEach(sh => sh.slots.forEach(sl => { sl.p = null; })); S.layout.fixtures.push(c); S.sel = { k: 'fx', fid: c.id }; return changed(true); }
+  if (a === 'dup') { const c = clone(fx); c.id = uid('f'); c.x = r2(c.x + 0.4); c.y = r2(c.y + 0.4); c.name = fx.name + ' (копия)'; (c.shelves || []).forEach(sh => sh.slots.forEach(sl => { sl.p = null; delete sl.u; })); S.layout.fixtures.push(c); S.sel = { k: 'fx', fid: c.id }; return changed(true); }
   if (a === 'del') {
     const n = fxStats(fx).models;
     if (!confirm(`Удалить «${fx.name}»?${n ? `\nНа нём привязано моделей: ${n} — привязки удалятся.` : ''}`)) return;
@@ -791,7 +908,8 @@ function bind3dPointer() {
     const hit = ray.intersectObjects(G.pick, false)[0];
     if (!hit) { select(null); return; }
     const u = hit.object.userData;
-    if (u.slot) select({ k: 'slot', fid: u.fid, si: u.si, ki: u.ki });
+    if (u.qr) select({ k: 'shelf', fid: u.fid, si: u.si });
+    else if (u.slot) select({ k: 'slot', fid: u.fid, si: u.si, ki: u.ki });
     else if (u.fid) select({ k: 'fx', fid: u.fid });
   });
 }
@@ -855,6 +973,16 @@ function svgPlan(host, opts) {
         const allEmpty = fx.shelves.every(s => !s.slots[k] || !s.slots[k].p);
         h += `<rect x="${-fx.w / 2 + 0.03 + k * cw + cw * 0.08}" y="${fx.d / 2 - 0.13}" width="${cw * 0.84}" height="0.09" rx="0.02" fill="${allEmpty ? '#e2e8f0' : ST_COLOR[st]}"/>`;
       }
+      if (S.showQr && !opts.mini && window.qrcode) {
+        const n = fx.shelves.length, step = (fx.w - 0.06) / n, qs = Math.min(0.3, step * 0.82);
+        fx.shelves.forEach((_, si) => {
+          const qx = -fx.w / 2 + 0.03 + (si + 0.5) * step - qs / 2, qy = fx.d / 2 + 0.05;
+          const isS = S.sel && S.sel.k === 'shelf' && S.sel.fid === fx.id && S.sel.si === si;
+          h += `<rect x="${qx - 0.015}" y="${qy - 0.015}" width="${qs + 0.03}" height="${qs + 0.03 + qs * 0.34}" rx="0.02" fill="#fff" stroke="${isS ? '#2563eb' : '#94a3b8'}" stroke-width="${isS ? 0.035 : 0.012}" data-qrsi="${si}" style="cursor:pointer"/>`;
+          h += `<image href="${qrDataUrl(shelfUrl(fx, si))}" x="${qx}" y="${qy}" width="${qs}" height="${qs}" data-qrsi="${si}" style="cursor:pointer;image-rendering:pixelated"/>`;
+          h += `<text x="${qx + qs / 2}" y="${qy + qs + qs * 0.22}" font-size="${qs * 0.24}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-weight="700" pointer-events="none">П${si + 1}</text>`;
+        });
+      }
     }
     if (!opts.mini && fx.type !== 'plant' && fx.type !== 'mirror') {
       const label = fx.name.length > 16 ? fx.name.slice(0, 15) + '…' : fx.name;
@@ -903,6 +1031,8 @@ function bind2d(svg, pts) {
       S.vsel = i + 1; changed(true); return;
     }
     if (rot) { const fx = fxById(rot); drag = { k: 'rot', fx }; svg.setPointerCapture(e.pointerId); return; }
+    const qsi = e.target.getAttribute('data-qrsi');
+    if (qsi != null) { const gq = e.target.closest('[data-fid]'); if (gq) { select({ k: 'shelf', fid: gq.dataset.fid, si: Number(qsi) }); return; } }
     const g = e.target.closest('[data-fid]');
     if (g) {
       const fx = fxById(g.dataset.fid);
@@ -953,6 +1083,7 @@ function prodThumb(p, cls) { return p && p.photo ? `<img src="${esc(p.photo)}" a
 function renderPanel() {
   const P = $('pgPanel');
   const sel = S.sel;
+  if (sel && sel.k === 'shelf') return renderShelfPanel(P, sel);
   if (sel && sel.k === 'slot') return renderSlotPanel(P, sel);
   if (sel && sel.k === 'fx') return renderFxPanel(P, fxById(sel.fid));
   return renderZonePanel(P);
@@ -986,6 +1117,12 @@ function renderZonePanel(P) {
   } else {
     h += `<div class="pg-info">Нажмите на шкаф или место на полке, чтобы увидеть товар и остатки. Включите «Редактирование», чтобы двигать шкафы, менять полки и форму помещения.</div>`;
   }
+  const zShelves = shelvesOf(fxs.filter(f => TYPES[f.type].shelves));
+  h += `<div class="pg-qrbar"><div><b>QR-коды полок</b><small>${zShelves.length} полок · этикетки 40×52 мм на A4</small></div><button class="pg-btn sm pri" id="zQrPdf">⬇ Скачать все (PDF)</button></div>`;
+  if (S.zone === 'hall') {
+    const rs = restockSlots();
+    if (rs.length) h += `<h4 class="pg-h-restock">Продали пару с витрины — выставьте ещё (${rs.length})</h4><div class="pg-list">${rs.map(r => `<div class="pg-li" data-rs="${r.fx.id}|${r.si}|${r.ki}">${prodThumb(r.p)}<div class="t"><b>${esc(r.p ? r.p.name : 'Товар')}</b><small>${esc(shelfName(r.fx, r.si))}${stockPlace(r.sl.p) ? ' · лежит: ' + esc(stockPlace(r.sl.p)) : ''}</small></div><div class="n"><span class="pg-pill restock">${r.p ? r.p.here : 0} пар</span></div></div>`).join('')}</div>`;
+  }
   // список секций
   h += `<h4>Секции и шкафы</h4><div class="pg-list">`;
   fxs.filter(f => TYPES[f.type].shelves).forEach(f => {
@@ -993,14 +1130,15 @@ function renderZonePanel(P) {
     h += `<div class="pg-li" data-fx="${f.id}"><div class="ph">${f.type === 'rack' ? '🗄' : f.type === 'island' ? '🔲' : '🧱'}</div><div class="t"><b>${esc(f.name)}</b><small>${esc(f.category || TYPES[f.type].label)} · ${st.models} мод. · ${st.pairs} пар${st.empty ? ` · пусто ${st.empty}` : ''}</small></div><div class="n">${st.out ? `<span class="pg-pill out">${st.out}</span>` : ''}${st.low ? ` <span class="pg-pill low">${st.low}</span>` : ''}</div></div>`;
   });
   h += `</div>`;
-  // не выставлено
-  const placed = placedIds();
-  const notPlaced = [...S.products.values()].filter(p => p.here > 0 && !placed.has(p.id)).sort((a, b) => (b.sold30 - a.sold30) || (b.here - a.here));
-  h += `<h4>В наличии, но не выставлено (${notPlaced.length})</h4><div class="pg-list">${notPlaced.slice(0, 12).map(p => `<div class="pg-li" title="${esc(p.name)}">${prodThumb(p)}<div class="t"><b>${esc(p.name)}</b><small>${esc(p.category || '')} · продано 30 дн.: ${p.sold30}</small></div><div class="n">${p.here} пар</div></div>`).join('') || '<div class="pg-empty">Всё выставлено</div>'}</div>`;
+  // нет на витрине — есть на складе
+  const notPlaced = notOnDisplay();
+  h += `<h4>Нет на витрине — есть на складе (${notPlaced.length})</h4><div class="pg-list">${notPlaced.slice(0, 12).map(p => `<div class="pg-li" title="${esc(p.name)}">${prodThumb(p)}<div class="t"><b>${esc(p.name)}</b><small>${esc(p.category || '')} · продано 30 дн.: ${p.sold30}${stockPlace(p.id) ? ' · лежит: ' + esc(stockPlace(p.id)) : ''}</small></div><div class="n">${p.here} пар</div></div>`).join('') || '<div class="pg-empty">Всё выставлено</div>'}</div>`;
   if (notPlaced.length > 12) h += `<button class="pg-btn sm" id="zAllNp" style="margin-top:6px">Показать все ${notPlaced.length}</button>`;
   P.innerHTML = h;
   P.querySelectorAll('[data-fx]').forEach(el => el.addEventListener('click', () => select({ k: 'fx', fid: el.dataset.fx })));
   P.querySelectorAll('[data-addfx]').forEach(el => el.addEventListener('click', () => addFx(el.dataset.addfx)));
+  P.querySelectorAll('[data-rs]').forEach(el => el.addEventListener('click', () => { const [fid, si, ki] = el.dataset.rs.split('|'); select({ k: 'slot', fid, si: Number(si), ki: Number(ki) }); }));
+  const zq = $('zQrPdf'); if (zq) zq.addEventListener('click', () => downloadPdf(zShelves, `${storeName()} - ${z.name}`));
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on('zName', 'change', (e) => { z.name = e.target.value.trim() || z.name; changed(false); });
   on('zH', 'change', (e) => { z.wallH = Math.max(2, Math.min(6, Number(e.target.value) || 3)); changed(true); });
@@ -1067,6 +1205,7 @@ function renderFxPanel(P, fx) {
     for (let si = fx.shelves.length - 1; si >= 0; si--) {
       const sh = fx.shelves[si];
       h += `<div class="pg-shelf"><div class="pg-shelf-h"><span>Полка ${si + 1}${si === fx.shelves.length - 1 ? ' (верх)' : si === 0 ? ' (низ)' : ''} · ${sh.slots.length} мест</span>
+        <button class="pg-mini qr" data-sqr="${si}" title="QR и состав полки">▦ QR</button>
         ${S.edit ? `<span class="pg-row"><button class="pg-mini" data-sm="${si}" title="Убрать место">−</button><button class="pg-mini" data-sp="${si}" title="Добавить место">+</button><button class="pg-mini" data-sdel="${si}" title="Удалить полку">✕</button></span>` : ''}</div>
         <div class="pg-cells" style="grid-template-columns:repeat(${sh.slots.length},1fr)">${sh.slots.map((sl, ki) => {
           const stt = slotStatus(sl); const p = sl.p && S.products.get(sl.p);
@@ -1076,6 +1215,8 @@ function renderFxPanel(P, fx) {
     }
     h += `</div>`;
     if (S.edit) h += `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить полку</button><button class="pg-btn sm" id="shAll">Мест на всех полках…</button></div>`;
+    h += `<h4>QR-коды полок</h4><div class="pg-qrgrid">${fx.shelves.map((_, si) => `<div class="pg-qrcard"><img src="${labelCanvas(fx, si, 5).toDataURL('image/png')}" alt="QR полка ${si + 1}" data-sqr="${si}"><button class="pg-mini" data-qpng="${si}">⬇ PNG</button></div>`).join('')}</div>
+      <div class="pg-row" style="margin-top:8px"><button class="pg-btn sm pri" id="fQrPdf">⬇ Скачать QR всех полок шкафа (PDF)</button></div>`;
   }
   P.innerHTML = h;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
@@ -1090,7 +1231,7 @@ function renderFxPanel(P, fx) {
   on('fY', 'change', (e) => { fx.y = num(e.target.value, fx.y); changed(true); });
   on('fR', 'change', (e) => { fx.rot = ((num(e.target.value, fx.rot) % 360) + 360) % 360; changed(true); });
   on('fRot', 'click', () => { fx.rot = (fx.rot + 90) % 360; changed(true); });
-  on('fDup', 'click', () => { const c = clone(fx); c.id = uid('f'); c.x = r2(c.x + 0.4); c.y = r2(c.y + 0.4); c.name = fx.name + ' (копия)'; (c.shelves || []).forEach(sh => sh.slots.forEach(sl => { sl.p = null; })); S.layout.fixtures.push(c); S.sel = { k: 'fx', fid: c.id }; changed(true); });
+  on('fDup', 'click', () => { const c = clone(fx); c.id = uid('f'); c.x = r2(c.x + 0.4); c.y = r2(c.y + 0.4); c.name = fx.name + ' (копия)'; (c.shelves || []).forEach(sh => sh.slots.forEach(sl => { sl.p = null; delete sl.u; })); S.layout.fixtures.push(c); S.sel = { k: 'fx', fid: c.id }; changed(true); });
   on('fDel', 'click', () => {
     const n = fxStats(fx).models;
     if (!confirm(`Удалить «${fx.name}»?${n ? `\nНа нём привязано моделей: ${n} — привязки удалятся.` : ''}`)) return;
@@ -1118,6 +1259,42 @@ function renderFxPanel(P, fx) {
     fx.shelves.splice(si, 1); if (S.sel && S.sel.k === 'slot') S.sel = { k: 'fx', fid: fx.id }; changed(true);
   }));
   P.querySelectorAll('.pg-cell').forEach(c => c.addEventListener('click', () => select({ k: 'slot', fid: fx.id, si: Number(c.dataset.si), ki: Number(c.dataset.ki) })));
+  P.querySelectorAll('[data-sqr]').forEach(b => b.addEventListener('click', () => select({ k: 'shelf', fid: fx.id, si: Number(b.dataset.sqr) })));
+  P.querySelectorAll('[data-qpng]').forEach(b => b.addEventListener('click', () => downloadPng(fx, Number(b.dataset.qpng))));
+  on('fQrPdf', 'click', () => downloadPdf(shelvesOf([fx]), fx.name));
+}
+function unitChip(bc) {
+  const u = S.units[bc] || {};
+  const cls = u.here ? 'ok' : (u.st === 'sold' ? 'sold' : 'gone');
+  const t = u.here ? 'на полке' : (u.st === 'sold' ? 'продана' : u.st === 'in_stock' ? 'на другом складе' : 'нет в базе');
+  return `<span class="pg-unit ${cls}" title="${esc(bc)} — ${t}">${esc(u.size || '—')} · №${esc(String(bc).slice(-4))}</span>`;
+}
+function renderShelfPanel(P, sel) {
+  const fx = fxById(sel.fid);
+  const sh = fx && fx.shelves && fx.shelves[sel.si];
+  if (!sh) { S.sel = fx ? { k: 'fx', fid: fx.id } : null; return renderPanel(); }
+  const items = sh.slots.map((sl, ki) => ({ sl, ki })).filter(x => x.sl.p);
+  let h = `<div class="pg-crumb"><a id="bkZone">${esc(S.layout.zones[fx.zone].name)}</a> › <a id="bkFx">${esc(fx.name)}</a> › Полка ${sel.si + 1}</div>`;
+  h += `<h3>${esc(shelfName(fx, sel.si))}</h3><div class="pg-sub">${esc(fx.category || TYPES[fx.type].label)} · ${sh.slots.length} мест · занято ${items.length}</div>`;
+  h += `<div class="pg-qrbig"><img src="${labelCanvas(fx, sel.si, 9).toDataURL('image/png')}" alt="QR полки"></div>
+    <div class="pg-actions"><button class="pg-btn pri" id="sqPng">⬇ Скачать PNG</button><button class="pg-btn" id="sqPdf">🖨 PDF для печати</button></div>
+    <div class="pg-info">Наклейте этикетку на кромку полки. <b>Привязка товара:</b> касса РМК → «Ещё» → «Полка: привязать товар» → отсканируйте этот QR → сканируйте этикетки пар, которые стоят на полке. Пара привязывается к полке, учёт — по модели. Если пару продали, а модель есть в магазине — место станет фиолетовым «нет на витрине — есть на складе».</div>`;
+  if (S.dirty) h += `<div class="pg-note">Есть несохранённые изменения — состав с кассы появится после сохранения и обновления.</div>`;
+  h += `<h4>Состав полки (${items.length}) <button class="pg-mini" id="sqReload" style="width:auto;padding:0 8px;margin-left:6px;font-size:11.5px" title="Обновить с сервера">⟳ Обновить</button></h4><div class="pg-list">`;
+  h += items.map(({ sl, ki }) => {
+    const p = S.products.get(sl.p); const st = slotStatus(sl);
+    const us = Array.isArray(sl.u) ? sl.u : [];
+    return `<div class="pg-li" data-ski="${ki}">${prodThumb(p)}<div class="t"><b>${esc(p ? p.name : 'Товар не найден')}</b><small>место ${ki + 1} · в магазине ${p ? p.here : 0} пар${us.length ? '' : ' · привязано вручную'}</small>${us.length ? `<div class="pg-units">${us.map(unitChip).join('')}</div>` : ''}</div><div class="n"><span class="pg-pill ${st}">${ST_LABEL[st]}</span></div></div>`;
+  }).join('') || '<div class="pg-empty">На полке пока нет товаров. Отсканируйте QR на кассе и привяжите пары.</div>';
+  h += `</div>`;
+  P.innerHTML = h;
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('bkZone', 'click', () => select(null));
+  on('bkFx', 'click', () => select({ k: 'fx', fid: fx.id }));
+  on('sqPng', 'click', () => downloadPng(fx, sel.si));
+  on('sqPdf', 'click', () => downloadPdf([[fx, sel.si]], shelfName(fx, sel.si)));
+  on('sqReload', 'click', () => { if (S.dirty) return toast('Сначала сохраните изменения', true); const keep = S.sel; loadAll().then(() => { S.sel = keep; renderAll(true); }); });
+  P.querySelectorAll('[data-ski]').forEach(el => el.addEventListener('click', () => select({ k: 'slot', fid: fx.id, si: sel.si, ki: Number(el.dataset.ski) })));
 }
 function sizesHTML(sizes) {
   const ks = Object.keys(sizes || {}).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999) || a.localeCompare(b));
@@ -1153,10 +1330,12 @@ function renderSlotPanel(P, sel) {
       <div class="pg-sub">${esc(p && p.category || '')}${p && p.price ? ' · ' + fmt(p.price) + ' с.' : ''}</div>
       <div style="margin-top:6px"><span class="pg-pill ${st}">${ST_LABEL[st]}</span></div></div></div>
       <div class="pg-stats">${stat('В этом магазине', (p ? p.here : 0) + ' пар')}${stat('Продано 7 дн.', p ? p.sold7 : 0)}${stat('Продано 30 дн.', p ? p.sold30 : 0)}</div>
+      ${Array.isArray(sl.u) && sl.u.length ? `<h4>Пары на полке (привязаны сканом)</h4><div class="pg-units">${sl.u.map(unitChip).join('')}</div>` : ''}
       <h4>Размеры в этом магазине</h4>${sizesHTML(p && p.sizes)}
       <h4>Остатки на других складах</h4><div id="slOther"><div class="pg-empty">⏳ загружаю…</div></div>
       <div class="pg-grid2" style="margin-top:10px"><div class="pg-f"><label>Пар на этом месте (выставлено)</label><input id="slQ" type="number" min="1" max="20" value="${sl.q || 1}"></div><div></div></div>`;
     if (st === 'low' || st === 'out') h += `<div class="pg-note">⚠ ${st === 'out' ? 'Этой модели нет в магазине' : 'Осталось мало пар'} — стоит перевести модель в скидки или привезти, а на это место поставить модель с большим остатком.</div>`;
+    if (st === 'restock') h += `<div class="pg-note restock">🟣 Пару с этого места продали, а модель ещё есть в магазине (${p ? p.here : 0} пар${stockPlace(sl.p) ? ', лежит: ' + esc(stockPlace(sl.p)) : ''}). Выставьте новую пару и отсканируйте её на кассе через QR полки.</div>`;
     if (st === 'slow') h += `<div class="pg-note">Модель есть, но за 30 дней не продавалась на этом магазине — кандидат на скидку или перенос на более видное место.</div>`;
     h += `<div class="pg-actions"><button class="pg-btn pri" id="slSet">🔁 Заменить товар</button><button class="pg-btn danger" id="slClr">Убрать с места</button></div>`;
   } else {
@@ -1174,7 +1353,7 @@ function renderSlotPanel(P, sel) {
   on('bkZone', 'click', () => select(null));
   on('bkFx', 'click', () => select({ k: 'fx', fid: fx.id }));
   on('slSet', 'click', () => openPicker(fx, sl));
-  on('slClr', 'click', () => { sl.p = null; sl.q = 1; changed(true); });
+  on('slClr', 'click', () => { sl.p = null; sl.q = 1; delete sl.u; changed(true); });
   on('slQ', 'change', (e) => { sl.q = Math.max(1, Math.min(20, Number(e.target.value) || 1)); changed(false); });
   P.querySelectorAll('[data-put]').forEach(el => el.addEventListener('click', () => assign(sl, el.dataset.put)));
   P.querySelectorAll('.pg-cells .pg-cell').forEach(c => c.addEventListener('click', () => select({ k: 'slot', fid: fx.id, si: sel.si, ki: Number(c.dataset.ki) })));
@@ -1192,6 +1371,7 @@ async function loadDetail(pid) {
   catch (e) { const el = box(); if (el) el.innerHTML = `<div class="pg-empty">Не загрузилось: ${esc(e.message)}</div>`; }
 }
 async function assign(sl, pid, prodStub) {
+  if (sl.p !== pid) delete sl.u;
   sl.p = pid; sl.q = sl.q || 1;
   if (!S.products.has(pid)) {
     if (prodStub) S.products.set(pid, { ...prodStub, here: 0, sizes: {}, sold30: 0, sold7: 0 });
@@ -1246,8 +1426,10 @@ function openPicker(fx, sl) {
 }
 function openNotPlaced(arr) {
   const m = $('pgModal'); m.hidden = false;
-  m.innerHTML = `<div class="pg-mbox"><h3>В наличии, но не выставлено (${arr.length})</h3><div class="pg-sub">Отсортировано по продажам за 30 дней. Выберите пустое место на полке, затем «Привязать товар».</div>
-    <div class="pg-mlist"><div class="pg-list">${arr.map(p => `<div class="pg-li" style="cursor:default">${prodThumb(p)}<div class="t"><b>${esc(p.name)}</b><small>${esc(p.category || '')} · продано 30 дн.: ${p.sold30}</small></div><div class="n">${p.here} пар</div></div>`).join('')}</div></div>
+  const rs = restockSlots();
+  m.innerHTML = `<div class="pg-mbox"><h3>Нет на витрине — есть на складе (${arr.length + rs.length})</h3><div class="pg-sub">Отсортировано по продажам за 30 дней. Выставьте пару на полку и отсканируйте её на кассе через QR полки.</div>
+    <div class="pg-mlist">${rs.length ? `<h4 class="pg-h-restock">Продали пару с витрины — выставьте ещё (${rs.length})</h4><div class="pg-list">${rs.map(r => `<div class="pg-li" style="cursor:default">${prodThumb(r.p)}<div class="t"><b>${esc(r.p ? r.p.name : 'Товар')}</b><small>место: ${esc(shelfName(r.fx, r.si))}${stockPlace(r.sl.p) ? ' · лежит: ' + esc(stockPlace(r.sl.p)) : ''}</small></div><div class="n">${r.p ? r.p.here : 0} пар</div></div>`).join('')}</div>` : ''}
+    <h4>Модели не выставлены (${arr.length})</h4><div class="pg-list">${arr.map(p => `<div class="pg-li" style="cursor:default">${prodThumb(p)}<div class="t"><b>${esc(p.name)}</b><small>${esc(p.category || '')} · продано 30 дн.: ${p.sold30}${stockPlace(p.id) ? ' · лежит: ' + esc(stockPlace(p.id)) : ''}</small></div><div class="n">${p.here} пар</div></div>`).join('')}</div></div>
     <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="npClose">Закрыть</button></div></div>`;
   $('npClose').addEventListener('click', closeModal);
 }
@@ -1258,8 +1440,8 @@ function renderKpis() {
   let slots = 0, empty = 0, low = 0, out = 0; const ids = new Set();
   fxs.forEach(f => f.shelves.forEach(sh => sh.slots.forEach(sl => { slots++; const st = slotStatus(sl); if (st === 'empty') empty++; else ids.add(sl.p); if (st === 'low') low++; if (st === 'out') out++; })));
   let pairs = 0; ids.forEach(id => { const p = S.products.get(id); if (p) pairs += p.here || 0; });
-  const placed = placedIds();
-  const notPlaced = [...S.products.values()].filter(p => p.here > 0 && !placed.has(p.id));
+  const notPlaced = notOnDisplay();
+  const rsN = restockSlots().length;
   const totalHere = [...S.products.values()].reduce((a, p) => a + (p.here || 0), 0);
   $('pgKpis').innerHTML = `
     <div class="pg-kpi"><small>Моделей ${S.zone === 'hall' ? 'на витрине' : 'на складе'}</small><b>${ids.size}</b></div>
@@ -1268,9 +1450,9 @@ function renderKpis() {
     <div class="pg-kpi ${empty ? 'warn' : ''}"><small>Пустых мест</small><b>${empty}</b></div>
     <div class="pg-kpi ${low ? 'warn' : ''}"><small>Мало остатков (≤2)</small><b>${low}</b></div>
     <div class="pg-kpi ${out ? 'bad' : ''}"><small>Нет в магазине</small><b>${out}</b></div>
-    <div class="pg-kpi click" id="kNp"><small>В наличии, не выставлено</small><b>${notPlaced.length}</b></div>
+    <div class="pg-kpi click ${notPlaced.length + rsN ? 'restock' : ''}" id="kNp"><small>Нет на витрине — есть на складе</small><b>${notPlaced.length + rsN}</b></div>
     <div class="pg-kpi"><small>Всего пар в магазине</small><b>${fmt(totalHere)}</b></div>`;
-  $('kNp').addEventListener('click', () => openNotPlaced(notPlaced.sort((a, b) => (b.sold30 - a.sold30) || (b.here - a.here))));
+  $('kNp').addEventListener('click', () => openNotPlaced(notPlaced));
 }
 function hint() {
   const el = $('pgHint');
@@ -1313,6 +1495,8 @@ document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('
 document.querySelectorAll('#pgViewSeg button').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));
 $('pgEdit').addEventListener('change', (e) => { S.edit = e.target.checked; if (!S.edit) S.shapeEdit = false; renderAll(true); });
 $('pgSave').addEventListener('click', save);
+const qrBtn = $('pgQr');
+if (qrBtn) { qrBtn.classList.toggle('on', S.showQr); qrBtn.addEventListener('click', () => { S.showQr = !S.showQr; localStorage.setItem('pg_show_qr', S.showQr ? '1' : '0'); qrBtn.classList.toggle('on', S.showQr); renderAll(true); }); }
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); if (S.dirty) save(); }
   if (e.key === 'Delete' && S.edit && S.sel && S.sel.k === 'fx' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { const b = $('fDel'); if (b) b.click(); }

@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.86';
+const RMK_VERSION = '1.2.87';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.87', date: '09.10.2026', title: 'Инкассация: приёмка отдельно по наличным, DC и Alif',
+    items: [
+      'В квитанции смены новая колонка «Приёмка»: у наличных, DC кошелька и Alif кошелька своя кнопка «✓ Принять», «⛔ Проблема» и «↺ Снять отметку» — кто и когда принял, видно в каждой строке.',
+      'Статус смены «Принято частично» с перечнем принятого (например ✓ Нал, DC); «Принято ✓» — когда приняты все типы оплаты. Кнопка «Принять всё» осталась.',
+      'Если часть уже принята, кассир не может изменить её сумму в квитанции; остальные части исправлять можно. Старые принятые квитанции считаются принятыми по всем типам.',
+    ],
+  },
   {
     v: '1.2.86', date: '09.10.2026', title: 'Планограмма: вкладка «Товары» по номенклатурам, плашки над шкафами, продажи по модели',
     items: [
@@ -4939,8 +4947,35 @@ function incStatusPill(r) {
   }
   if (i.review && i.review.status === 'accepted') return '<span class="pill g">Принято ✓</span>';
   if (i.review && i.review.status === 'problem') return '<span class="pill red">Проблема</span>';
+  if (i.review && i.review.status === 'partial') {
+    const R = i.reviews || {};
+    const acc = incParts(i).filter(p => R[p.id] && R[p.id].status === 'accepted').map(p => p.short);
+    return `<span class="pill amber" title="Принято: ${esc(acc.join(', '))}">Принято частично</span><div class="muted" style="font-size:11.5px;margin-top:2px">✓ ${esc(acc.join(', '))}</div>`;
+  }
   if (i.status === 'diff') return '<span class="pill amber">Расхождение</span>';
   return '<span class="pill blue">Сдано</span>';
+}
+// части квитанции, которые принимаются отдельно: наличные, DC кошелёк, Alif кошелёк
+function incParts(x) {
+  const parts = [{ id: 'cash', label: 'Наличные', short: 'Нал' }];
+  (x.wallets || []).forEach(w => { if (Number(w.expected) > 0 || Number(w.sent) > 0) parts.push({ id: w.id, label: w.label, short: w.id === 'dcwlt' ? 'DC' : w.id === 'alifwlt' ? 'Alif' : w.label }); });
+  return parts;
+}
+function incPartRv(x, id) {
+  if (x.reviews) return x.reviews[id] || null;
+  return x.review && (x.review.status === 'accepted' || x.review.status === 'problem') ? x.review : null; // старые квитанции
+}
+function incPartCell(x, id) {
+  if (!incParts(x).some(p => p.id === id)) return '<span class="muted">переводить нечего</span>';
+  const rv = incPartRv(x, id);
+  const st = rv ? (rv.status === 'accepted' ? `<div style="font-size:12px;color:var(--green,#15803d)"><b>✅ Принято</b><br><span class="muted">${esc(rv.by || '')} · ${dushTime(rv.at, true)}</span></div>`
+    : `<div style="font-size:12px;color:var(--red)"><b>⛔ Проблема</b>${rv.note ? ': ' + esc(rv.note) : ''}<br><span class="muted">${esc(rv.by || '')} · ${dushTime(rv.at, true)}</span></div>`) : '';
+  const btns = [
+    !rv || rv.status !== 'accepted' ? `<button class="btn btn-primary btn-sm" data-incpart="${id}" data-increv="accepted">✓ Принять</button>` : '',
+    !rv || rv.status !== 'problem' ? `<button class="btn btn-sm" data-incpart="${id}" data-increv="problem" title="Отметить проблему">⛔</button>` : '',
+    rv ? `<button class="btn btn-sm" data-incpart="${id}" data-increv="reset" title="Снять отметку">↺</button>` : '',
+  ].join(' ');
+  return `${st}<div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:${st ? 4 : 0}px">${btns}</div>`;
 }
 function incDiffHTML(n) {
   const v = Number(n) || 0;
@@ -5025,7 +5060,7 @@ function incToggle(tr) {
   if (det.style.display !== 'none') { det.style.display = 'none'; tr.classList.remove('open'); if (caret) caret.textContent = '›'; return; }
   det.style.display = ''; tr.classList.add('open'); if (caret) caret.textContent = '‹';
   body.innerHTML = incDetailHTML(incRowsCache[i], i);
-  body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv); }));
+  body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv, b.dataset.incpart || ''); }));
 }
 function incDetailHTML(r, i) {
   const x = r.incass;
@@ -5038,44 +5073,48 @@ function incDetailHTML(r, i) {
       <td>👛 ${esc(w.label)}${w.returns ? `<div class="muted" style="font-size:12px">продажи ${fmtNum(w.sales || 0)} − возвраты ${fmtNum(w.returns)}${!w.expected ? ' · переводить нечего' : ''}</div>` : ''}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
       <td>${esc(w.txn || '—')}</td>
       <td>${w.photoUrl ? `<a href="${esc(w.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(w.photoUrl)}" alt="скриншот" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb"></a>` : '<span class="muted">нет</span>'}</td>
+      <td>${incPartCell(x, w.id)}</td>
     </tr>`).join('');
   const bank = ((x.expected && x.expected.bank) || []).map(b => `${esc(b.label)}: <b>${fmtNum(b.amount)} ${CUR}</b>`).join(' · ');
   const rv = x.review;
   return `<div style="padding:12px 14px">
     <table class="tbl" style="margin-bottom:10px">
-      <thead><tr><th>Способ</th><th class="r">По кассе</th><th class="r">Сдано</th><th class="r">Разница</th><th>Номер операции / пакета</th><th>Скриншот</th></tr></thead>
+      <thead><tr><th>Способ</th><th class="r">По кассе</th><th class="r">Сдано</th><th class="r">Разница</th><th>Номер операции / пакета</th><th>Скриншот</th><th style="min-width:150px">Приёмка</th></tr></thead>
       <tbody>
         <tr><td>💵 Наличные${x.cash.openingFloat ? `<div class="muted" style="font-size:12px">размен на начало ${fmtNum(x.cash.openingFloat)} ${Number(x.cash.cashSales) < 0 ? '− возвраты' : '+ за смену'} ${fmtNum(Math.abs(Number(x.cash.cashSales) || 0))}</div>` : ''}${x.cash.floatLeft > 0 ? `<div class="muted" style="font-size:12px">оставлено на размен ${fmtNum(x.cash.floatLeft)}</div>` : ''}</td><td class="r">${money(x.cash.expected)}</td><td class="r strong">${money(x.cash.counted)}</td><td class="r">${incDiffHTML(x.cash.diff)}</td>
-          <td>${x.cash.bagAmount > 0 ? `пакет № <b>${esc(x.cash.bagNo || '—')}</b> — ${money(x.cash.bagAmount)}` : '—'}</td><td></td></tr>
+          <td>${x.cash.bagAmount > 0 ? `пакет № <b>${esc(x.cash.bagNo || '—')}</b> — ${money(x.cash.bagAmount)}` : '—'}</td><td></td><td>${incPartCell(x, 'cash')}</td></tr>
         ${wl}
       </tbody>
     </table>
     ${bank ? `<div class="muted" style="margin-bottom:8px">🏦 На счёт банка (без перевода): ${bank}</div>` : ''}
     ${x.comment ? `<div style="margin-bottom:8px">💬 <b>Комментарий кассира:</b> ${esc(x.comment)}</div>` : ''}
     <div class="muted" style="font-size:12.5px;margin-bottom:10px">Сдал: ${esc(x.submittedBy || '—')} · ${dushTime(x.submittedAt, true)}${x.edits ? ` · исправлялась ${fmtInt(x.edits)} раз` : ''} · чеков ${fmtInt(x.receipts || 0)}</div>
-    ${rv ? `<div style="margin-bottom:10px">${rv.status === 'accepted' ? '✅ Принято' : '⛔ Проблема'}: ${esc(rv.by || '')} · ${dushTime(rv.at, true)}${rv.note ? ' — ' + esc(rv.note) : ''}</div>` : ''}
+    ${rv && rv.status !== 'partial' ? `<div style="margin-bottom:10px">${rv.status === 'accepted' ? '✅ Принято полностью' : '⛔ Проблема'}: ${esc(rv.by || '')} · ${dushTime(rv.at, true)}${rv.note ? ' — ' + esc(rv.note) : ''}</div>` : ''}
+    <div class="muted" style="font-size:12.5px;margin-bottom:6px">Наличные, DC и Alif принимаются отдельно — кнопки в колонке «Приёмка». Ниже — сразу всё.</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      ${!rv || rv.status !== 'accepted' ? `<button class="btn btn-primary btn-sm" data-increv="accepted">✓ Принять</button>` : ''}
-      ${!rv || rv.status !== 'problem' ? `<button class="btn btn-sm" data-increv="problem">⛔ Отметить проблему</button>` : ''}
-      ${rv ? `<button class="btn btn-sm" data-increv="reset">↺ Снять отметку</button>` : ''}
+      ${!rv || rv.status !== 'accepted' ? `<button class="btn btn-sm" data-increv="accepted">✓ Принять всё</button>` : ''}
+      ${rv ? `<button class="btn btn-sm" data-increv="reset">↺ Снять все отметки</button>` : ''}
     </div>
   </div>`;
 }
-async function incReview(i, status) {
+async function incReview(i, status, part) {
   const r = incRowsCache[i];
   if (!r || !r.incass) return;
+  const x = r.incass;
+  const pl = part ? ((incParts(x).find(p => p.id === part) || {}).label || part) : '';
   let note = '';
-  if (status === 'problem') { note = prompt('Опишите проблему (недостача, нет скриншота и т.п.):', '') || ''; if (!note.trim()) return; }
-  if (status === 'accepted' && r.incass.status === 'diff') { note = prompt('Есть расхождение. Комментарий к приёмке (необязательно):', '') || ''; }
+  if (status === 'problem') { note = prompt(`${pl ? pl + ': о' : 'О'}пишите проблему (недостача, нет скриншота и т.п.):`, '') || ''; if (!note.trim()) return; }
+  const partDiff = part === 'cash' ? Math.abs(Number(x.cash && x.cash.diff) || 0) >= 0.01 : part ? Math.abs(Number(((x.wallets || []).find(w => w.id === part) || {}).diff) || 0) >= 0.01 : x.status === 'diff';
+  if (status === 'accepted' && partDiff) { const n = prompt(`${pl ? pl + ': е' : 'Е'}сть расхождение. Комментарий к приёмке (необязательно):`, ''); if (n === null) return; note = n; }
   try {
-    const d = await posApi('?action=incass-review', { method: 'POST', body: JSON.stringify({ shiftId: r.shiftId, status, note, by: state.user || '' }) });
+    const d = await posApi('?action=incass-review', { method: 'POST', body: JSON.stringify({ shiftId: r.shiftId, status, note, part: part || '', by: state.user || '' }) });
     r.incass = d.incass;
     const tr = document.querySelector(`tr.inc-row[data-idx="${i}"]`);
     if (tr) { tr.querySelector('td:last-child').innerHTML = incStatusPill(r); }
     const body = $('incDetBody-' + i);
     if (body) {
       body.innerHTML = incDetailHTML(r, i);
-      body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv); }));
+      body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv, b.dataset.incpart || ''); }));
     }
   } catch (e) {
     alert('Не удалось сохранить: ' + (e.message || e));

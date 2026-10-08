@@ -176,3 +176,24 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-log-t{flex:1;min-width:0}.pg-log-t span{color:#475569}.pg-log-t small{display:block;color:#64748b;font-size:12px;margin-top:1px}
 .pg-log-ts{flex:none;color:#64748b;font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
 .pg-loglist{max-height:280px;overflow:auto}
+
+/* «Товары» по номенклатурам */
+.pg-mbox.pg-wide{max-width:940px}
+.pg-mlist-tall{max-height:62vh}
+.pg-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.pg-tabs button{border:1px solid var(--bd);background:#fff;border-radius:20px;padding:7px 12px;font:600 13px Manrope,sans-serif;cursor:pointer;color:#334155}
+.pg-tabs button b{display:inline-block;min-width:20px;padding:1px 6px;margin-left:4px;border-radius:10px;background:#f1f5f9;font-size:12px}
+.pg-tabs button.on{background:#0f172a;color:#fff;border-color:#0f172a}
+.pg-tabs button.on b{background:rgba(255,255,255,.18);color:#fff}
+.pg-tabs button.t-off b{background:#ede9fe;color:#5b21b6}.pg-tabs button.t-other b{background:#fee2e2;color:#991b1b}.pg-tabs button.t-promo b{background:#fef3c7;color:#92400e}
+.pg-tabs button.on.t-off b,.pg-tabs button.on.t-other b,.pg-tabs button.on.t-promo b{background:rgba(255,255,255,.18);color:#fff}
+.pg-szl{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.pg-szl i{font-style:normal;font-size:11.5px;background:#f1f5f9;border-radius:5px;padding:1px 6px;color:#334155}
+.pg-wide .pg-li .t small{display:block}
+.pg-li .t small.pg-warn{color:#b45309;font-weight:600}
+.pg-wide .pg-li .n{text-align:right;line-height:1.7}
+.pg-mv{padding:4px 9px;font-size:12px;margin-top:2px;background:#fef3c7;border-color:#fde68a;color:#92400e}
+.pg-wide h4{margin:12px 0 6px;font-size:13px;color:#334155}
+@media (max-width:900px){.pg-goods{padding:6px 8px;font-size:12px}}
+.pg-wide .pg-li .t small em{font-style:normal;font-weight:800;color:#0f172a}
+@media (max-width:1320px) and (min-width:901px){.pg-brand-t{display:none}.pg-top{gap:8px}.pg-switch>span:last-child{font-size:13px}}

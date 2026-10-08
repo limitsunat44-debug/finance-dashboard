@@ -676,19 +676,33 @@ const CAT_IC = [
   [/стельк/i, '🦶', '#dff7fb'], [/ортопед/i, '✚', '#d9f5ef'], [/акц|скид/i, '%', '#fef3c7'],
 ];
 const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return n + ' ' + (m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c); };
+// Плашка категории — над каждой группой соседних шкафов этой категории (а не в средней точке всех шкафов).
+function fxBox(f) { const sw = f.rot % 180 !== 0; const w = sw ? f.d : f.w, d = sw ? f.w : f.d; return { x0: f.x - w / 2, x1: f.x + w / 2, y0: f.y - d / 2, y1: f.y + d / 2 }; }
+function catClusters(fs) {
+  const par = fs.map((_, i) => i); const find = (i) => par[i] === i ? i : (par[i] = find(par[i]));
+  for (let i = 0; i < fs.length; i++) for (let j = i + 1; j < fs.length; j++) {
+    if ((fs[i].type === 'island') !== (fs[j].type === 'island')) continue;
+    const a = fxBox(fs[i]), b = fxBox(fs[j]);
+    const gx = Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1)), gy = Math.max(0, Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1));
+    if (Math.max(gx, gy) < 0.6) par[find(i)] = find(j);
+  }
+  const g = {}; fs.forEach((f, i) => { (g[find(i)] = g[find(i)] || []).push(f); });
+  return Object.values(g);
+}
 function addCategoryLabels() {
   const groups = {};
   zoneFx('hall').filter(f => TYPES[f.type].shelves && f.category).forEach(f => { (groups[f.category] = groups[f.category] || []).push(f); });
-  Object.entries(groups).forEach(([cat, fs]) => {
+  Object.entries(groups).forEach(([cat, all]) => catClusters(all).forEach(fs => {
     const ids = new Set(); fs.forEach(f => f.shelves.forEach(sh => sh.slots.forEach(sl => { if (sl.p) ids.add(sl.p); })));
     let pairs = 0; ids.forEach(id => { const p = S.products.get(id); if (p) pairs += p.here || 0; });
-    const x = fs.reduce((a, f) => a + f.x, 0) / fs.length, y = fs.reduce((a, f) => a + f.y, 0) / fs.length, hh = Math.max(...fs.map(f => f.h));
+    const bx = fs.map(fxBox); const x = (Math.min(...bx.map(b => b.x0)) + Math.max(...bx.map(b => b.x1))) / 2, y = (Math.min(...bx.map(b => b.y0)) + Math.max(...bx.map(b => b.y1))) / 2, hh = Math.max(...fs.map(f => f.h));
     const ic = CAT_IC.find(([re]) => re.test(cat)) || [null, '▦', '#eef2f7'];
     const el = document.createElement('div'); el.className = 'pg-cat';
+    el.title = fs.map(f => f.name).join(', ');
     el.innerHTML = `<span class="ic" style="background:${ic[2]}">${ic[1]}</span><span><b>${esc(cat)}</b><small>${plural(ids.size, 'модель', 'модели', 'моделей')} · ${pairs} пар</small></span>`;
     el.addEventListener('pointerdown', (e) => { e.stopPropagation(); select({ k: 'fx', fid: fs[0].id }); });
     const lo = new CSS2DObject(el); lo.position.set(x, hh + 0.55, y); G.root.add(lo);
-  });
+  }));
 }
 function blob(g, w, d) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.35, d + 0.35), pmat('blobM', () => new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false, opacity: 0.55 })));
@@ -1472,6 +1486,107 @@ function openNotPlaced(arr) {
     <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="npClose">Закрыть</button></div></div>`;
   $('npClose').addEventListener('click', closeModal);
 }
+
+// ═══════════════════════ «Товары»: по номенклатурам ═══════════════════════
+const isPromoFx = (f) => /акц|скид/i.test(f.category || '');
+function hallPlaces() {
+  const by = new Map();
+  zoneFx('hall').forEach(fx => (fx.shelves || []).forEach((sh, si) => sh.slots.forEach((sl, ki) => {
+    if (!sl.p) return;
+    const e = by.get(sl.p) || { pid: sl.p, places: [], units: [] }; by.set(sl.p, e);
+    e.places.push({ fx, si, ki, sl });
+    (sl.u || []).forEach(bc => e.units.push({ bc, fx, si, ki }));
+  })));
+  return by;
+}
+function goodsData() {
+  const by = hallPlaces();
+  const on = [...by.values()].map(e => ({ ...e, p: S.products.get(e.pid) || { id: e.pid, name: 'Товар', here: 0, sizes: {}, sold30: 0 } }))
+    .sort((a, b) => (b.p.sold30 || 0) - (a.p.sold30 || 0) || (b.p.here || 0) - (a.p.here || 0));
+  const rs = restockSlots(); const np = notOnDisplay();
+  // пары на витрине, которые по учёту не в этом магазине
+  const otherUnits = [];
+  on.forEach(e => e.units.forEach(u => { const x = S.units[u.bc]; if (x && !x.here) otherUnits.push({ ...u, e, x }); }));
+  // модели на витрине, которых по учёту 0 в этом магазине, но есть в другом
+  const otherModels = on.filter(e => !(e.p.here > 0) && (e.p.elsewhere || []).length);
+  const promoFx = zoneFx('hall').filter(f => TYPES[f.type].shelves && isPromoFx(f));
+  const promoFree = promoFx.reduce((a, f) => a + f.shelves.reduce((b, sh) => b + sh.slots.filter(sl => !sl.p).length, 0), 0);
+  const low = on.filter(e => e.p.here > 0 && e.p.here <= 2 && e.places.some(pl => !isPromoFx(pl.fx)));
+  return { on, rs, np, otherUnits, otherModels, promoFx, promoFree, low };
+}
+const placeTxt = (pls) => pls.slice(0, 3).map(pl => shelfName(pl.fx, pl.si)).join(', ') + (pls.length > 3 ? ` +${pls.length - 3}` : '');
+const elseTxt = (p) => (p.elsewhere || []).slice(0, 3).map(w => `${esc(w.name.replace(/^Ортосалон\s*/i, '').replace(/"/g, ''))}: ${w.n}`).join(' · ');
+const statusTxt = (x) => x.st === 'in_stock' ? `в наличии — ${esc(x.whName || 'другой склад')}` : x.st === 'sold' ? `продана${x.whName ? ' (' + esc(x.whName) + ')' : ''}` : x.st === 'written_off' ? `списана${x.whName ? ' (' + esc(x.whName) + ')' : ''}` : esc(x.st || 'неизвестно');
+function moveToPromo(pid) {
+  const by = hallPlaces(); const e = by.get(pid); if (!e) return;
+  const from = e.places.find(pl => !isPromoFx(pl.fx)); if (!from) return toast('Модель уже на акционной полке');
+  let to = null;
+  for (const fx of zoneFx('hall').filter(f => TYPES[f.type].shelves && isPromoFx(f))) {
+    for (let si = fx.shelves.length - 1; si >= 0 && !to; si--) { const ki = fx.shelves[si].slots.findIndex(sl => !sl.p); if (ki >= 0) to = { fx, si, ki }; }
+    if (to) break;
+  }
+  if (!to) return toast('На акционной полке нет свободных мест', true);
+  const t = to.fx.shelves[to.si].slots[to.ki];
+  t.p = from.sl.p; t.q = from.sl.q || 1; if (from.sl.u) t.u = from.sl.u.slice();
+  from.sl.p = null; from.sl.q = 1; delete from.sl.u;
+  changed(true);
+  toast(`Перенесено: ${shelfName(from.fx, from.si)} → ${shelfName(to.fx, to.si)}. Нажмите «Сохранить», чтобы закрепить.`);
+  return to;
+}
+function openGoods(tab) {
+  const m = $('pgModal'); m.hidden = false;
+  let cur = tab || 'disp';
+  const D0 = goodsData();
+  m.innerHTML = `<div class="pg-mbox pg-wide"><h3>Товары на витрине — по номенклатурам</h3>
+    <div class="pg-sub">${esc(storeName())} · продажи считаются по номенклатуре: продали любой размер модели — значит модель продаётся (чеки кассы за 30 дней).</div>
+    <div class="pg-tabs" id="gdTabs"></div>
+    <input class="pg-search" id="gdQ" placeholder="Поиск: название, артикул, полка" autocomplete="off">
+    <div class="pg-mlist pg-mlist-tall" id="gdList"></div>
+    <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="gdClose">Закрыть</button></div></div>`;
+  $('gdClose').addEventListener('click', closeModal);
+  const go = (fid, si, ki) => { closeModal(); if (S.zone !== 'hall') S.zone = 'hall'; select({ k: 'slot', fid, si: Number(si), ki: Number(ki) }); };
+  const draw = () => {
+    const D = goodsData();
+    const tabs = [
+      ['disp', 'На витрине', D.on.length],
+      ['off', 'Нет на витрине — есть на складе', D.rs.length + D.np.length],
+      ['other', 'На витрине, но числятся в другом магазине', D.otherUnits.length + D.otherModels.length],
+      ['promo', 'Мало остатка → на акцию', D.low.length],
+    ];
+    $('gdTabs').innerHTML = tabs.map(([k, t, n]) => `<button data-t="${k}" class="${k === cur ? 'on' : ''} t-${k}">${t} <b>${n}</b></button>`).join('');
+    $('gdTabs').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { cur = b.dataset.t; draw(); }));
+    const v = $('gdQ').value.trim().toLowerCase();
+    const hit = (p, extra) => !v || [(p && p.name), (p && p.sku), extra].join(' ').toLowerCase().includes(v);
+    const sz = (sizes) => { const ks = Object.keys(sizes || {}).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999)); return ks.length ? `<span class="pg-szl">${ks.map(k => `<i>${esc(k.replace(/^размер\s*/i, ''))}${sizes[k] > 1 ? '×' + sizes[k] : ''}</i>`).join('')}</span>` : ''; };
+    const pill = (st) => `<span class="pg-pill ${st}">${ST_LABEL[st] || ''}</span>`;
+    let h = '';
+    if (cur === 'disp') {
+      const arr = D.on.filter(e => hit(e.p, placeTxt(e.places)));
+      h = arr.map(e => { const st = worstStatus(e.places.map(pl => slotStatus(pl.sl))); const pl = e.places[0];
+        return `<div class="pg-li" data-go="${pl.fx.id}|${pl.si}|${pl.ki}">${prodThumb(e.p)}<div class="t"><b>${esc(e.p.name)}</b><small>${esc(placeTxt(e.places))} · продано 30 дн.: <em>${e.p.sold30 || 0}</em>${e.p.sold7 ? ` (7 дн.: ${e.p.sold7})` : ''}</small>${sz(e.p.sizes)}</div><div class="n">${pill(st)}<br>${e.p.here || 0} пар</div></div>`; }).join('');
+    } else if (cur === 'off') {
+      const rs = D.rs.filter(r => hit(r.p, shelfName(r.fx, r.si))); const np = D.np.filter(p => hit(p, stockPlace(p.id)));
+      h = (rs.length ? `<h4 class="pg-h-restock">Продали пару с витрины — выставьте другую (${rs.length})</h4>` + rs.map(r => `<div class="pg-li" data-go="${r.fx.id}|${r.si}|${r.ki}">${prodThumb(r.p)}<div class="t"><b>${esc(r.p ? r.p.name : 'Товар')}</b><small>место: ${esc(shelfName(r.fx, r.si))}${stockPlace(r.sl.p) ? ' · лежит: ' + esc(stockPlace(r.sl.p)) : ''}</small>${sz(r.p && r.p.sizes)}</div><div class="n"><span class="pg-pill restock">${r.p ? r.p.here : 0} пар</span></div></div>`).join('') : '')
+        + `<h4>Модели не выставлены (${np.length})</h4>` + (np.map(p => `<div class="pg-li" style="cursor:default">${prodThumb(p)}<div class="t"><b>${esc(p.name)}</b><small>${esc(p.category || '')} · продано 30 дн.: <em>${p.sold30 || 0}</em>${stockPlace(p.id) ? ' · лежит: ' + esc(stockPlace(p.id)) : ''}</small>${sz(p.sizes)}</div><div class="n">${p.here} пар</div></div>`).join('') || '<div class="pg-empty">Всё выставлено</div>');
+    } else if (cur === 'other') {
+      const ou = D.otherUnits.filter(u => hit(u.e.p, u.bc + ' ' + shelfName(u.fx, u.si)));
+      const om = D.otherModels.filter(e => hit(e.p, placeTxt(e.places)));
+      h = `<div class="pg-info" style="margin:0 0 8px">Пара физически стоит на витрине этого магазина, а по учёту числится в другом месте — нужно оформить перемещение или проверить пару.</div>`
+        + `<h4>Привязанные сканом пары (${ou.length})</h4>` + (ou.map(u => `<div class="pg-li" data-go="${u.fx.id}|${u.si}|${u.ki}">${prodThumb(u.e.p)}<div class="t"><b>${esc(u.e.p.name)}</b><small>пара №${esc(String(u.bc).slice(-6))}${u.x.size && u.x.size !== '—' ? ' · р. ' + esc(u.x.size) : ''} · ${esc(shelfName(u.fx, u.si))}</small><small class="pg-warn">по учёту: ${statusTxt(u.x)}</small></div><div class="n"><span class="pg-pill ${u.x.st === 'in_stock' ? 'restock' : 'out'}">${u.x.st === 'in_stock' ? 'другой магазин' : 'нет в учёте'}</span></div></div>`).join('') || '<div class="pg-empty">Таких пар нет</div>')
+        + `<h4>Модели на витрине: здесь 0 пар, но есть в других магазинах (${om.length})</h4>` + (om.map(e => { const pl = e.places[0]; return `<div class="pg-li" data-go="${pl.fx.id}|${pl.si}|${pl.ki}">${prodThumb(e.p)}<div class="t"><b>${esc(e.p.name)}</b><small>${esc(placeTxt(e.places))}</small><small class="pg-warn">числится: ${elseTxt(e.p)}</small></div><div class="n"><span class="pg-pill out">0 здесь</span></div></div>`; }).join('') || '<div class="pg-empty">Таких моделей нет</div>');
+    } else {
+      const arr = D.low.filter(e => hit(e.p, placeTxt(e.places)));
+      h = `<div class="pg-note" style="margin:0 0 8px">Модели с остатком 1–2 пары в магазине. Предложение: перенести на акционную полку${D.promoFx.length ? ` (${esc(D.promoFx.map(f => f.name).join(', '))}, свободно мест: ${D.promoFree})` : ' — сначала задайте шкафу категорию «Акция / скидки»'}. После переноса нажмите «Сохранить».</div>`
+        + (arr.map(e => { const pl = e.places.find(x => !isPromoFx(x.fx)) || e.places[0]; return `<div class="pg-li" data-go="${pl.fx.id}|${pl.si}|${pl.ki}">${prodThumb(e.p)}<div class="t"><b>${esc(e.p.name)}</b><small>${esc(placeTxt(e.places))} · продано 30 дн.: <em>${e.p.sold30 || 0}</em></small>${sz(e.p.sizes)}</div><div class="n"><span class="pg-pill low">${e.p.here} пар</span><br>${D.promoFx.length ? `<button class="pg-btn pg-mv" data-mv="${e.pid}">% На акцию</button>` : ''}</div></div>`; }).join('') || '<div class="pg-empty">Моделей с малым остатком нет</div>');
+    }
+    $('gdList').innerHTML = h || '<div class="pg-empty">Ничего не найдено</div>';
+    $('gdList').querySelectorAll('[data-go]').forEach(el => el.addEventListener('click', (ev) => { if (ev.target.closest('[data-mv]')) return; const [f, si, ki] = el.dataset.go.split('|'); go(f, si, ki); }));
+    $('gdList').querySelectorAll('[data-mv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); moveToPromo(b.dataset.mv); draw(); }));
+  };
+  $('gdQ').addEventListener('input', draw);
+  draw();
+}
+$('pgGoods') && $('pgGoods').addEventListener('click', () => openGoods());
 
 // ═══════════════════════ общий рендер ═══════════════════════
 function renderKpis() {

@@ -66,6 +66,7 @@
         return `<div class="it">${i.photo ? `<img src="${esc(i.photo)}" alt="">` : '<div class="ph">👟</div>'}<div style="min-width:0">
           <b>${esc(i.name)}</b><small>${i.price ? i.price.toLocaleString('ru-RU') + ' с. · ' : ''}в магазине ${i.here} пар${i.scanned ? ` · на полке ${i.onShelf}` : ''}</small>
           <div><span class="pill ${i.status}">${LBL[i.status] || ''}</span></div>
+          ${(() => { const l = i.units.filter(u => u.ts).sort((x, y) => String(y.ts).localeCompare(String(x.ts)))[0]; return l ? `<small style="display:block">📍 привязал(а): ${esc(l.by || '—')} · ${new Date(l.ts).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</small>` : ''; })()}
           ${i.units.length ? `<div class="units">${i.units.map(u => `<span class="u ${u.onShelf ? '' : (u.st === 'sold' ? 'sold' : 'gone')}">${esc(u.size)} · №${esc(String(u.bc).slice(-4))}</span>`).join('')}</div>` : ''}
           ${sizes.length ? `<div class="sz">${sizes.map(k => `<span>${esc(k)}: <b>${i.sizes[k]}</b></span>`).join('')}</div>` : ''}
         </div></div>`;

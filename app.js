@@ -13562,7 +13562,8 @@ function posShelfParse(code) {
 }
 function posShelfBy() {
     const sh = POS.shift || {};
-    return String(sh.cashier_name || sh.seller_name || sh.opened_by || (POS.chosen && POS.chosen.name) || 'касса').slice(0, 60);
+    const who = sh.seller_name || (POS.chosen && POS.chosen.name) || 'касса';
+    return String(who + (sh.kassa_name ? ` (${sh.kassa_name})` : '')).slice(0, 80);
 }
 function posShelfCss() {
     if (document.getElementById('posShelfCss')) return;
@@ -13629,6 +13630,7 @@ function posShelfRender() {
         <div class="psh-t">На полке (${items.length})</div>
         ${items.map(i => `<div class="psh-it">${i.photo ? `<img src="${posEsc(i.photo)}" alt="">` : '<div class="psh-ph">👟</div>'}<div style="min-width:0;flex:1">
             <b>${posEsc(i.name)}</b><small>в магазине ${i.here} пар${i.scanned ? ` · на полке ${i.onShelf}` : ' · привязано вручную'}</small>
+            ${(() => { const l = (i.units || []).filter(u => u.ts).sort((x, y) => String(y.ts).localeCompare(String(x.ts)))[0]; if (!l) return ''; let t = ''; try { t = new Date(l.ts).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) {} return `<small style="display:block">📍 привязал(а): ${posEsc(l.by || '—')} · ${posEsc(t)}</small>`; })()}
             <div><span class="psh-pill ${i.status}">${LBL[i.status] || ''}</span></div>
             ${i.units.length ? `<div class="psh-u">${i.units.map(u => `<span class="${u.onShelf ? '' : (u.st === 'sold' ? 'sold' : 'gone')}">${posEsc(u.size)} · №${posEsc(String(u.bc).slice(-4))}<button type="button" data-a="unu" data-bc="${posEsc(u.bc)}" title="Отвязать пару">×</button></span>`).join('')}</div>` : ''}
           </div><button type="button" class="psh-rm" data-a="unp" data-p="${posEsc(i.p)}">Убрать</button></div>`).join('') || '<div class="psh-empty">На полке пока нет товаров. Введите последние 6 цифр штрихкода пары выше.</div>'}

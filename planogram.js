@@ -142,6 +142,41 @@ async function downloadPdf(list, title) {
     doc.save(fileSafe(`QR полок - ${title}.pdf`));
   } catch (e) { toast('PDF не создан: ' + e.message, true); }
 }
+// ─────────── журнал привязок ───────────
+const fmtTs = (iso) => { try { return new Date(iso).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) { return iso || ''; } };
+const LOG_ACT = { bind: ['📍', 'Привязал(а) пару'], move: ['↪️', 'Перенёс(ла) пару'], unbind: ['✖', 'Отвязал(а) пару'], remove: ['🗑', 'Убрал(а) модель'], edit: ['✏️', 'Изменил(а) планограмму в редакторе'] };
+function logRow(e, withShelf) {
+  const [ico, t] = LOG_ACT[e.act] || ['•', e.act];
+  const what = e.act === 'edit' ? `версия ${e.v || ''}` : `${esc(e.name || '')}${e.size && e.size !== '—' ? ' · р. ' + esc(e.size) : ''}${e.bc ? ' · №' + esc(String(e.bc).split(',').map(x => x.slice(-6)).join(', ')) : ''}`;
+  return `<div class="pg-log"><div class="pg-log-ico">${ico}</div><div class="pg-log-t"><b>${esc(e.by || '—')}</b> <span>${t}</span><small>${what}${withShelf && e.shelf ? ` → <b>${esc(e.shelf)}</b>` : ''}${e.from ? ` (с: ${esc(e.from)})` : ''}${e.warn ? `<br>⚠ ${esc(e.warn)}` : ''}</small></div><div class="pg-log-ts">${fmtTs(e.ts)}</div></div>`;
+}
+async function openLog() {
+  const m = $('pgModal'); m.hidden = false;
+  m.innerHTML = `<div class="pg-mbox"><h3>Журнал привязок полок</h3><div class="pg-sub" style="margin-bottom:8px">${esc(storeName())} · кто и когда привязал пару к полке, отвязал или изменил планограмму. Время — Душанбе/Ташкент.</div>
+    <input class="pg-search" id="lgQ" placeholder="Фильтр: продавец, товар, полка, цифры штрихкода" autocomplete="off">
+    <div class="pg-mlist" id="lgList"><div class="pg-empty">⏳ загружаю…</div></div>
+    <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="lgClose">Закрыть</button></div></div>`;
+  $('lgClose').addEventListener('click', closeModal);
+  let all = [];
+  const draw = () => {
+    const v = $('lgQ').value.trim().toLowerCase();
+    const arr = v ? all.filter(e => [e.by, e.name, e.shelf, e.bc, e.size].join(' ').toLowerCase().includes(v)) : all;
+    $('lgList').innerHTML = arr.length ? arr.slice(0, 500).map(e => logRow(e, true)).join('') : '<div class="pg-empty">Записей нет</div>';
+  };
+  $('lgQ').addEventListener('input', draw);
+  try { const d = await api(`?action=planogram-log&wh=${S.wh}&limit=2000`); all = d.entries || []; draw(); }
+  catch (e) { $('lgList').innerHTML = `<div class="pg-empty">Не загрузилось: ${esc(e.message)}</div>`; }
+}
+async function loadShelfLog(fx, si) {
+  const el = $('sqLog'); if (!el) return;
+  try {
+    const d = await api(`?action=planogram-log&wh=${S.wh}&s=${shelfSid(fx, si)}&limit=50`);
+    const box = $('sqLog'); if (!box) return;
+    S.shelfLog = {}; (d.entries || []).slice().reverse().forEach(e => { if ((e.act === 'bind' || e.act === 'move') && e.bc) S.shelfLog[e.bc] = e; });
+    box.innerHTML = (d.entries || []).length ? d.entries.map(e => logRow(e, false)).join('') : '<div class="pg-empty">Привязок с кассы по этой полке ещё не было</div>';
+    document.querySelectorAll('[data-ubc]').forEach(c => { const e = S.shelfLog[c.dataset.ubc]; if (e) c.title += ` · привязал(а) ${e.by || '—'} ${fmtTs(e.ts)}`; });
+  } catch (e) { const box = $('sqLog'); if (box) box.innerHTML = `<div class="pg-empty">Журнал не загрузился: ${esc(e.message)}</div>`; }
+}
 function shelvesOf(fxs) { const out = []; fxs.forEach(fx => (fx.shelves || []).forEach((_, si) => out.push([fx, si]))); return out; }
 // модели «нет на витрине — есть на складе»: привязанная сканом пара продана/ушла, а модель ещё есть в магазине
 function restockSlots() {
@@ -1119,6 +1154,7 @@ function renderZonePanel(P) {
   }
   const zShelves = shelvesOf(fxs.filter(f => TYPES[f.type].shelves));
   h += `<div class="pg-qrbar"><div><b>QR-коды полок</b><small>${zShelves.length} полок · этикетки 40×52 мм на A4</small></div><button class="pg-btn sm pri" id="zQrPdf">⬇ Скачать все (PDF)</button></div>`;
+  h += `<div class="pg-qrbar"><div><b>Журнал привязок</b><small>кто и когда привязал пару к полке</small></div><button class="pg-btn sm" id="zLog">📜 Открыть журнал</button></div>`;
   if (S.zone === 'hall') {
     const rs = restockSlots();
     if (rs.length) h += `<h4 class="pg-h-restock">Продали пару с витрины — выставьте ещё (${rs.length})</h4><div class="pg-list">${rs.map(r => `<div class="pg-li" data-rs="${r.fx.id}|${r.si}|${r.ki}">${prodThumb(r.p)}<div class="t"><b>${esc(r.p ? r.p.name : 'Товар')}</b><small>${esc(shelfName(r.fx, r.si))}${stockPlace(r.sl.p) ? ' · лежит: ' + esc(stockPlace(r.sl.p)) : ''}</small></div><div class="n"><span class="pg-pill restock">${r.p ? r.p.here : 0} пар</span></div></div>`).join('')}</div>`;
@@ -1138,6 +1174,7 @@ function renderZonePanel(P) {
   P.querySelectorAll('[data-fx]').forEach(el => el.addEventListener('click', () => select({ k: 'fx', fid: el.dataset.fx })));
   P.querySelectorAll('[data-addfx]').forEach(el => el.addEventListener('click', () => addFx(el.dataset.addfx)));
   P.querySelectorAll('[data-rs]').forEach(el => el.addEventListener('click', () => { const [fid, si, ki] = el.dataset.rs.split('|'); select({ k: 'slot', fid, si: Number(si), ki: Number(ki) }); }));
+  const zl = $('zLog'); if (zl) zl.addEventListener('click', openLog);
   const zq = $('zQrPdf'); if (zq) zq.addEventListener('click', () => downloadPdf(zShelves, `${storeName()} - ${z.name}`));
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on('zName', 'change', (e) => { z.name = e.target.value.trim() || z.name; changed(false); });
@@ -1267,7 +1304,7 @@ function unitChip(bc) {
   const u = S.units[bc] || {};
   const cls = u.here ? 'ok' : (u.st === 'sold' ? 'sold' : 'gone');
   const t = u.here ? 'на полке' : (u.st === 'sold' ? 'продана' : u.st === 'in_stock' ? 'на другом складе' : 'нет в базе');
-  return `<span class="pg-unit ${cls}" title="${esc(bc)} — ${t}">${esc(u.size || '—')} · №${esc(String(bc).slice(-4))}</span>`;
+  return `<span class="pg-unit ${cls}" data-ubc="${esc(bc)}" title="${esc(bc)} — ${t}">${esc(u.size || '—')} · №${esc(String(bc).slice(-4))}</span>`;
 }
 function renderShelfPanel(P, sel) {
   const fx = fxById(sel.fid);
@@ -1287,7 +1324,9 @@ function renderShelfPanel(P, sel) {
     return `<div class="pg-li" data-ski="${ki}">${prodThumb(p)}<div class="t"><b>${esc(p ? p.name : 'Товар не найден')}</b><small>место ${ki + 1} · в магазине ${p ? p.here : 0} пар${us.length ? '' : ' · привязано вручную'}</small>${us.length ? `<div class="pg-units">${us.map(unitChip).join('')}</div>` : ''}</div><div class="n"><span class="pg-pill ${st}">${ST_LABEL[st]}</span></div></div>`;
   }).join('') || '<div class="pg-empty">На полке пока нет товаров. Отсканируйте QR на кассе и привяжите пары.</div>';
   h += `</div>`;
+  h += `<h4>Журнал полки — кто и когда привязал</h4><div class="pg-loglist" id="sqLog"><div class="pg-empty">⏳ загружаю…</div></div>`;
   P.innerHTML = h;
+  loadShelfLog(fx, sel.si);
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on('bkZone', 'click', () => select(null));
   on('bkFx', 'click', () => select({ k: 'fx', fid: fx.id }));

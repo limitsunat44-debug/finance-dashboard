@@ -168,3 +168,11 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-unit.gone{background:#fee2e2;color:#991b1b}
 .pg-note.restock{background:#f5f3ff;border-color:#c4b5fd;color:#4c1d95}
 .pg-h-restock{color:#6d28d9}
+
+/* ── журнал привязок ── */
+.pg-log{display:flex;gap:8px;align-items:flex-start;padding:7px 2px;border-top:1px solid #eef2f7;font-size:12.5px}
+.pg-log:first-child{border-top:0}
+.pg-log-ico{width:20px;text-align:center;flex:none}
+.pg-log-t{flex:1;min-width:0}.pg-log-t span{color:#475569}.pg-log-t small{display:block;color:#64748b;font-size:12px;margin-top:1px}
+.pg-log-ts{flex:none;color:#64748b;font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pg-loglist{max-height:280px;overflow:auto}

@@ -13592,7 +13592,14 @@ function posShelfCss() {
 .psh-u span button{border:0;background:none;color:inherit;font-weight:800;margin-left:4px;padding:0}
 .psh-rm{margin-left:auto;align-self:flex-start;border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:9px;padding:5px 9px;font-size:12px;font-weight:700}
 .psh-done{width:100%;margin-top:14px;padding:14px;border-radius:14px;border:1px solid #cbd5e1;background:#fff;font-size:15px;font-weight:700}
-.psh-empty{color:#64748b;font-size:13px;background:#fff;border-radius:12px;padding:12px}`;
+.psh-empty{color:#64748b;font-size:13px;background:#fff;border-radius:12px;padding:12px}
+.psh-lbl{font-size:13px;font-weight:700;color:#334155;margin:4px 0 6px}
+.psh-row input#posShelfInp{font-size:22px;letter-spacing:.12em;font-weight:700;text-align:center}
+#posShelfRes{margin-top:10px}
+.psh-found{border:2px solid #bfdbfe}
+.psh-st{font-size:12.5px;font-weight:700;margin-top:4px}.psh-st.ok{color:#166534}.psh-st.warn{color:#92400e}
+.psh-bind{width:100%;margin-top:8px;padding:12px;border:0;border-radius:12px;background:#16a34a;color:#fff;font-size:15px;font-weight:800}
+.psh-bind:disabled{opacity:.6}`;
     document.head.appendChild(st);
 }
 function posShelfEl() {
@@ -13615,15 +13622,16 @@ function posShelfRender() {
     const LBL = { ok: 'На витрине', restock: 'Нет на витрине — есть на складе', out: 'Нет в магазине' };
     el.innerHTML = `<div class="psh-h"><button type="button" data-a="close" aria-label="Закрыть">←</button><div style="min-width:0"><b>📍 ${posEsc(name)}</b><small>${v ? `${posEsc(v.fixture.category || '')}${v.fixture.category ? ' · ' : ''}${items.length} моделей · свободно мест ${v.shelf.free}` : '⏳ загружаю…'}</small></div></div>
       <div class="psh-b">
-        ${POS.isMobile ? `<button type="button" class="psh-cam" data-a="cam">📷 Сканировать товар на полку</button>` : ''}
-        <div class="psh-row"><input id="posShelfInp" inputmode="numeric" autocomplete="off" placeholder="Штрихкод пары (сканер или вручную)"><button type="button" data-a="bind">Привязать</button></div>
+        <div class="psh-lbl">Введите последние 6 цифр штрихкода пары</div>
+        <div class="psh-row"><input id="posShelfInp" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="13" autocomplete="off" placeholder="Напр. 155746"><button type="button" data-a="find">Найти</button></div>
+        <div id="posShelfRes"></div>
         ${msg}
         <div class="psh-t">На полке (${items.length})</div>
         ${items.map(i => `<div class="psh-it">${i.photo ? `<img src="${posEsc(i.photo)}" alt="">` : '<div class="psh-ph">👟</div>'}<div style="min-width:0;flex:1">
             <b>${posEsc(i.name)}</b><small>в магазине ${i.here} пар${i.scanned ? ` · на полке ${i.onShelf}` : ' · привязано вручную'}</small>
             <div><span class="psh-pill ${i.status}">${LBL[i.status] || ''}</span></div>
             ${i.units.length ? `<div class="psh-u">${i.units.map(u => `<span class="${u.onShelf ? '' : (u.st === 'sold' ? 'sold' : 'gone')}">${posEsc(u.size)} · №${posEsc(String(u.bc).slice(-4))}<button type="button" data-a="unu" data-bc="${posEsc(u.bc)}" title="Отвязать пару">×</button></span>`).join('')}</div>` : ''}
-          </div><button type="button" class="psh-rm" data-a="unp" data-p="${posEsc(i.p)}">Убрать</button></div>`).join('') || '<div class="psh-empty">На полке пока нет товаров. Сканируйте этикетки пар, которые стоят на этой полке.</div>'}
+          </div><button type="button" class="psh-rm" data-a="unp" data-p="${posEsc(i.p)}">Убрать</button></div>`).join('') || '<div class="psh-empty">На полке пока нет товаров. Введите последние 6 цифр штрихкода пары выше.</div>'}
         <button type="button" class="psh-done" data-a="close">Готово</button>
       </div>`;
     el.querySelectorAll('[data-a]').forEach(b => b.addEventListener('click', (e) => {
@@ -13631,19 +13639,26 @@ function posShelfRender() {
         const a = b.dataset.a;
         if (a === 'close') return posShelfClose();
         if (a === 'cam') return pmobOpenScan('shelf');
-        if (a === 'bind') { const i = document.getElementById('posShelfInp'); const c = i ? i.value.trim() : ''; if (c) posShelfBind(c); return; }
+        if (a === 'find') { const i = document.getElementById('posShelfInp'); posShelfFind(i ? i.value : '', true); return; }
         if (a === 'unu') return posShelfUnbind({ barcode: b.dataset.bc });
         if (a === 'unp') { if (confirm('Убрать эту модель с полки?')) posShelfUnbind({ p: b.dataset.p }); }
     }));
     const inp = document.getElementById('posShelfInp');
     if (inp) {
-        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const c = inp.value.trim(); if (c) posShelfBind(c); } });
-        if (!POS.isMobile) setTimeout(() => inp.focus(), 30);
+        inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); posShelfFind(inp.value, true); } });
+        inp.addEventListener('input', () => {
+            const d = inp.value.replace(/\D+/g, '');
+            if (d !== inp.value) inp.value = d;
+            clearTimeout(POS_SHELF.findT);
+            if (d.length >= 6) POS_SHELF.findT = setTimeout(() => posShelfFind(d, false), 250);
+            else { const r = document.getElementById('posShelfRes'); if (r) r.innerHTML = ''; }
+        });
+        if (POS_SHELF.view && POS_SHELF.focusInp !== false) setTimeout(() => { try { inp.focus(); } catch (_) {} }, 30);
     }
 }
 async function posShelfOpen(ref) {
     POS_SHELF.open = true; POS_SHELF.w = ref.w; POS_SHELF.sid = ref.sid; POS_SHELF.view = null;
-    POS_SHELF.msg = 'Сканируйте этикетки пар, которые стоят на этой полке.'; POS_SHELF.msgCls = 'ok';
+    POS_SHELF.msg = 'Вводите последние 6 цифр штрихкода каждой пары, которая стоит на этой полке, и нажимайте «Привязать».'; POS_SHELF.msgCls = 'ok';
     posShelfRender();
     try {
         const r = await posApiTimeout(`?action=planogram-shelf&w=${encodeURIComponent(ref.w)}&s=${encodeURIComponent(ref.sid)}`, { method: 'GET' }, 12000);
@@ -13687,6 +13702,40 @@ async function posShelfUnbind(o) {
         POS_SHELF.view = r.data.view || POS_SHELF.view; POS_SHELF.msg = '🗑 Убрано с полки'; POS_SHELF.msgCls = 'ok';
     } catch (e) { POS_SHELF.msg = '⛔ ' + posEsc((e && e.message) || e); POS_SHELF.msgCls = 'err'; }
     posShelfRender();
+}
+// Поиск пары по последним цифрам штрихкода → карточка + «Привязать к полке»
+async function posShelfFind(raw, force) {
+    const d = String(raw || '').replace(/\D+/g, '');
+    const box = document.getElementById('posShelfRes');
+    if (!box) return;
+    if (d.length < (force ? 4 : 6)) { box.innerHTML = '<div class="psh-msg warn">Введите последние 6 цифр штрихкода (они под штрихкодом на этикетке).</div>'; return; }
+    const seq = (POS_SHELF.findSeq = (POS_SHELF.findSeq || 0) + 1);
+    box.innerHTML = '<div class="psh-empty">⏳ Ищу пару …' + posEsc(d) + '</div>';
+    try {
+        const r = await posApiTimeout(`?action=planogram-unit-search&w=${encodeURIComponent(POS_SHELF.w || '')}&s=${encodeURIComponent(POS_SHELF.sid || '')}&q=${d}`, { method: 'GET' }, 12000);
+        if (seq !== POS_SHELF.findSeq) return;
+        if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+        const items = r.data.items || [];
+        if (!items.length) { box.innerHTML = `<div class="psh-msg err">Пара с окончанием <b>${posEsc(d)}</b> не найдена. Проверьте цифры.</div>`; return; }
+        // полный штрихкод со сканера: одна пара в этом магазине → сразу привязать
+        if (d.length >= 12 && items.length === 1 && items[0].here) { box.innerHTML = ''; await posShelfBind(items[0].bc); return; }
+        const onShelf = new Set(((POS_SHELF.view && POS_SHELF.view.items) || []).flatMap(i => (i.units || []).map(u => u.bc)));
+        box.innerHTML = (r.data.onlyOther ? '<div class="psh-msg warn">В этом магазине такой пары нет — показаны пары с других складов / проданные.</div>' : '')
+            + (items.length > 1 ? `<div class="psh-lbl">Найдено ${items.length} — выберите нужную</div>` : '')
+            + items.map(it => {
+                const stTxt = it.here ? '✅ В наличии в этом магазине' : (it.st === 'in_stock' ? `⚠ На складе «${posEsc(it.whName || 'другой')}»` : (it.st === 'sold' ? '⚠ Числится проданной' : '⚠ ' + posEsc(it.st)));
+                const bcTxt = String(it.bc);
+                return `<div class="psh-it psh-found">${it.photo ? `<img src="${posEsc(it.photo)}" alt="">` : '<div class="psh-ph">👟</div>'}<div style="min-width:0;flex:1">
+                    <b>${posEsc(it.name)}</b><small>р. ${posEsc(it.size)} · ${posEsc(bcTxt.slice(0, -6))}<b style="display:inline;font-size:12px">${posEsc(bcTxt.slice(-6))}</b>${it.price ? ' · ' + posEsc(String(it.price)) + ' с.' : ''}</small>
+                    <div class="psh-st ${it.here ? 'ok' : 'warn'}">${stTxt}</div>
+                    ${onShelf.has(it.bc) ? '<div class="psh-st ok">Уже на этой полке</div>' : `<button type="button" class="psh-bind" data-bc="${posEsc(it.bc)}">📍 Привязать к полке</button>`}
+                  </div></div>`;
+            }).join('');
+        box.querySelectorAll('.psh-bind').forEach(b => b.addEventListener('click', () => { b.disabled = true; b.textContent = '⏳ Привязываю…'; posShelfBind(b.dataset.bc); }));
+    } catch (e) {
+        if (seq !== POS_SHELF.findSeq) return;
+        box.innerHTML = `<div class="psh-msg err">⛔ ${posEsc((e && e.message) || e)}</div>`;
+    }
 }
 // Ручной ввод в режиме «Полка»: код под QR (fzqlpk2j-6) → открыть полку; цифры → привязать пару
 async function posShelfManual() {

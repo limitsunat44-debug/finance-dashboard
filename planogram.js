@@ -1278,7 +1278,7 @@ function renderShelfPanel(P, sel) {
   h += `<h3>${esc(shelfName(fx, sel.si))}</h3><div class="pg-sub">${esc(fx.category || TYPES[fx.type].label)} · ${sh.slots.length} мест · занято ${items.length}</div>`;
   h += `<div class="pg-qrbig"><img src="${labelCanvas(fx, sel.si, 9).toDataURL('image/png')}" alt="QR полки"></div>
     <div class="pg-actions"><button class="pg-btn pri" id="sqPng">⬇ Скачать PNG</button><button class="pg-btn" id="sqPdf">🖨 PDF для печати</button></div>
-    <div class="pg-info">Наклейте этикетку на кромку полки. <b>Привязка товара:</b> касса РМК → «Ещё» → «Полка: привязать товар» → отсканируйте этот QR → сканируйте этикетки пар, которые стоят на полке. Пара привязывается к полке, учёт — по модели. Если пару продали, а модель есть в магазине — место станет фиолетовым «нет на витрине — есть на складе».</div>`;
+    <div class="pg-info">Наклейте этикетку на кромку полки. <b>Привязка товара:</b> касса РМК → «Ещё» → «Полка: привязать товар» → отсканируйте этот QR → введите последние 6 цифр штрихкода каждой пары на полке и нажмите «Привязать». Пара привязывается к полке, учёт — по модели. Если пару продали, а модель есть в магазине — место станет фиолетовым «нет на витрине — есть на складе».</div>`;
   if (S.dirty) h += `<div class="pg-note">Есть несохранённые изменения — состав с кассы появится после сохранения и обновления.</div>`;
   h += `<h4>Состав полки (${items.length}) <button class="pg-mini" id="sqReload" style="width:auto;padding:0 8px;margin-left:6px;font-size:11.5px" title="Обновить с сервера">⟳ Обновить</button></h4><div class="pg-list">`;
   h += items.map(({ sl, ki }) => {

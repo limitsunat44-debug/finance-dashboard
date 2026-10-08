@@ -148,7 +148,7 @@ const LOG_ACT = { bind: ['📍', 'Привязал(а) пару'], move: ['↪�
 function logRow(e, withShelf) {
   const [ico, t] = LOG_ACT[e.act] || ['•', e.act];
   const what = e.act === 'edit' ? `версия ${e.v || ''}` : `${esc(e.name || '')}${e.size && e.size !== '—' ? ' · р. ' + esc(e.size) : ''}${e.bc ? ' · №' + esc(String(e.bc).split(',').map(x => x.slice(-6)).join(', ')) : ''}`;
-  return `<div class="pg-log"><div class="pg-log-ico">${ico}</div><div class="pg-log-t"><b>${esc(e.by || '—')}</b> <span>${t}</span><small>${what}${withShelf && e.shelf ? ` → <b>${esc(e.shelf)}</b>` : ''}${e.from ? ` (с: ${esc(e.from)})` : ''}${e.warn ? `<br>⚠ ${esc(e.warn)}` : ''}</small></div><div class="pg-log-ts">${fmtTs(e.ts)}</div></div>`;
+  return `<div class="pg-log"><div class="pg-log-ico">${ico}</div><div class="pg-log-t"><b>${esc(e.by || '—')}</b> <span>${t}</span><small>${what}${withShelf && e.shelf ? ` → <b>${esc(e.shelf)}</b>` : ''}${e.from ? ` (с: ${esc(e.from)})` : ''}${e.warn ? `<br>⚠ ${esc(e.warn)}` : ''}${e.restored ? '<br><i>восстановлено по истории версий</i>' : ''}</small></div><div class="pg-log-ts">${fmtTs(e.ts)}</div></div>`;
 }
 async function openLog() {
   const m = $('pgModal'); m.hidden = false;

@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.87';
+const RMK_VERSION = '1.2.88';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.88', date: '10.10.2026', title: 'Инкассация: автопроверка чека перевода DC и Alif',
+    items: [
+      'Кассир прикрепляет скриншот перевода — система сразу читает чек и проверяет: статус «Успешно», сумма = указанной кассиром, получатель — наш счёт 930902100 (с кодом 992 или без), чек нужного банка (DC или Alif).',
+      'Если всё верно — кассир видит уведомление «✅ получатель и сумма на чеке верны»; если нет — что именно не так. С непрошедшим чеком сдать можно только с комментарием.',
+      'Номер операции подставляется с чека автоматически; один и тот же чек нельзя сдать в двух сменах. В квитанции админки рядом со скриншотом — «✅ чек проверен» или причина ошибки.',
+    ],
+  },
   {
     v: '1.2.87', date: '09.10.2026', title: 'Инкассация: приёмка отдельно по наличным, DC и Alif',
     items: [
@@ -5062,6 +5070,13 @@ function incToggle(tr) {
   body.innerHTML = incDetailHTML(incRowsCache[i], i);
   body.querySelectorAll('[data-increv]').forEach(b => b.addEventListener('click', (ev) => { ev.stopPropagation(); incReview(i, b.dataset.increv, b.dataset.incpart || ''); }));
 }
+// Автопроверка чека перевода (серверная): статус, сумма, получатель, № операции, повтор чека
+function incVerHTML(v) {
+  if (!v) return '';
+  const bad = (v.checks || []).filter(c => !c.ok && !c.warn), warn = (v.checks || []).filter(c => c.warn && !c.ok);
+  const tip = (v.checks || []).map(c => (c.ok ? '✓ ' : c.warn ? '⚠ ' : '✗ ') + c.text).join('\n');
+  return `<div title="${esc(tip)}" style="margin-top:4px;font-size:12px;font-weight:600;color:${v.ok ? '#047857' : '#b91c1c'}">${v.ok ? '✅ чек проверен' : '⛔ ' + esc(bad.map(c => c.text).join('; '))}${warn.length ? `<div style="color:#92400e;font-weight:500">⚠ ${esc(warn.map(c => c.text).join('; '))}</div>` : ''}</div>`;
+}
 function incDetailHTML(r, i) {
   const x = r.incass;
   if (!x) {
@@ -5072,7 +5087,7 @@ function incDetailHTML(r, i) {
   const wl = (x.wallets || []).map(w => `<tr>
       <td>👛 ${esc(w.label)}${w.returns ? `<div class="muted" style="font-size:12px">продажи ${fmtNum(w.sales || 0)} − возвраты ${fmtNum(w.returns)}${!w.expected ? ' · переводить нечего' : ''}</div>` : ''}</td><td class="r">${money(w.expected)}</td><td class="r strong">${money(w.sent)}</td><td class="r">${incDiffHTML(w.diff)}</td>
       <td>${esc(w.txn || '—')}</td>
-      <td>${w.photoUrl ? `<a href="${esc(w.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(w.photoUrl)}" alt="скриншот" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb"></a>` : '<span class="muted">нет</span>'}</td>
+      <td>${w.photoUrl ? `<a href="${esc(w.photoUrl)}" target="_blank" rel="noopener"><img src="${esc(w.photoUrl)}" alt="скриншот" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb"></a>` : '<span class="muted">нет</span>'}${incVerHTML(w.verify)}</td>
       <td>${incPartCell(x, w.id)}</td>
     </tr>`).join('');
   const bank = ((x.expected && x.expected.bank) || []).map(b => `${esc(b.label)}: <b>${fmtNum(b.amount)} ${CUR}</b>`).join(' · ');

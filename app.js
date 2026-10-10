@@ -12514,6 +12514,14 @@ function posIncStyle() {
 .inc-photo .inc-pbtn{background:#f1f5f9;border:1px dashed #94a3b8;border-radius:10px;padding:9px 12px;font-size:14px;cursor:pointer}
 .inc-photo img{width:54px;height:54px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb}
 .inc-photo .inc-pst{font-size:12.5px;color:#64748b}
+.inc-ver{margin-top:8px;border-radius:10px;padding:9px 11px;font-size:13px;line-height:1.45}
+.inc-ver b{display:block;font-size:14px;margin-bottom:3px}
+.inc-ver.ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
+.inc-ver.bad{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+.inc-ver.wait{background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.inc-ver .w{color:#92400e}
+.inc-vtoast{position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:100000;max-width:92vw;padding:12px 16px;border-radius:12px;font-size:14.5px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.18);transition:opacity .3s}
+.inc-vtoast.ok{background:#047857;color:#fff}.inc-vtoast.bad{background:#b91c1c;color:#fff}
 .inc-err{background:#fef2f2;color:#b91c1c;border-radius:10px;padding:10px 12px;font-size:14px;margin-bottom:10px;display:none}
 .inc-f{display:flex;gap:10px;padding:12px 18px 18px}
 .inc-f button{flex:1;font-size:16px;padding:13px;border-radius:12px;border:0;cursor:pointer;font-weight:600}
@@ -12575,6 +12583,7 @@ async function posIncassFlow(shift) {
           <div class="inc-row"><label>Номер операции (если есть)</label><input class="incTxn" value="${posEsc(pv(w.id, 'txn') || '')}"></div>
           <div class="inc-photo"><label class="inc-pbtn">📷 Скриншот перевода<input type="file" accept="image/*" class="incFile" style="display:none"></label>
             <img class="incImg" style="${photos[w.id] ? '' : 'display:none'}" src="${posEsc(photos[w.id])}" alt="скриншот"><span class="inc-pst">${photos[w.id] ? 'прикреплён' : ''}</span></div>
+          <div class="inc-ver incVer" style="display:none"></div>
           <div class="inc-diff incWDiff" style="display:none"></div>
         </div>`; }).join('')}
         ${bank.length ? `<div class="inc-sec inc-info">🏦 Поступает на счёт банка, переводить не нужно:<br>${bank.map(b => `${posEsc(b.label)}: <b>${posIncFmt(b.amount)}</b>`).join(' · ')}</div>` : ''}
@@ -12611,6 +12620,54 @@ async function posIncassFlow(shift) {
     ov.querySelectorAll('input,textarea').forEach(el => el.addEventListener('input', recalc));
     recalc();
 
+    // ── Автопроверка чека перевода: статус «Успешно», сумма = указанной, получатель — наш счёт ──
+    const vers = {};
+    wallets.forEach(w => { const v = pv(w.id, 'verify'); if (v) vers[w.id] = v; });
+    const vToast = (ok, text) => {
+        const t = document.createElement('div'); t.className = 'inc-vtoast ' + (ok ? 'ok' : 'bad'); t.textContent = text;
+        document.body.appendChild(t); setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, ok ? 3500 : 6000);
+    };
+    // пересчёт проверки суммы при изменении поля «Переведено» (сумма с чека уже известна)
+    const verEval = (sec) => {
+        const v = vers[sec.dataset.w]; if (!v) return null;
+        const sent = posIncNum(sec.querySelector('.incSent').value || '0');
+        const amtOk = Number(v.amount) > 0 && Math.abs(Number(v.amount) - sent) < 0.01;
+        const checks = (v.checks || []).map(c => c.id === 'amount' ? { ...c, ok: amtOk, text: Number(v.amount) > 0 ? (amtOk ? `Сумма ${posIncFmt(v.amount)} совпадает` : `Сумма на чеке ${posIncFmt(v.amount)}, а указано ${posIncFmt(sent)}`) : c.text } : c);
+        return { ...v, checks, ok: checks.every(c => c.ok || c.warn) };
+    };
+    const verRender = (sec) => {
+        const box = sec.querySelector('.incVer'); const v = verEval(sec);
+        if (!v) { box.style.display = 'none'; return null; }
+        box.style.display = ''; box.className = 'inc-ver incVer ' + (v.ok ? 'ok' : 'bad');
+        const bad = v.checks.filter(c => !c.ok && !c.warn), warn = v.checks.filter(c => c.warn && !c.ok);
+        box.innerHTML = (v.ok ? '<b>✅ Чек проверен: получатель и сумма верны</b>' : '<b>⛔ Чек не прошёл проверку</b>')
+            + v.checks.filter(c => c.ok).map(c => '✓ ' + posEsc(c.text)).join('<br>')
+            + (bad.length ? (v.checks.some(c => c.ok) ? '<br>' : '') + bad.map(c => '✗ ' + posEsc(c.text)).join('<br>') : '')
+            + (warn.length ? '<br>' + warn.map(c => '<span class="w">⚠ ' + posEsc(c.text) + '</span>').join('<br>') : '');
+        return v;
+    };
+    const verRun = async (sec, dataUrl) => {
+        const id = sec.dataset.w, w = wallets.find(x => x.id === id), box = sec.querySelector('.incVer');
+        box.style.display = ''; box.className = 'inc-ver incVer wait'; box.innerHTML = '⏳ Проверяю чек: статус, сумму и получателя…';
+        try {
+            const r = await posApi('?action=incass-verify', { method: 'POST', body: JSON.stringify({ shiftId: shift.id, walletId: id, sent: posIncNum(sec.querySelector('.incSent').value || '0'), dataUrl }) });
+            if (!r.ok || !r.data.ok) throw new Error(r.data.error || `HTTP ${r.status}`);
+            vers[id] = r.data.verify;
+            const txnEl = sec.querySelector('.incTxn');
+            if (txnEl && !txnEl.value.trim() && r.data.verify.txnId) txnEl.value = r.data.verify.txnId;
+            const v = verRender(sec);
+            if (v.ok) vToast(true, `✅ ${w.label}: получатель и сумма на чеке верны`);
+            else vToast(false, `⛔ ${w.label}: ` + v.checks.filter(c => !c.ok && !c.warn).map(c => c.text).join('; '));
+        } catch (e) {
+            delete vers[id];
+            box.className = 'inc-ver incVer bad'; box.innerHTML = '<b>⚠ Не удалось проверить чек автоматически</b>' + posEsc(e.message || String(e)) + '<br>Администратор проверит вручную.';
+        }
+    };
+    ov.querySelectorAll('[data-w]:not([data-none])').forEach(sec => {
+        verRender(sec);
+        sec.querySelector('.incSent').addEventListener('input', () => verRender(sec));
+    });
+
     ov.querySelectorAll('[data-w]:not([data-none])').forEach(sec => {
         const id = sec.dataset.w;
         sec.querySelector('.incFile').addEventListener('change', async (ev) => {
@@ -12625,6 +12682,7 @@ async function posIncassFlow(shift) {
                 photos[id] = r.data.url;
                 img.src = r.data.url; img.style.display = '';
                 st.textContent = '✓ прикреплён';
+                verRun(sec, dataUrl);
             } catch (e) {
                 st.textContent = '⚠ не загрузился: ' + (e.message || e);
             }
@@ -12655,6 +12713,8 @@ async function posIncassFlow(shift) {
             const anyDiff = recalc();
             const comment = $i('incComment').value.trim();
             if (anyDiff && !comment) return showErr('Есть расхождение — напишите причину в комментарии.');
+            const badVer = [...ov.querySelectorAll('[data-w]:not([data-none])')].filter(sec => { const v = verEval(sec); return v && !v.ok; });
+            if (badVer.length && !comment) return showErr('Чек перевода не прошёл проверку (' + badVer.map(sec => wallets.find(x => x.id === sec.dataset.w).label).join(', ') + ') — исправьте сумму, прикрепите правильный чек или напишите причину в комментарии.');
             const btn = $i('incOk');
             btn.disabled = true; btn.textContent = 'Сохраняю…';
             try {

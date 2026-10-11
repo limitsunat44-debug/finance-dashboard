@@ -12,6 +12,9 @@
 
 
 
+## 1.2.94 — 12.10.2026 — Касса: экран не приближается
+- viewport: maximum-scale=1, user-scalable=no (iOS не приближает к полю ввода); блок pinch/gesture и двойного тапа (touch-action: manipulation). index, shelf, planogram, inventory, learn.
+
 ## 1.2.93 — 12.10.2026 — Касса: порядок способов оплаты
 - DCity скрыт из кассы (встроенный список, кэш телефона и ответ сервера `paytypes`). Старые чеки и отчёты с DCity не меняются.
 - Порядок: DC кошелек → Alif кошелек → DC QR → Alif QR → Alif Salom → Смешанная оплата → Наличные, Humo, IBT24.

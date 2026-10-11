@@ -2,7 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style id="noZoom">html{-webkit-text-size-adjust:100%;text-size-adjust:100%}html,body,button,input,select,textarea,a,label{touch-action:manipulation}</style>
+<script>/* запрет приближения экрана (pinch / двойной тап) — касса фиксирована */document.addEventListener('gesturestart',function(e){e.preventDefault()},{passive:false});document.addEventListener('gesturechange',function(e){e.preventDefault()},{passive:false});document.addEventListener('touchmove',function(e){if(e.touches&&e.touches.length>1)e.preventDefault()},{passive:false});</script>
+
 <meta name="theme-color" content="#0f1512">
 <title>Инвентаризация — OrtoSalon</title>
 <link rel="apple-touch-icon" href="apple-touch-icon.png">

@@ -2,7 +2,10 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<style id="noZoom">html{-webkit-text-size-adjust:100%;text-size-adjust:100%}html,body,button,input,select,textarea,a,label{touch-action:manipulation}</style>
+<script>/* запрет приближения экрана (pinch / двойной тап) — касса фиксирована */document.addEventListener('gesturestart',function(e){e.preventDefault()},{passive:false});document.addEventListener('gesturechange',function(e){e.preventDefault()},{passive:false});document.addEventListener('touchmove',function(e){if(e.touches&&e.touches.length>1)e.preventDefault()},{passive:false});</script>
+
     <title>Ортосалон Дашборд</title>
 
     <!-- ─── PWA: касса устанавливается как приложение ─── -->
@@ -17,7 +20,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
     <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20261011-212811">
+    <link rel="stylesheet" href="style.css?v=20261011-213404">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -3274,8 +3277,8 @@
             </div>
         </div>
 	<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>window.__APP_BUILD = '20261011-212811';</script>
-    <script src="app.js?v=20261011-212811"></script>
+    <script>window.__APP_BUILD = '20261011-213404';</script>
+    <script src="app.js?v=20261011-213404"></script>
 
     <!-- ═══════════════════════════════════════════════════════════════ -->
     <!-- ИНДИКАТОР СИНХРОНИЗАЦИИ SUPABASE -->

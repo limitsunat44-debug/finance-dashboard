@@ -12,6 +12,11 @@
 
 
 
+## 1.2.92 — 12.10.2026 — Обучение сотрудников
+- Страница /learn/ (index.html, learn.css, learn.js, content.js, img/): выбор сотрудника без пароля, уроки по кассе, диагностике, диагнозам, товарам, смене; тесты; словарик.
+- Прогресс: localStorage + app_state `learn:<sellerRef>` (POST/GET `learn-progress`, GET `learn-progress-all`).
+- sw.js: путь /learn не обрабатывается Service Worker'ом (не перезаписывает офлайн-кэш кассы).
+
 ## 1.2.91 — 11.10.2026 — Товары в пути: способ доставки
 - Поле «Способ доставки» (auto/avia/rail/sea) в форме отправки; хранится в app_state transit_transport (без DDL).
 - TG-бот: transit_search, reorder_plan (+CSV), хештеги рубрик.

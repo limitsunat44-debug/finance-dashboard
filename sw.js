@@ -15,7 +15,7 @@
    ПРИ ОБНОВЛЕНИИ: поднять SW_VERSION (и, как обычно, ?v=... у app.js/style.css).
    ============================================================================ */
 
-const SW_VERSION = '20261011-181934';
+const SW_VERSION = '20261011-211640';
 const CACHE_STATIC = 'orto-kassa-static-' + SW_VERSION;
 
 // Ядро оболочки (app-shell). Пути относительные к scope.
@@ -109,6 +109,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   // 2) СВОЙ ORIGIN.
+  //    0) Раздел обучения /learn/ — отдельная страница, SW её не трогает
+  //       (иначе навигация на /learn/ перезаписала бы офлайн-кэш кассы).
+  if (url.pathname.startsWith('/learn')) return;
   //    a) Навигация/HTML — network-first (свежесть важнее), кэш — офлайн-фолбэк.
   const isNav = req.mode === 'navigate' ||
                 (req.headers.get('accept') || '').includes('text/html');

@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.88';
+const RMK_VERSION = '1.2.89';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.89', date: '11.10.2026', title: 'Поступление: защита от дублей при проведении',
+    items: [
+      'Причина трёх одинаковых документов ПОСТ-2026-0100/0101/0102: проведение большой партии (1 430 шт.) идёт ~3 минуты, админка ждала 95 секунд и сама повторяла запрос — каждый повтор создавал новый документ.',
+      'Теперь запись (проведение, сохранение) больше не повторяется автоматически; проведение ждёт ответа до 5 минут. У каждого нажатия «Провести» свой ключ — повтор того же нажатия не создаёт второй документ.',
+      'Если такое же поступление (тот же поставщик, склад и количество) уже проведено за последние 30 минут — система предупредит и проведёт второй документ только после подтверждения.',
+    ],
+  },
   {
     v: '1.2.88', date: '10.10.2026', title: 'Инкассация: автопроверка чека перевода DC и Alif',
     items: [
@@ -892,7 +900,10 @@ function nowDushLabel() {
 async function svcFetch(url, opts) {
   const o = opts || {};
   const timeoutMs = o.timeoutMs || 95000; // выше лимита cold-start, чтобы не рвать раньше времени
-  const retries = (o.retries != null) ? o.retries : 2;
+  // Авто-повтор ТОЛЬКО для чтения (GET). POST/запись не повторяем: сервер мог уже выполнить
+  // запрос, а повтор создаёт дубли (11.10.2026 — три одинаковых поступления ПОСТ-0100/0101/0102).
+  const isRead = !o.method || String(o.method).toUpperCase() === 'GET';
+  const retries = (o.retries != null) ? o.retries : (isRead ? 2 : 0);
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
@@ -9018,7 +9029,7 @@ function recvPersist() {
   try {
     localStorage.setItem(RECV_LS_KEY, JSON.stringify({
       docId: recv.docId, supplierId: recv.supplierId, warehouseId: recv.warehouseId,
-      docNumber: recv.docNumber, docDate: recv.docDate, items: recv.items,
+      docNumber: recv.docNumber, docDate: recv.docDate, items: recv.items, postKey: recv.postKey || null,
     }));
   } catch (_) {}
 }
@@ -9033,6 +9044,7 @@ function recvRestore() {
     recv.docNumber = d.docNumber || '';
     recv.docDate = d.docDate || recv.docDate;
     recv.items = Array.isArray(d.items) ? d.items : [];
+    recv.postKey = d.postKey || null;
   } catch (_) {}
 }
 
@@ -9775,7 +9787,7 @@ async function recvCreateSupplier() {
 // ── Отмена документа ──
 function recvCancelDoc() {
   if (!confirm('Очистить текущий документ поступления? Несохранённые данные будут потеряны.')) return;
-  recv.docId = null; recv.status = 'draft'; recv.items = []; recv.docNumber = ''; recv.activeCalcUid = null;
+  recv.docId = null; recv.postKey = null; recv.status = 'draft'; recv.items = []; recv.docNumber = ''; recv.activeCalcUid = null;
   recv.docDate = new Date().toISOString().slice(0, 10);
   try { localStorage.removeItem(RECV_LS_KEY); } catch (_) {}
   recvPaint();
@@ -9798,7 +9810,9 @@ async function recvSubmit(isPost) {
   }
   const supName = (recv.suppliers.find(s => s.id === recv.supplierId) || {}).name || null;
   const whName = (recv.warehouses.find(w => w.id === recv.warehouseId) || {}).name || null;
+  if (isPost && !recv.docId && !recv.postKey) { recv.postKey = (crypto.randomUUID ? crypto.randomUUID() : ('k' + Date.now() + Math.random().toString(36).slice(2))); recvPersist(); }
   const payload = {
+    clientKey: (isPost && !recv.docId) ? recv.postKey : null,
     docId: recv.docId, docNumber: recv.docNumber || null, docDate: recv.docDate,
     supplierId: recv.supplierId || null, supplierName: supName,
     warehouseId: recv.warehouseId || null, warehouseName: whName,
@@ -9825,8 +9839,25 @@ async function recvSubmit(isPost) {
   try {
     const btn = isPost ? $('recvPost') : $('recvSaveDraft');
     if (btn) { btn.disabled = true; btn.textContent = isPost ? 'Проведение…' : 'Сохранение…'; }
-    const d = await posApi('?action=' + action, { method: 'POST', body: JSON.stringify(payload) });
+    let d;
+    try {
+      // проведение большой партии (1000+ штук) идёт до 3–4 минут — ждём до 5 минут, без повторов
+      d = await posApi('?action=' + action, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 300000 });
+    } catch (e) {
+      const m = String(e && e.message || e);
+      if (isPost && /^DUPLICATE:/.test(m)) {
+        if (!confirm(m.replace(/^DUPLICATE:\s*/, '') + '\n\nПровести ещё один документ?')) { recvPaint(); return; }
+        d = await posApi('?action=' + action, { method: 'POST', body: JSON.stringify({ ...payload, allowDuplicate: true }), timeoutMs: 300000 });
+      } else if (isPost && /abort/i.test(m)) {
+        throw new Error('сервер долго не отвечает. Документ, скорее всего, ещё проводится — НЕ нажимайте «Провести» повторно: подождите 2–3 минуты и откройте «Документы поступления».');
+      } else throw e;
+    }
     recv.docId = d.doc.id;
+    if (isPost && d.duplicateRequest) {
+      recv.docsList = null;
+      alert(`Поступление уже проведено — № ${d.doc.doc_number || ''} (создано экземпляров: ${d.createdUnits || 0}). Повторный документ не создавался.\nЦенники можно напечатать из «Документы поступления».`);
+      recvResetForm(); recv.tab = 'docs'; recvPaint(); return;
+    }
     if (isPost) {
       const docNo = (d.doc && d.doc.doc_number) || recv.docNumber || '';
       const bcs = d.barcodes || [];
@@ -9868,6 +9899,7 @@ async function recvSubmit(isPost) {
 
 // Сброс формы нового документа (без подтверждения) — после проведения/нового документа
 function recvResetForm() {
+  recv.postKey = null;
   recv.docId = null; recv.status = 'draft'; recv.items = []; recv.docNumber = '';
   recv.activeCalcUid = null; recv.lastBarcodes = []; recv.docMode = 'new';
   recv.docDate = new Date().toISOString().slice(0, 10);

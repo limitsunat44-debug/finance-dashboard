@@ -11977,22 +11977,38 @@ const POS_PAYTYPES_LS = 'pos_paytypes_v2';
 const POS_PAYTYPES_DEFAULT = {
     cash: [{ ref: '30cd860d-357a-11ed-8788-40a3ccea3566', name: 'Наличные', kind: 'cash' }],
     cards: [
-        ['ce9c7be3-9e71-11ef-8245-c018500f4abe', 'Alif QR'],
-        ['a12bc3f3-e7ed-11ed-8010-c018500f4abe', 'Alif Salom'],
+        ['ce9c7be5-9e71-11ef-8245-c018500f4abe', 'DC кошелек'],
         ['80977525-3723-11ed-878a-40a3ccea3566', 'Alif Кошелек'],
         ['ce9c7be4-9e71-11ef-8245-c018500f4abe', 'DC QR'],
-        ['ce9c7be5-9e71-11ef-8245-c018500f4abe', 'DC кошелек'],
-        ['80977526-3723-11ed-878a-40a3ccea3566', 'DCity'],
+        ['ce9c7be3-9e71-11ef-8245-c018500f4abe', 'Alif QR'],
+        ['a12bc3f3-e7ed-11ed-8010-c018500f4abe', 'Alif Salom'],
         ['80977527-3723-11ed-878a-40a3ccea3566', 'Humo'],
         ['80977528-3723-11ed-878a-40a3ccea3566', 'IBT24'],
     ].map(([ref, name]) => ({ ref, name, kind: 'card' })),
     terminals: [], defaultTerminal: null,
 };
+// v1.2.93: DCity убран из кассы; порядок: DC кошелек, Alif кошелек, DC QR, Alif QR, Alif Salom,
+// затем «Смешанная оплата», затем остальные (Наличные, Humo, IBT24…).
+const POS_PAY_HIDDEN = /^\s*dcity\s*$/i;
+const POS_PAY_ORDER = ['dc кошелек', 'alif кошелек', 'dc qr', 'alif qr', 'alif salom'];
+function posPayRank(name) {
+    const n = String(name || '').trim().toLowerCase().replace(/ё/g, 'е');
+    const i = POS_PAY_ORDER.indexOf(n);
+    return i < 0 ? 999 : i;
+}
+function posPtNorm(pt) {
+    if (!pt || typeof pt !== 'object') return pt;
+    const cards = (pt.cards || []).filter(c => c && !POS_PAY_HIDDEN.test(c.name || ''))
+        .map((c, i) => ({ c, i }))
+        .sort((a, b) => (posPayRank(a.c.name) - posPayRank(b.c.name)) || (a.i - b.i))
+        .map(x => x.c);
+    return { ...pt, cards };
+}
 function posPaytypesValid(pt) {
     return !!(pt && ((pt.cash && pt.cash.length) || (pt.cards && pt.cards.length)));
 }
 function posPaytypesFromCache() {
-    try { const v = JSON.parse(localStorage.getItem(POS_PAYTYPES_LS) || 'null'); return posPaytypesValid(v) ? v : null; }
+    try { const v = JSON.parse(localStorage.getItem(POS_PAYTYPES_LS) || 'null'); return posPaytypesValid(v) ? posPtNorm(v) : null; }
     catch (_) { return null; }
 }
 let _posPtLoading = null;
@@ -12003,7 +12019,7 @@ function posLoadPaytypes() {
             const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
             const r = await posApiTimeout(`?action=paytypes&shop=${shop}`, { method: 'GET' }, 6000);
             if (r.ok && r.data.ok && posPaytypesValid(r.data.paytypes)) {
-                POS.paytypes = r.data.paytypes;
+                POS.paytypes = posPtNorm(r.data.paytypes);
                 try { localStorage.setItem(POS_PAYTYPES_LS, JSON.stringify(r.data.paytypes)); } catch (_) {}
             }
         } catch (_) { /* нет сети — останется копия/встроенный список */ }
@@ -12020,7 +12036,7 @@ async function posOpenPayment() {
         const cached = posPaytypesFromCache();
         if (cached) { POS.paytypes = cached; posLoadPaytypes(); }   // обновим в фоне
         else await posLoadPaytypes();
-        if (!posPaytypesValid(POS.paytypes)) POS.paytypes = POS_PAYTYPES_DEFAULT;
+        if (!posPaytypesValid(POS.paytypes)) POS.paytypes = posPtNorm(POS_PAYTYPES_DEFAULT);
     }
     posPopulateCardSelects();
     const t = posTotals();
@@ -12886,7 +12902,7 @@ async function posEnsurePaytypes() {
     try {
         const shop = encodeURIComponent((POS.chosen && POS.chosen.shopRef) || '');
         const r = await posApi(`?action=paytypes&shop=${shop}`, { method: 'GET' });
-        if (r.ok && r.data.ok && r.data.paytypes) POS.paytypes = r.data.paytypes;
+        if (r.ok && r.data.ok && r.data.paytypes) POS.paytypes = posPtNorm(r.data.paytypes);
     } catch (_) { /* — */ }
     return POS.paytypes;
 }
@@ -14005,10 +14021,13 @@ function pmobRenderPayList() {
         b.addEventListener('click', () => pmobPickPay(mode, ref));
         box.appendChild(b);
     };
-    cash.forEach(c => add(c.name || 'Наличными', 'Оплата наличными', 'cash', c.ref, 'cash'));
-    cards.forEach(c => add(c.name, 'Электронная оплата', 'card', c.ref));
+    // Порядок: основные кошельки/QR → «Смешанная оплата» → остальные (Наличные, Humo, IBT24…).
+    const cardsN = posPtNorm({ cards }).cards;
+    const main = cardsN.filter(c => posPayRank(c.name) < 999);
+    const rest = cardsN.filter(c => posPayRank(c.name) >= 999);
+    main.forEach(c => add(c.name, 'Электронная оплата', 'card', c.ref));
     // Смешанная оплата доступна, если есть и наличные, и хотя бы одна карта.
-    if (cash.length && cards.length) {
+    if (cash.length && cardsN.length) {
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'pmob-pay-item mixed';
@@ -14019,6 +14038,8 @@ function pmobRenderPayList() {
         b.addEventListener('click', () => pmobOpenMix());
         box.appendChild(b);
     }
+    cash.forEach(c => add(c.name || 'Наличными', 'Оплата наличными', 'cash', c.ref, 'cash'));
+    rest.forEach(c => add(c.name, 'Электронная оплата', 'card', c.ref));
 }
 
 // Открыть панель смешанной оплаты.

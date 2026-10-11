@@ -7,8 +7,15 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.90';
+const RMK_VERSION = '1.2.91';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.91', date: '11.10.2026', title: 'Товары в пути: способ доставки',
+    items: [
+      'В форме отправки новое поле «Способ доставки»: Авто / Авиа / Ж/д / Море; показывается в карточке отправки.',
+      'Telegram-бот отвечает, что едет в пути (по модели и размерам, дата отправки, способ доставки), и считает автозаказ на 3 месяца с файлом Excel.',
+    ],
+  },
   {
     v: '1.2.90', date: '11.10.2026', title: 'Пользователи: создание кассиров РМК',
     items: [
@@ -12067,9 +12074,10 @@ function trItemQty(it) {
   return (it.sizes || []).reduce((s, x) => s + (parseInt(x.qty, 10) || 0), 0);
 }
 
+const TR_TRANSPORT = { auto: '🚚 Авто', avia: '✈️ Авиа', rail: '🚆 Ж/д', sea: '🚢 Море' };
 function trNewForm() {
   return {
-    id: null, ship_date: dushToday(), supplier: '', country: '', carrier: '',
+    id: null, ship_date: dushToday(), supplier: '', country: '', carrier: '', transport: '',
     sender_company: '', waybill_no: '', places: '', weight_kg: '', delivery_cost: '',
     goods_cost: '', customs_cost: '', note: '', docPhotos: [], items: [],
   };
@@ -12179,6 +12187,7 @@ function trCardHtml(s) {
           <span class="shp-badge ${st.cls}">${st.label}</span></div>
         <div class="shp-card-sub">
           ${s.waybill_no ? '№ ' + esc(s.waybill_no) + ' · ' : ''}
+          ${s.transport ? (TR_TRANSPORT[s.transport] || esc(s.transport)) + ' · ' : ''}
           ${s.carrier ? esc(s.carrier) + ' · ' : ''}
           ${s.country ? esc(s.country) + ' · ' : ''}
           отпр. ${s.ship_date ? docFmtDate(s.ship_date) : '—'}
@@ -12246,6 +12255,7 @@ function trFormHtml() {
         <label class="shp-fld"><span>Дата отправки <b>*</b></span><input type="date" class="finput" id="trF_date" value="${esc(f.ship_date || '')}"></label>
         <label class="shp-fld shp-fld-wide"><span>Поставщик <b>*</b></span><input class="finput" id="trF_supplier" placeholder="Название поставщика" value="${esc(f.supplier || '')}"></label>
         <label class="shp-fld"><span>Страна отправления</span><input class="finput" id="trF_country" placeholder="напр. Китай" value="${esc(f.country || '')}"></label>
+        <label class="shp-fld"><span>Способ доставки</span><select class="finput" id="trF_transport"><option value="">— не указан —</option>${Object.entries(TR_TRANSPORT).map(([k, v]) => `<option value="${k}" ${f.transport === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
         <label class="shp-fld"><span>Перевозчик (ТК)</span><input class="finput" id="trF_carrier" placeholder="напр. SinoTrans" value="${esc(f.carrier || '')}"></label>
         <label class="shp-fld"><span>Компания-отправитель</span><input class="finput" id="trF_sender" value="${esc(f.sender_company || '')}"></label>
         <label class="shp-fld"><span>№ накладной / трек-номер</span><input class="finput" id="trF_waybill" value="${esc(f.waybill_no || '')}"></label>
@@ -12375,6 +12385,7 @@ function trBindForm() {
   const cn = $('trCancel'); if (cn) cn.addEventListener('click', close);
   const bindF = (id, key) => { const el = $(id); if (el) el.addEventListener('input', () => { f[key] = el.value; }); };
   bindF('trF_date', 'ship_date'); bindF('trF_supplier', 'supplier'); bindF('trF_country', 'country');
+  { const el = $('trF_transport'); if (el) el.addEventListener('change', () => { f.transport = el.value; }); }
   bindF('trF_carrier', 'carrier'); bindF('trF_sender', 'sender_company'); bindF('trF_waybill', 'waybill_no');
   bindF('trF_places', 'places'); bindF('trF_weight', 'weight_kg'); bindF('trF_note', 'note');
   const deliv1 = $('trF_deliv'), deliv2 = $('trF_deliv2');
@@ -12456,7 +12467,7 @@ async function trOpenEdit(id) {
   if (!s) { docToast('Отправка не найдена'); return; }
   trState.form = {
     id: s.id, ship_date: s.ship_date || '', supplier: s.supplier || '', country: s.country || '',
-    carrier: s.carrier || '', sender_company: s.sender_company || '', waybill_no: s.waybill_no || '',
+    carrier: s.carrier || '', transport: s.transport || '', sender_company: s.sender_company || '', waybill_no: s.waybill_no || '',
     places: s.places == null ? '' : s.places, weight_kg: s.weight_kg == null ? '' : s.weight_kg,
     delivery_cost: s.delivery_cost == null ? '' : s.delivery_cost, goods_cost: s.goods_cost == null ? '' : s.goods_cost,
     customs_cost: s.customs_cost == null ? '' : s.customs_cost, note: s.note || '',
@@ -12479,7 +12490,7 @@ async function trSave() {
   const btn = $('trSave'); if (btn) { btn.disabled = true; btn.textContent = 'Сохранение…'; }
   const payload = {
     id: f.id || undefined, ship_date: f.ship_date, supplier: f.supplier, country: f.country,
-    carrier: f.carrier, sender_company: f.sender_company, waybill_no: f.waybill_no,
+    carrier: f.carrier, transport: f.transport || '', sender_company: f.sender_company, waybill_no: f.waybill_no,
     places: f.places, weight_kg: f.weight_kg, delivery_cost: f.delivery_cost,
     goods_cost: f.goods_cost, customs_cost: f.customs_cost, note: f.note,
     doc_photos: f.docPhotos, by: state.user || 'admin',

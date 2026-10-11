@@ -12,6 +12,9 @@
 
 
 
+## 1.2.91 — 11.10.2026 — Товары в пути: способ доставки
+- Поле «Способ доставки» (auto/avia/rail/sea) в форме отправки; хранится в app_state transit_transport (без DDL).
+- TG-бот: transit_search, reorder_plan (+CSV), хештеги рубрик.
 ## 1.2.90 — 11.10.2026 — Пользователи: создание кассиров РМК
 - Блок «Кассиры (продавцы кассы)»: создание (имя, магазин, % бонуса), переименование, % бонуса, скрыть/вернуть в кассе.
 - Backend: app_state pos_sellers_custom (ref = uuid → seller_ref_1c в сменах/чеках/бонусах), pos-sellers-admin / pos-seller-create / pos-seller-update; список кассы getSellers(forKassa).

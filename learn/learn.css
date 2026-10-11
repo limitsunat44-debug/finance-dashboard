@@ -38,7 +38,7 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 .person:active{transform:scale(.98)}
 .ava{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:900;font-size:18px;flex:none}
 .person b{display:block;font-size:17px;font-weight:800}
-.person span{font-size:13px;color:var(--muted)}
+.person .sub{font-size:13px;color:var(--muted);display:block}
 .person .go{margin-left:auto;width:34px;height:34px;border-radius:50%;background:var(--pri-l);display:grid;place-items:center}
 .person .go svg{width:16px;height:16px;stroke:var(--pri-d);fill:none;stroke-width:3}
 .note{font-size:14px;color:var(--muted);text-align:center;margin:18px 0}

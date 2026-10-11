@@ -118,7 +118,7 @@
       document.getElementById('people').innerHTML = list.length ? list.map((s) => `
         <button class="person" data-ref="${esc(s.ref)}" data-name="${esc(s.name)}">
           <span class="ava" style="background:${avaColor(s.name)}">${esc(initials(s.name))}</span>
-          <span><b>${esc(s.name)}</b><span>${localProgText(s.ref)}</span></span>
+          <span><b>${esc(s.name)}</b><span class="sub">${localProgText(s.ref)}</span></span>
           <span class="go">${svg('right')}</span>
         </button>`).join('') : '<div class="note">Никого не нашли. Проверьте интернет или напишите имя иначе.</div>';
       document.querySelectorAll('.person').forEach((b) => (b.onclick = () => choose({ ref: b.dataset.ref, name: b.dataset.name })));

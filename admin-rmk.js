@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.89';
+const RMK_VERSION = '1.2.90';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.90', date: '11.10.2026', title: 'Пользователи: создание кассиров РМК',
+    items: [
+      'В разделе «Пользователи» новый блок «Кассиры (продавцы кассы)»: кнопка «+ Добавить кассира» — имя, магазин (для справки) и % бонуса (по умолчанию 2%).',
+      'Новый кассир сразу появляется в кассе в списке «Продавец» при открытии смены; его продажи, смены, инкассация и бонус учитываются так же, как у остальных продавцов.',
+      'Можно переименовать созданного кассира, поменять % бонуса и скрыть любого продавца из списка кассы (история продаж и бонусы сохраняются).',
+    ],
+  },
   {
     v: '1.2.89', date: '11.10.2026', title: 'Поступление: защита от дублей при проведении',
     items: [
@@ -4101,6 +4109,8 @@ async function renderUsers(force) {
 
       ${kassaAdminCard(d.kassaAdmin || {})}
 
+      <div class="card card-pad" id="usSellersCard"><div class="loading">⏳ Загружаю кассиров…</div></div>
+
       <div class="card card-pad">
         <div class="card-h-row"><h3>Учётки касс и складов</h3></div>
         <div class="tbl-wrap">
@@ -4136,10 +4146,75 @@ async function renderUsers(force) {
       </div>
     `;
     kassaAdminBind(d.kassaAdmin || {});
+    usSellersPaint();
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить пользователей: ' + (e.message || e));
   }
+}
+
+// ── Кассиры (продавцы кассы): создание в РМК без 1С ─────────────────────
+// Созданный кассир сразу появляется в кассе в списке «Продавец» при открытии смены,
+// его продажи пишутся на его код, бонус начисляется по его % (по умолчанию 2%).
+const US_SHOPS = ['Айни', 'Сиёма', 'Сити-Молл', 'Баракат', 'Интернет магазин'];
+async function usSellersPaint() {
+  const box = $('usSellersCard'); if (!box) return;
+  let d;
+  try { d = await posApi('?action=pos-sellers-admin', { method: 'GET' }); }
+  catch (e) { box.innerHTML = `<div class="card-h-row"><h3>Кассиры (продавцы кассы)</h3></div>` + errBar('Не удалось загрузить кассиров: ' + (e.message || e)); return; }
+  const rows = d.sellers || [], def = d.defaultRate != null ? d.defaultRate : 2;
+  const by = String(state.user || 'admin');
+  box.innerHTML = `
+    <div class="card-h-row"><h3>Кассиры (продавцы кассы)</h3><span class="muted" style="font-size:12.5px">${fmtInt(rows.filter(r => r.active).length)} в кассе</span></div>
+    <div class="muted" style="font-size:12.5px;margin:-4px 0 10px">Новый кассир сразу появится в кассе в списке «Продавец» при открытии смены. Продажи и бонус (${fmtNum(def)}% по умолчанию) считаются ему так же, как остальным. Процент можно поменять здесь или в «Бонусы сотрудников».</div>
+    <div class="us-sl-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+      <label style="flex:2 1 220px;display:flex;flex-direction:column;gap:4px;font-size:12.5px">Имя и фамилия кассира<input id="usSlName" class="finput" placeholder="например, Каримова Нигина" maxlength="80"></label>
+      <label style="flex:1 1 150px;display:flex;flex-direction:column;gap:4px;font-size:12.5px">Магазин (для справки)<select id="usSlShop" class="finput"><option value="">— любой —</option>${US_SHOPS.map(x => `<option>${esc(x)}</option>`).join('')}</select></label>
+      <label style="flex:0 1 110px;display:flex;flex-direction:column;gap:4px;font-size:12.5px">Бонус, %<input id="usSlRate" class="finput" type="number" min="0" max="100" step="0.1" value="${esc(String(def))}"></label>
+      <button class="btn btn-primary" id="usSlAdd">+ Добавить кассира</button>
+    </div>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Кассир</th><th>Откуда</th><th>Магазин</th><th class="c">Бонус</th><th class="c">В кассе</th><th class="c"></th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr data-ref="${esc(r.ref)}">
+        <td class="strong">${esc(r.name)}</td>
+        <td class="muted" style="font-size:12.5px">${r.custom ? 'создан в РМК' + (r.createdAt ? ' · ' + dushTime(r.createdAt, true) : '') + (r.createdBy ? ' · ' + esc(r.createdBy) : '') : 'из истории продаж'}</td>
+        <td>${esc(r.shop || '—')}</td>
+        <td class="c">${r.ratePct != null ? fmtNum(r.ratePct) : fmtNum(def)}%</td>
+        <td class="c"><span class="badge ${r.active ? 'ok' : 'off'}">${r.active ? 'Показан' : 'Скрыт'}</span></td>
+        <td class="c" style="white-space:nowrap">
+          ${r.custom ? `<button class="btn btn-ghost btn-sm" data-sl-ren="${esc(r.ref)}">✎ Имя</button>` : ''}
+          <button class="btn btn-ghost btn-sm" data-sl-rate="${esc(r.ref)}">% бонуса</button>
+          <button class="btn btn-ghost btn-sm" data-sl-act="${esc(r.ref)}" data-on="${r.active ? '0' : '1'}">${r.active ? 'Скрыть' : 'Вернуть'}</button>
+        </td></tr>`).join('') : `<tr><td class="tbl-empty" colspan="6">Продавцов нет</td></tr>`}</tbody>
+    </table></div>`;
+  const find = (ref) => rows.find(r => r.ref === ref) || {};
+  $('usSlAdd').onclick = async () => {
+    const name = $('usSlName').value.trim();
+    if (name.length < 2) { alert('Укажите имя и фамилию кассира.'); return; }
+    const btn = $('usSlAdd'); btn.disabled = true; btn.textContent = 'Сохраняю…';
+    try {
+      const r = await posApi('?action=pos-seller-create', { method: 'POST', body: JSON.stringify({ name, shop: $('usSlShop').value, ratePct: $('usSlRate').value, by }) });
+      alert(`Кассир «${r.seller.name}» создан (бонус ${fmtNum(r.ratePct)}%).\nВ кассе он появится в списке «Продавец» при открытии смены (обновите страницу кассы).`);
+      usSellersPaint();
+    } catch (e) { alert('Не удалось создать кассира: ' + (e.message || e)); btn.disabled = false; btn.textContent = '+ Добавить кассира'; }
+  };
+  box.querySelectorAll('[data-sl-ren]').forEach(b => b.onclick = async () => {
+    const r = find(b.dataset.slRen); const name = prompt('Новое имя кассира:', r.name || ''); if (name == null || !name.trim()) return;
+    try { await posApi('?action=pos-seller-update', { method: 'POST', body: JSON.stringify({ ref: r.ref, name: name.trim(), by }) }); usSellersPaint(); }
+    catch (e) { alert('Не удалось: ' + (e.message || e)); }
+  });
+  box.querySelectorAll('[data-sl-act]').forEach(b => b.onclick = async () => {
+    const r = find(b.dataset.slAct), on = b.dataset.on === '1';
+    if (!on && !confirm(`Скрыть «${r.name}» из списка продавцов в кассе?\nИстория продаж и бонусы сохранятся.`)) return;
+    try { await posApi('?action=pos-seller-update', { method: 'POST', body: JSON.stringify({ ref: r.ref, active: on, by }) }); usSellersPaint(); }
+    catch (e) { alert('Не удалось: ' + (e.message || e)); }
+  });
+  box.querySelectorAll('[data-sl-rate]').forEach(b => b.onclick = async () => {
+    const r = find(b.dataset.slRate); const v = prompt(`Процент бонуса для «${r.name}» (0–100):`, String(r.ratePct != null ? r.ratePct : def)); if (v == null) return;
+    const n = Number(String(v).replace(',', '.')); if (!Number.isFinite(n) || n < 0 || n > 100) { alert('Нужно число от 0 до 100.'); return; }
+    try { const x = await posApi('?action=bonus-rate-set', { method: 'POST', body: JSON.stringify({ sellerRef: r.ref, sellerName: r.name, ratePct: n, by }) }); if (x && x.ok === false) throw new Error(x.error); usSellersPaint(); }
+    catch (e) { alert('Не удалось: ' + (e.message || e)); }
+  });
 }
 
 // ═════════════════════════════════════════════════════

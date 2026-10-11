@@ -12,6 +12,9 @@
 
 
 
+## 1.2.90 — 11.10.2026 — Пользователи: создание кассиров РМК
+- Блок «Кассиры (продавцы кассы)»: создание (имя, магазин, % бонуса), переименование, % бонуса, скрыть/вернуть в кассе.
+- Backend: app_state pos_sellers_custom (ref = uuid → seller_ref_1c в сменах/чеках/бонусах), pos-sellers-admin / pos-seller-create / pos-seller-update; список кассы getSellers(forKassa).
 ## 1.2.89 — 11.10.2026 — Поступление: защита от дублей при проведении
 - svcFetch: авто-повтор только для GET; recv-post ждёт до 5 мин; clientKey (app_state recv_req:<key>) — идемпотентность нажатия «Провести».
 - Backend: такое же поступление за 30 мин → 409 DUPLICATE, второй документ только с allowDuplicate.

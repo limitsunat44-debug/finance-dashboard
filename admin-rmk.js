@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.94';
+const RMK_VERSION = '1.2.95';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.95', date: '13.10.2026', title: 'Поступление: выборочная печать этикеток',
+    items: [
+      'В «Документах поступления» у проведённых документов новая кнопка «🖨 Этикетки».',
+      'Можно печатать все этикетки, по товару, по размеру или по одной: отметить штрихкоды или найти по последним цифрам. Есть кнопка «Только на складе» (без проданных) и копии (1–5).',
+      'Если этикеток больше лимита (100–1000, по умолчанию 500), печать делится на части: «Часть 1 · 1–500», «Часть 2 · 501–1000»… Документы больше 1000 экземпляров теперь загружаются полностью.',
+    ],
+  },
   {
     v: '1.2.94', date: '12.10.2026', title: 'Касса: экран не приближается',
     items: [
@@ -10039,7 +10047,7 @@ async function recvPaintDocs() {
       <td class="c">${fmtInt(dc.total_qty || 0)}</td>
       <td class="r">${fmtNum(dc.total_cost || 0)} ${CUR}</td>
       <td class="c">${st}</td>
-      <td class="c"><button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">Открыть</button></td>
+      <td class="c" style="white-space:nowrap"><button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">Открыть</button>${dc.status === 'posted' ? ` <button class="btn btn-outline btn-sm recv-doc-lbl" data-docid="${dc.id}" data-docno="${esc(dc.doc_number || '')}" title="Печать этикеток: все, по товарам, по размерам или по одной">🖨 Этикетки</button>` : ''}</td>
     </tr>`;
   }).join('');
   root.innerHTML = `
@@ -10062,6 +10070,9 @@ async function recvPaintDocs() {
   const nw = $('recvDocsNew'); if (nw) nw.onclick = () => { recvResetForm(); recv.tab = 'new'; recvPaint(); };
   root.querySelectorAll('.recv-doc-open').forEach(b => {
     b.onclick = () => recvOpenDoc(b.getAttribute('data-docid'));
+  });
+  root.querySelectorAll('.recv-doc-lbl').forEach(b => {
+    b.onclick = () => recvLabelsDialog({ docId: b.getAttribute('data-docid'), docNumber: b.getAttribute('data-docno') });
   });
 }
 
@@ -10334,6 +10345,12 @@ async function recvPrintLabels() {
     } catch (e) { alert('Не удалось загрузить штрихкоды документа: ' + (e.message || e)); return; }
   }
   if (!bc.length) { alert('Сначала проведите поступление — тогда появятся штрихкоды для печати.'); return; }
+  // v1.2.95: всегда через окно выбора (все / по товарам / по размерам / по одной, печать частями)
+  return recvLabelsDialog({ docId: recv.docId, docNumber: recv.docNumber, barcodes: bc });
+}
+
+// Открыть окно печати для готового списка этикеток
+function recvOpenLabelsWindow(bc) {
   const html = recvBuildLabelsHTML(bc);
   // открываем в новом окне (надёжнее для загрузки JsBarcode и диалога печати)
   const w = window.open('', '_blank');
@@ -10344,6 +10361,159 @@ async function recvPrintLabels() {
     if (frame) { const doc = frame.contentWindow.document; doc.open(); doc.write(html); doc.close(); }
     else alert('Разрешите всплывающие окна для печати этикеток.');
   }
+}
+
+// ══════════════════════════════════════════════════════
+//  v1.2.95 — ВЫБОРОЧНАЯ ПЕЧАТЬ ЭТИКЕТОК ДОКУМЕНТА
+//  Все / по товару / по размеру / по одной (по штрихкоду). Копии. Печать частями
+//  (браузер плохо держит >1000 страниц в одном задании) — каждая часть отдельным окном.
+// ══════════════════════════════════════════════════════
+const RECV_LBL_STATUS = { in_stock: 'на складе', sold: 'продан', moved: 'перемещён', reserved: 'резерв', written_off: 'списан', returned: 'возврат' };
+function recvSizeCmp(a, b) {
+  const na = parseFloat(String(a).replace(',', '.')), nb = parseFloat(String(b).replace(',', '.'));
+  if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+  return String(a).localeCompare(String(b), 'ru', { numeric: true });
+}
+async function recvLabelsDialog({ docId, docNumber, barcodes }) {
+  let list = barcodes || null;
+  if (docId) {
+    try {
+      const d = await posApi('?action=recv-doc-barcodes&id=' + encodeURIComponent(docId), { method: 'GET' });
+      if (d.barcodes && d.barcodes.length) list = d.barcodes;
+    } catch (e) { if (!list) { alert('Не удалось загрузить штрихкоды документа: ' + (e.message || e)); return; } }
+  }
+  list = (list || []).filter(b => b && b.barcode);
+  if (!list.length) { alert('В документе нет штрихкодов для печати.'); return; }
+
+  // группировка: товар → размер → экземпляры
+  const groups = new Map();
+  for (const b of list) {
+    const pk = b.productId || b.productName || '—';
+    if (!groups.has(pk)) groups.set(pk, { key: pk, name: b.productName || '—', sizes: new Map() });
+    const g = groups.get(pk);
+    const sz = lblSizeOnly(b.size) || 'без размера';
+    if (!g.sizes.has(sz)) g.sizes.set(sz, []);
+    g.sizes.get(sz).push(b);
+  }
+  const G = [...groups.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+  G.forEach(g => { g.sizeList = [...g.sizes.keys()].sort(recvSizeCmp); g.sizeList.forEach(sz => g.sizes.get(sz).sort((x, y) => String(x.barcode).localeCompare(String(y.barcode)))); });
+  const ordered = []; G.forEach(g => g.sizeList.forEach(sz => ordered.push(...g.sizes.get(sz))));
+  const hasNotInStock = ordered.some(b => b.status && b.status !== 'in_stock');
+
+  const st = {
+    sel: new Set(ordered.filter(b => !b.status || b.status === 'in_stock').map(b => b.barcode)),
+    open: new Set(), openSz: new Set(), copies: 1, batch: 500, printed: new Set(), q: '',
+  };
+  if (!st.sel.size) ordered.forEach(b => st.sel.add(b.barcode));
+
+  const ov = document.createElement('div');
+  ov.className = 'rcedit-overlay'; ov.id = 'recvLblOverlay';
+  ov.innerHTML = `<div class="rcedit-modal" style="max-width:860px">
+    <div class="rcedit-head"><h3>🖨 Печать этикеток${docNumber ? ' · ' + esc(docNumber) : ''}</h3><button class="rcedit-x" data-x>✕</button></div>
+    <div class="rlb-bar">
+      <button class="btn btn-outline btn-sm" data-all>Выбрать все (${fmtInt(ordered.length)})</button>
+      <button class="btn btn-ghost btn-sm" data-none>Снять все</button>
+      ${hasNotInStock ? `<button class="btn btn-ghost btn-sm" data-instock title="Выбрать только экземпляры, которые сейчас на складе (без проданных и перемещённых)">Только на складе</button>` : ''}
+      <input class="rlb-q" data-q placeholder="Штрихкод или последние цифры…" inputmode="numeric">
+    </div>
+    <div class="rcedit-body rlb-body" data-body></div>
+    <div class="rlb-foot" data-foot></div>
+  </div>`;
+  document.body.appendChild(ov);
+  const $q = (s) => ov.querySelector(s);
+  const close = () => ov.remove();
+  $q('[data-x]').onclick = close;
+  ov.addEventListener('click', e => { if (e.target === ov) close(); });
+
+  const cnt = (arr) => arr.reduce((n, b) => n + (st.sel.has(b.barcode) ? 1 : 0), 0);
+  const allOf = (g) => g.sizeList.flatMap(sz => g.sizes.get(sz));
+  const stBadge = (b) => (b.status && b.status !== 'in_stock') ? `<span class="rlb-st">${esc(RECV_LBL_STATUS[b.status] || b.status)}</span>` : '';
+  const chk = (n, t) => n === 0 ? '' : (n === t ? 'checked' : 'data-ind');
+
+  function paintBody() {
+    const q = st.q.replace(/\D/g, '');
+    const body = $q('[data-body]');
+    if (q.length >= 3) {
+      const hits = ordered.filter(b => String(b.barcode).endsWith(q) || (q.length >= 6 && String(b.barcode).includes(q)));
+      body.innerHTML = hits.length ? `<div class="rlb-hint">Найдено: ${hits.length}. Отметьте нужные.</div>` + hits.slice(0, 200).map(b => `
+        <label class="rlb-unit"><input type="checkbox" data-u="${esc(b.barcode)}" ${st.sel.has(b.barcode) ? 'checked' : ''}>
+          <span class="rlb-bc">${esc(b.barcode)}</span><span>${esc(b.productName)} · <b>${esc(lblSizeOnly(b.size))}</b></span>${stBadge(b)}</label>`).join('')
+        : '<div class="rlb-hint">Ничего не найдено.</div>';
+    } else {
+      body.innerHTML = G.map((g, gi) => {
+        const all = allOf(g), n = cnt(all), open = st.open.has(gi);
+        return `<div class="rlb-prod">
+          <div class="rlb-prow">
+            <label class="rlb-pl"><input type="checkbox" data-p="${gi}" ${chk(n, all.length)}><b>${esc(g.name)}</b></label>
+            <span class="rlb-cnt">${n} из ${all.length}</span>
+            <button class="btn btn-ghost btn-sm" data-po="${gi}">${open ? 'Свернуть ▴' : 'Размеры ▾'}</button>
+          </div>
+          <div class="rlb-sizes">${g.sizeList.map(sz => {
+            const arr = g.sizes.get(sz), m = cnt(arr);
+            return `<label class="rlb-sz ${m ? 'on' : ''}"><input type="checkbox" data-s="${gi}|${esc(sz)}" ${chk(m, arr.length)}>${esc(sz)} <i>${m}/${arr.length}</i></label>`;
+          }).join('')}</div>
+          ${open ? g.sizeList.map(sz => {
+            const arr = g.sizes.get(sz), k = gi + '|' + sz, so = st.openSz.has(k);
+            return `<div class="rlb-szblock"><button class="rlb-szh" data-so="${esc(k)}">Размер ${esc(sz)} · ${cnt(arr)}/${arr.length} ${so ? '▴' : '▾ по одной'}</button>
+              ${so ? `<div class="rlb-units">${arr.map(b => `<label class="rlb-unit"><input type="checkbox" data-u="${esc(b.barcode)}" ${st.sel.has(b.barcode) ? 'checked' : ''}><span class="rlb-bc">${esc(b.barcode)}</span>${stBadge(b)}</label>`).join('')}</div>` : ''}</div>`;
+          }).join('') : ''}
+        </div>`;
+      }).join('');
+    }
+    body.querySelectorAll('input[data-ind]').forEach(i => { i.indeterminate = true; });
+    paintFoot();
+  }
+  function selectedList() {
+    const out = [];
+    for (const b of ordered) if (st.sel.has(b.barcode)) for (let c = 0; c < st.copies; c++) out.push(b);
+    return out;
+  }
+  function paintFoot() {
+    const sel = selectedList(), n = sel.length, B = st.batch;
+    const parts = Math.ceil(n / B);
+    let btns = '';
+    if (!n) btns = '<span class="rlb-hint">Ничего не выбрано.</span>';
+    else if (parts <= 1) btns = `<button class="btn btn-primary" data-print="0">🖨 Печать (${fmtInt(n)})</button>`;
+    else for (let i = 0; i < parts; i++) {
+      const a = i * B + 1, z = Math.min(n, (i + 1) * B);
+      btns += `<button class="btn ${st.printed.has(i) ? 'btn-outline' : 'btn-primary'} btn-sm" data-print="${i}">${st.printed.has(i) ? '✓ ' : ''}Часть ${i + 1} · ${fmtInt(a)}–${fmtInt(z)}</button>`;
+    }
+    $q('[data-foot]').innerHTML = `
+      <div class="rlb-opts">
+        <span>Выбрано: <b>${fmtInt(st.sel.size)}</b> шт.${st.copies > 1 ? ` × ${st.copies} = <b>${fmtInt(n)}</b> этикеток` : ''}</span>
+        <label>Копий каждой: <select data-copies>${[1, 2, 3, 4, 5].map(c => `<option ${c === st.copies ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+        <label>Этикеток в одной печати: <select data-batch>${[100, 200, 300, 500, 800, 1000].map(c => `<option ${c === B ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
+      </div>
+      ${parts > 1 ? `<div class="rlb-hint">Больше ${fmtInt(B)} этикеток — печатаем частями. Нажимайте части по очереди, дождитесь окончания печати каждой.</div>` : ''}
+      <div class="rlb-btns">${btns}</div>`;
+    $q('[data-copies]').onchange = (e) => { st.copies = +e.target.value; st.printed.clear(); paintFoot(); };
+    $q('[data-batch]').onchange = (e) => { st.batch = +e.target.value; st.printed.clear(); paintFoot(); };
+    $q('[data-foot]').querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
+      const i = +b.getAttribute('data-print');
+      const chunk = sel.slice(i * B, (i + 1) * B);
+      st.printed.add(i);
+      recvOpenLabelsWindow(chunk);
+      paintFoot();
+    });
+  }
+  const setMany = (arr, on) => arr.forEach(b => on ? st.sel.add(b.barcode) : st.sel.delete(b.barcode));
+  $q('[data-body]').addEventListener('change', (e) => {
+    const t = e.target; if (!t.matches('input[type=checkbox]')) return;
+    if (t.dataset.p != null) setMany(allOf(G[+t.dataset.p]), t.checked);
+    else if (t.dataset.s != null) { const [gi, ...rest] = t.dataset.s.split('|'); setMany(G[+gi].sizes.get(rest.join('|')) || [], t.checked); }
+    else if (t.dataset.u != null) { t.checked ? st.sel.add(t.dataset.u) : st.sel.delete(t.dataset.u); }
+    st.printed.clear();
+    paintBody();
+  });
+  $q('[data-body]').addEventListener('click', (e) => {
+    const po = e.target.closest('[data-po]'); if (po) { const i = +po.dataset.po; st.open.has(i) ? st.open.delete(i) : st.open.add(i); paintBody(); return; }
+    const so = e.target.closest('[data-so]'); if (so) { const k = so.dataset.so; st.openSz.has(k) ? st.openSz.delete(k) : st.openSz.add(k); paintBody(); }
+  });
+  $q('[data-all]').onclick = () => { setMany(ordered, true); st.printed.clear(); paintBody(); };
+  $q('[data-none]').onclick = () => { st.sel.clear(); st.printed.clear(); paintBody(); };
+  const ins = $q('[data-instock]'); if (ins) ins.onclick = () => { st.sel.clear(); ordered.forEach(b => { if (!b.status || b.status === 'in_stock') st.sel.add(b.barcode); }); st.printed.clear(); paintBody(); };
+  $q('[data-q]').oninput = (e) => { st.q = e.target.value; paintBody(); };
+  paintBody();
 }
 
 

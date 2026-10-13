@@ -2105,3 +2105,14 @@ table.tbl.tr-tbl tbody tr.tr-jrow:hover{background:var(--g-soft);}
 .rlb-opts{display:flex;flex-wrap:wrap;gap:16px;align-items:center;font-size:13.5px;margin-bottom:8px}
 .rlb-opts select{height:30px;border:1px solid var(--line);border-radius:8px;padding:0 6px;font:inherit}
 .rlb-btns{display:flex;flex-wrap:wrap;gap:8px}
+
+/* v1.2.96 — статус печати этикеток */
+.rlb-pr{font-size:11px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.rlb-pr.on{color:#047857;background:#d1fae5}
+.rlb-pr.half{color:#92400e;background:#fef3c7}
+.rlb-sz em{font-style:normal;font-size:11px;font-weight:700;color:#64748b;background:#f1f5f9;border-radius:6px;padding:0 5px}
+.rlb-sz em.ok{color:#047857;background:#d1fae5}
+.rlb-sz em.half{color:#92400e;background:#fef3c7}
+.rlb-units{grid-template-columns:repeat(auto-fill,minmax(300px,1fr))}
+.rlb-unmark{margin-left:auto}
+.rlb-docpr{margin-top:4px}

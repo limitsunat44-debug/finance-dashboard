@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.95';
+const RMK_VERSION = '1.2.96';
 const RMK_CHANGELOG = [
+  {
+    v: '1.2.96', date: '13.10.2026', title: 'Этикетки: статус «распечатан / не распечатан»',
+    items: [
+      'У каждой этикетки в окне печати есть статус: «✓ распечатан 13.10.2026 07:15» (×2, если печатали повторно) или «не распечатан».',
+      'На размерах и товарах виден счётчик «🖨 3/4» и «распечатано 60 из 720». Кнопка «Только не распечатанные» выбирает то, что ещё не печатали.',
+      'В списке документов поступления под статусом показано «этикетки распечатаны · дата» или «распечатано N из M».',
+      'Если печать не получилась, кнопка «Снять отметку «распечатан»» вернёт выбранным статус «не распечатан».',
+    ],
+  },
   {
     v: '1.2.95', date: '13.10.2026', title: 'Поступление: выборочная печать этикеток',
     items: [
@@ -10046,7 +10055,12 @@ async function recvPaintDocs() {
       <td class="c">${fmtInt(dc.positions_count || 0)}</td>
       <td class="c">${fmtInt(dc.total_qty || 0)}</td>
       <td class="r">${fmtNum(dc.total_cost || 0)} ${CUR}</td>
-      <td class="c">${st}</td>
+      <td class="c">${st}${dc.status === 'posted' ? (() => {
+        const tq = Number(dc.total_qty) || 0, pc = Number(dc.labels_printed) || 0;
+        if (!pc) return `<div class="rlb-docpr"><span class="rlb-pr">этикетки не распечатаны</span></div>`;
+        const cls = tq && pc >= tq ? 'on' : 'half';
+        return `<div class="rlb-docpr"><span class="rlb-pr ${cls}" title="Последняя печать">🖨 ${tq && pc >= tq ? 'распечатаны' : 'распечатано ' + fmtInt(pc) + ' из ' + fmtInt(tq)} · ${dushTime(dc.labels_printed_at, true)}</span></div>`;
+      })() : ''}</td>
       <td class="c" style="white-space:nowrap"><button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">Открыть</button>${dc.status === 'posted' ? ` <button class="btn btn-outline btn-sm recv-doc-lbl" data-docid="${dc.id}" data-docno="${esc(dc.doc_number || '')}" title="Печать этикеток: все, по товарам, по размерам или по одной">🖨 Этикетки</button>` : ''}</td>
     </tr>`;
   }).join('');
@@ -10414,6 +10428,7 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
       <button class="btn btn-outline btn-sm" data-all>Выбрать все (${fmtInt(ordered.length)})</button>
       <button class="btn btn-ghost btn-sm" data-none>Снять все</button>
       ${hasNotInStock ? `<button class="btn btn-ghost btn-sm" data-instock title="Выбрать только экземпляры, которые сейчас на складе (без проданных и перемещённых)">Только на складе</button>` : ''}
+      ${docId ? `<button class="btn btn-ghost btn-sm" data-unprinted title="Выбрать только этикетки, которые ещё не печатали (и на складе)">Только не распечатанные (${fmtInt(ordered.filter(b => !b.printedAt).length)})</button>` : ''}
       <input class="rlb-q" data-q placeholder="Штрихкод или последние цифры…" inputmode="numeric">
     </div>
     <div class="rcedit-body rlb-body" data-body></div>
@@ -10421,7 +10436,7 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
   </div>`;
   document.body.appendChild(ov);
   const $q = (s) => ov.querySelector(s);
-  const close = () => ov.remove();
+  const close = () => { ov.remove(); if (st.dirty && recv.tab === 'docs') { recv.docsList = null; recvPaintDocs(); } };
   $q('[data-x]').onclick = close;
   ov.addEventListener('click', e => { if (e.target === ov) close(); });
 
@@ -10429,6 +10444,11 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
   const allOf = (g) => g.sizeList.flatMap(sz => g.sizes.get(sz));
   const stBadge = (b) => (b.status && b.status !== 'in_stock') ? `<span class="rlb-st">${esc(RECV_LBL_STATUS[b.status] || b.status)}</span>` : '';
   const chk = (n, t) => n === 0 ? '' : (n === t ? 'checked' : 'data-ind');
+  // v1.2.96: статус печати этикетки
+  const prBadge = (b) => b.printedAt
+    ? `<span class="rlb-pr on" title="${b.printedBy ? 'Печатал: ' + esc(b.printedBy) : ''}">✓ распечатан ${dushTime(b.printedAt, true)}${(b.printCount || 1) > 1 ? ' · ×' + b.printCount : ''}</span>`
+    : `<span class="rlb-pr">не распечатан</span>`;
+  const prCnt = (arr) => arr.reduce((n, b) => n + (b.printedAt ? 1 : 0), 0);
 
   function paintBody() {
     const q = st.q.replace(/\D/g, '');
@@ -10437,7 +10457,7 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
       const hits = ordered.filter(b => String(b.barcode).endsWith(q) || (q.length >= 6 && String(b.barcode).includes(q)));
       body.innerHTML = hits.length ? `<div class="rlb-hint">Найдено: ${hits.length}. Отметьте нужные.</div>` + hits.slice(0, 200).map(b => `
         <label class="rlb-unit"><input type="checkbox" data-u="${esc(b.barcode)}" ${st.sel.has(b.barcode) ? 'checked' : ''}>
-          <span class="rlb-bc">${esc(b.barcode)}</span><span>${esc(b.productName)} · <b>${esc(lblSizeOnly(b.size))}</b></span>${stBadge(b)}</label>`).join('')
+          <span class="rlb-bc">${esc(b.barcode)}</span><span>${esc(b.productName)} · <b>${esc(lblSizeOnly(b.size))}</b></span>${stBadge(b)}${prBadge(b)}</label>`).join('')
         : '<div class="rlb-hint">Ничего не найдено.</div>';
     } else {
       body.innerHTML = G.map((g, gi) => {
@@ -10445,17 +10465,17 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
         return `<div class="rlb-prod">
           <div class="rlb-prow">
             <label class="rlb-pl"><input type="checkbox" data-p="${gi}" ${chk(n, all.length)}><b>${esc(g.name)}</b></label>
-            <span class="rlb-cnt">${n} из ${all.length}</span>
+            <span class="rlb-cnt">${(() => { const pc = prCnt(all); return pc === all.length ? '<span class="rlb-pr on">✓ все распечатаны</span>' : (pc ? `<span class="rlb-pr half">распечатано ${pc} из ${all.length}</span>` : '<span class="rlb-pr">не распечатаны</span>'); })()} · выбрано ${n} из ${all.length}</span>
             <button class="btn btn-ghost btn-sm" data-po="${gi}">${open ? 'Свернуть ▴' : 'Размеры ▾'}</button>
           </div>
           <div class="rlb-sizes">${g.sizeList.map(sz => {
             const arr = g.sizes.get(sz), m = cnt(arr);
-            return `<label class="rlb-sz ${m ? 'on' : ''}"><input type="checkbox" data-s="${gi}|${esc(sz)}" ${chk(m, arr.length)}>${esc(sz)} <i>${m}/${arr.length}</i></label>`;
+            return `<label class="rlb-sz ${m ? 'on' : ''}"><input type="checkbox" data-s="${gi}|${esc(sz)}" ${chk(m, arr.length)}>${esc(sz)} <i>${m}/${arr.length}</i><em class="${prCnt(arr) === arr.length ? 'ok' : (prCnt(arr) ? 'half' : '')}" title="Распечатано">🖨 ${prCnt(arr)}/${arr.length}</em></label>`;
           }).join('')}</div>
           ${open ? g.sizeList.map(sz => {
             const arr = g.sizes.get(sz), k = gi + '|' + sz, so = st.openSz.has(k);
-            return `<div class="rlb-szblock"><button class="rlb-szh" data-so="${esc(k)}">Размер ${esc(sz)} · ${cnt(arr)}/${arr.length} ${so ? '▴' : '▾ по одной'}</button>
-              ${so ? `<div class="rlb-units">${arr.map(b => `<label class="rlb-unit"><input type="checkbox" data-u="${esc(b.barcode)}" ${st.sel.has(b.barcode) ? 'checked' : ''}><span class="rlb-bc">${esc(b.barcode)}</span>${stBadge(b)}</label>`).join('')}</div>` : ''}</div>`;
+            return `<div class="rlb-szblock"><button class="rlb-szh" data-so="${esc(k)}">Размер ${esc(sz)} · выбрано ${cnt(arr)}/${arr.length} · распечатано ${prCnt(arr)}/${arr.length} ${so ? '▴' : '▾ по одной'}</button>
+              ${so ? `<div class="rlb-units">${arr.map(b => `<label class="rlb-unit"><input type="checkbox" data-u="${esc(b.barcode)}" ${st.sel.has(b.barcode) ? 'checked' : ''}><span class="rlb-bc">${esc(b.barcode)}</span>${stBadge(b)}${prBadge(b)}</label>`).join('')}</div>` : ''}</div>`;
           }).join('') : ''}
         </div>`;
       }).join('');
@@ -10485,7 +10505,13 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
         <label>Этикеток в одной печати: <select data-batch>${[100, 200, 300, 500, 800, 1000].map(c => `<option ${c === B ? 'selected' : ''}>${c}</option>`).join('')}</select></label>
       </div>
       ${parts > 1 ? `<div class="rlb-hint">Больше ${fmtInt(B)} этикеток — печатаем частями. Нажимайте части по очереди, дождитесь окончания печати каждой.</div>` : ''}
-      <div class="rlb-btns">${btns}</div>`;
+      <div class="rlb-btns">${btns}${docId && n ? `<button class="btn btn-ghost btn-sm rlb-unmark" data-unmark title="Если печать не получилась — вернуть выбранным статус «не распечатан»">Снять отметку «распечатан» (${fmtInt(st.sel.size)})</button>` : ''}</div>`;
+    const um = $q('[data-unmark]'); if (um) um.onclick = () => {
+      const arr = ordered.filter(b => st.sel.has(b.barcode) && b.printedAt);
+      if (!arr.length) { alert('Среди выбранных нет распечатанных этикеток.'); return; }
+      if (!confirm(`Снять отметку «распечатан» у ${arr.length} этикеток?`)) return;
+      st.markPrinted(arr, true);
+    };
     $q('[data-copies]').onchange = (e) => { st.copies = +e.target.value; st.printed.clear(); paintFoot(); };
     $q('[data-batch]').onchange = (e) => { st.batch = +e.target.value; st.printed.clear(); paintFoot(); };
     $q('[data-foot]').querySelectorAll('[data-print]').forEach(b => b.onclick = () => {
@@ -10494,6 +10520,7 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
       st.printed.add(i);
       recvOpenLabelsWindow(chunk);
       paintFoot();
+      if (st.markPrinted) st.markPrinted(chunk);
     });
   }
   const setMany = (arr, on) => arr.forEach(b => on ? st.sel.add(b.barcode) : st.sel.delete(b.barcode));
@@ -10513,6 +10540,24 @@ async function recvLabelsDialog({ docId, docNumber, barcodes }) {
   $q('[data-none]').onclick = () => { st.sel.clear(); st.printed.clear(); paintBody(); };
   const ins = $q('[data-instock]'); if (ins) ins.onclick = () => { st.sel.clear(); ordered.forEach(b => { if (!b.status || b.status === 'in_stock') st.sel.add(b.barcode); }); st.printed.clear(); paintBody(); };
   $q('[data-q]').oninput = (e) => { st.q = e.target.value; paintBody(); };
+  const unp = $q('[data-unprinted]'); if (unp) unp.onclick = () => { st.sel.clear(); ordered.forEach(b => { if (!b.printedAt && (!b.status || b.status === 'in_stock')) st.sel.add(b.barcode); }); st.printed.clear(); paintBody(); };
+  // отметка печати на сервере
+  async function markPrinted(arr, unmark) {
+    if (!docId || !arr.length) return;
+    const codes = [...new Set(arr.map(b => b.barcode))];
+    try {
+      const r = await posApi('?action=recv-label-printed', { method: 'POST', body: JSON.stringify({ docId, barcodes: codes, by: state.user || '', unmark: !!unmark }) });
+      const set = new Set(codes);
+      for (const b of ordered) if (set.has(b.barcode)) {
+        if (unmark) { b.printedAt = null; b.printCount = 0; b.printedBy = ''; }
+        else { b.printedAt = r.at; b.printCount = (b.printCount || 0) + 1; b.printedBy = state.user || ''; }
+      }
+      st.dirty = true;
+    } catch (e) { alert('Этикетки открыты для печати, но отметку «распечатан» сохранить не удалось: ' + (e.message || e)); }
+    const u = $q('[data-unprinted]'); if (u) u.textContent = `Только не распечатанные (${fmtInt(ordered.filter(b => !b.printedAt).length)})`;
+    paintBody();
+  }
+  st.markPrinted = markPrinted;
   paintBody();
 }
 

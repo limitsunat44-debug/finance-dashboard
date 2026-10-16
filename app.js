@@ -58,7 +58,8 @@ const ADMIN_ACCOUNTS = {
     // allowedKassa — точное имя кассы в 1С (фильтр списка касс в РМК).
     'siyoma':   { password: 'siyoma123',   displayName: 'Сиёма',    allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Сиёма"' },
     'ayni':     { password: 'ayni123',     displayName: 'Айни',     allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Айни"' },
-    'barakat':  { password: 'barakat123',  displayName: 'Баракат',  allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Баракат"' },
+    // v1.2.99: Баракат переехал в Худжанд (16.10.2026). Логин прежний, касса та же; старое имя — как запасное.
+    'barakat':  { password: 'barakat123',  displayName: 'Худжанд',  allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Худжанд"', allowedKassaAlt: ['Ортосалон "Баракат"'] },
     'citymall': { password: 'citymall123', displayName: 'Сити-Молл', allowedTabs: ['cashier'], allowedKassa: 'Ортосалон "Сити-Молл"' }
 };
 
@@ -195,6 +196,7 @@ function _doLoginApproved(username, password) {
 let currentAllowedTabs = '*';
 // Разрешённая касса для логина магазина (точное имя) или null = все кассы.
 let currentAllowedKassa = null;
+let currentAllowedKassaAlt = null;
 // Администратор кассы (вход с паролем на сервере): может делать ручную скидку суммой.
 let currentKassaAdmin = false;
 const KASSA_ADMIN_SESSION = '__kassa_admin__';
@@ -1683,6 +1685,7 @@ function _applyAccount(account) {
     currentUser = account.displayName;
     currentAllowedTabs = account.allowedTabs || '*';
     currentAllowedKassa = account.allowedKassa || null;
+    currentAllowedKassaAlt = account.allowedKassaAlt || null;
     currentKassaAdmin = !!account.kassaAdmin;
     document.body.classList.toggle('kassa-admin', currentKassaAdmin);
     document.getElementById('loginScreen').style.display = 'none';
@@ -10630,7 +10633,7 @@ function posKassaEmoji(name) {
     if (n.includes('интернет')) return '🌐';
     if (n.includes('сити') || n.includes('молл')) return '🏬';
     if (n.includes('сиём') || n.includes('сием')) return '🏪';
-    if (n.includes('баракат')) return '🏪';
+    if (n.includes('баракат') || n.includes('худжанд')) return '🏪';
     if (n.includes('айни')) return '🏪';
     return '🛒';
 }
@@ -10655,7 +10658,8 @@ async function loadPos() {
         // Логин магазина: оставляем только его СОБСТВЕННУЮ кассу.
         if (currentAllowedKassa) {
             const norm = s => String(s || '').trim().toLowerCase();
-            POS.kassas = POS.kassas.filter(k => norm(k.name) === norm(currentAllowedKassa));
+            const okNames = new Set([currentAllowedKassa].concat(currentAllowedKassaAlt || []).map(norm));
+            POS.kassas = POS.kassas.filter(k => okNames.has(norm(k.name)));
         }
         POS.sellers = r.data.sellers || [];
         POS.loaded = true;

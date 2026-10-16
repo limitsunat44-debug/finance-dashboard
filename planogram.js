@@ -19,7 +19,7 @@ const LS_AUTH = 'orto_admin_rmk_auth';
 const STORES = [
   { wh: '5ca2d3e6-29c1-4d1a-aeee-832fa513e2e2', name: 'Ортосалон «Айни»', active: true },
   { wh: '19db06fa-deb5-47db-acd7-486c5bc679d0', name: 'Ортосалон «Сиёма»', active: false },
-  { wh: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Ортосалон «Баракат»', active: false },
+  { wh: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Ортосалон «Худжанд»', active: false },
   { wh: '8f0bf6e3-1ffc-4267-8f4b-1e79179dd2a7', name: 'Ортосалон «Сити-Молл»', active: false },
 ];
 

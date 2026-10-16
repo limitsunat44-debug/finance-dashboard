@@ -47,7 +47,7 @@
 (function () {
   const API = 'https://1c-sync-barcodes.vercel.app/api/pos';
   const SECRET = 'TySog2bN1bMJHsssoTvyCZO3IKOef1z0';
-  const STORES = { '5ca2d3e6': 'Ортосалон «Айни»', '19db06fa': 'Ортосалон «Сиёма»', 'f9a506e7': 'Ортосалон «Баракат»', '8f0bf6e3': 'Ортосалон «Сити-Молл»' };
+  const STORES = { '5ca2d3e6': 'Ортосалон «Айни»', '19db06fa': 'Ортосалон «Сиёма»', 'f9a506e7': 'Ортосалон «Худжанд»', '8f0bf6e3': 'Ортосалон «Сити-Молл»' };
   const LBL = { ok: 'На витрине', restock: 'Нет на витрине — есть на складе', out: 'Нет в магазине' };
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const q = new URLSearchParams(location.search);

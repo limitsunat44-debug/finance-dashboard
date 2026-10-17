@@ -72,6 +72,7 @@ try {
   src = src.replace(/(admin-rmk\.css\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(admin-rmk\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(fonts-dejavu\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  src = src.replace(/(admin-sms\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   if (src !== before) { writeFileSync(p, src); changed++; }
 } catch (_) { /* admin-rmk.html может не существовать — пропускаем */ }
 

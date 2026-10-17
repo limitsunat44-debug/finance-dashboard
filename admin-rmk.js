@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.2.99';
+const RMK_VERSION = '1.3.0';
 const RMK_CHANGELOG = [
+  {
+    v: '1.3.0', date: '17.10.2026', title: 'Новый раздел «SMS рассылка» (OsonSMS)',
+    items: [
+      'Рассылка SMS клиентам: дисконтные карты и пациенты после диагностики (DocSales2), фильтры по филиалу, возрасту, дате, баллам, исключение салона.',
+      'Шаблоны сообщений, переменные {Имя}, {Баллы}, {Осталось}, ИИ-генератор текста по темам (RU/TJ), счётчик длины и стоимости, длинные SMS по желанию.',
+      'Автоматические рассылки: повторная бесплатная диагностика детям через 4 месяца (кроме Сиёма Молл), «ещё немного до бонуса 100 с.» от 40 баллов, новое поступление товаров.',
+      'История рассылок со статусами доставки, отложенная отправка, тихие часы 9:00–20:00, ограничение частоты и список отписавшихся.'
+    ],
+  },
   {
     v: '1.2.99', date: '16.10.2026', title: 'Магазин «Баракат» переименован в «Худжанд»',
     items: [
@@ -1121,6 +1130,7 @@ const VIEW_META = {
   returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
+  sms:       { title: 'SMS рассылка', sub: 'Сообщения клиентам дисконтных карт, после диагностики и автоматические напоминания' },
   buyers:    { title: 'Покупатели', sub: 'Клиенты по дисконтным картам: история покупок и бонусные баллы' },
   doctors:   { title: 'Продажи по врачам', sub: 'Отчёт о продажах и бонусах врачей' },
   bonuses:   { title: 'Бонусы сотрудников', sub: 'Бонус кассиров от продаж: свод, настройка % и отметка выплат' },
@@ -1145,7 +1155,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1265,6 +1275,7 @@ function renderView(force) {
   else if (v === 'returns') renderReturns(force);
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
+  else if (v === 'sms') renderSms(force);
   else if (v === 'buyers') renderBuyers(force);
   else if (v === 'doctors') renderDoctors(force);
   else if (v === 'bonuses') renderBonuses(force);

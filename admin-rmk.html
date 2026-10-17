@@ -6,7 +6,8 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-rmk.css?v=20261016-135434">
+  <link rel="stylesheet" href="admin-sms.css?v=20261017-185058">
+  <link rel="stylesheet" href="admin-rmk.css?v=20261017-185058">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -17,7 +18,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20261016-135434"></script>
+  <script src="fonts-dejavu.js?v=20261017-185058"></script>
 </head>
 <body>
 
@@ -71,6 +72,7 @@
         <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
         <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
         <button class="sb-item" data-view="buyers"><span class="sb-ic">👥</span> Покупатели</button>
+        <button class="sb-item" data-view="sms"><span class="sb-ic">💬</span> SMS рассылка</button>
         <button class="sb-item" data-view="doctors"><span class="sb-ic">🩺</span> Продажи по врачам</button>
         <button class="sb-item" data-view="bonuses"><span class="sb-ic">🎁</span> Бонусы сотрудников</button>
         <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товара</button>
@@ -162,6 +164,11 @@
         <!-- ═══ ДИСКОНТНЫЕ КАРТЫ ═══ -->
         <section class="view" id="view-cards">
           <div id="cdBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
+        <!-- ═══ SMS РАССЫЛКА ═══ -->
+        <section class="view" id="view-sms">
+          <div id="smsBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
         <section class="view" id="view-buyers">
@@ -291,6 +298,7 @@
     </main>
   </div>
 
-  <script src="admin-rmk.js?v=20261016-135434"></script>
+  <script src="admin-sms.js?v=20261017-185058"></script>
+  <script src="admin-rmk.js?v=20261017-185058"></script>
 </body>
 </html>

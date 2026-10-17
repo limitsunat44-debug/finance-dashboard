@@ -10,6 +10,11 @@
 
 ---
 
+## 1.3.0 — 17.10.2026 — SMS рассылка (OsonSMS)
+- Backend `1c-sync-barcodes/api/sms.js`: audience/preview/templates/rules/ai-generate/campaign-*/process/campaigns/optout/status; cron `*/10 4-14 * * *` (очередь + автоправила после 11:00).
+- app_state: sms_settings, sms_templates, sms_auto_rules, sms_optout, sms_last_sent, sms_campaigns, `sms_c:<id>`, `sms_auto_log:<rule>`, sms_auto_lastrun, sms_lock. txn_id `<campaign>-<i>` (идемпотентно).
+- Front: `admin-sms.js`, `admin-sms.css`, view `sms`.
+
 ## 1.2.99 — 16.10.2026 — Баракат → Худжанд
 - warehouses f9a506e7 и pos_kassa_templates cfc13fd0 переименованы в «Ортосалон "Худжанд"»; getKassas берёт имя из шаблона. Логин `barakat` принимает оба имени кассы.
 - Отчёты/бот: shopRename (Баракат→Худжанд). app_state `shop_pause` = { shops:[{match,from,until,note}] } — магазин на паузе не попадает в «ещё не открыты»; снимается сам при первой смене после `from` или в `until`.

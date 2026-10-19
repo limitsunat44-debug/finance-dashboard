@@ -48,6 +48,7 @@ let changed = 0;
   // style.css?v=... и app.js?v=... (в href/src)
   src = src.replace(/(style\.css\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(app\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  src = src.replace(/(tasks-kassa\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   // window.__APP_BUILD = '...'  — билд страницы для авто-обновления (СРАВНИВАЕТСЯ с version.json).
   // ЕСЛИ НЕ ОБНОВЛЯТЬ — касса уйдёт в бесконечный location.reload() (билд никогда не совпадёт).
   src = src.replace(/(window\.__APP_BUILD\s*=\s*)['"][^'"]*['"]/, `$1'${VERSION}'`);
@@ -73,6 +74,7 @@ try {
   src = src.replace(/(admin-rmk\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(fonts-dejavu\.js\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(admin-sms\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  src = src.replace(/(admin-tasks\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   if (src !== before) { writeFileSync(p, src); changed++; }
 } catch (_) { /* admin-rmk.html может не существовать — пропускаем */ }
 

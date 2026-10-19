@@ -1,0 +1,35 @@
+/* ══════════ ЗАДАЧИ СОТРУДНИКОВ (v1.4.0) ══════════ */
+.atk-filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.atk-filters .sms-sel{width:auto;min-width:150px}
+.atk-tblw{overflow-x:auto}
+.atk-tbl td{vertical-align:top}
+.atk-tbl small{color:var(--tx2);font-size:11.5px}
+.atk-kind{white-space:nowrap;font-size:12px;font-weight:600}
+.atk-desc{font-size:12px;color:var(--tx2);margin-top:3px;line-height:1.35;max-width:420px}
+.atk-cmt{font-size:12px;margin-top:4px;background:#f0faf4;border-radius:7px;padding:4px 7px;max-width:420px}
+.atk-note{font-size:11.5px;margin-top:4px;color:#b45309}
+.atk-pr{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:7px}
+.atk-pr.high{background:#fde8e8;color:#dc2626}.atk-pr.mid{background:#fef3c7;color:#b45309}.atk-pr.low{background:#e0edff;color:#2563eb}
+.atk-st{display:inline-block;font-size:11.5px;font-weight:700;padding:2px 8px;border-radius:7px;background:#eef2f1;color:var(--tx2);white-space:nowrap}
+.atk-st.open{background:#e0edff;color:#1d4ed8}.atk-st.review{background:#fef3c7;color:#b45309}.atk-st.done{background:#dcfce7;color:#15803d}.atk-st.rejected,.atk-st.expired{background:#fde8e8;color:#dc2626}
+.atk-acts{white-space:nowrap}
+.atk-acts .sms-btn{padding:6px 9px;font-size:12px;margin:0 4px 4px 0}
+.atk-empty{padding:30px;text-align:center;color:var(--tx2);font-size:13.5px}
+.atk-form{max-width:760px}
+.atk-aigrid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(380px,1.3fr);gap:16px;align-items:start}
+@media (max-width:1000px){.atk-aigrid{grid-template-columns:1fr}}
+.atk-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.atk-stats>div{background:#f7f9f8;border:1px solid var(--line);border-radius:11px;padding:9px 10px;display:flex;flex-direction:column;gap:2px}
+.atk-stats span{font-size:11.5px;color:var(--tx2)}
+.atk-stats b{font-size:16px}
+.atk-stats small{font-size:11px;color:var(--tx3)}
+.atk-stats small.up{color:#15803d}.atk-stats small.dn{color:#dc2626}
+.atk-sum{margin-top:12px;background:#f0faf4;border:1px solid #bbf7d0;border-radius:11px;padding:10px 12px;font-size:13px;line-height:1.45}
+.atk-draft{display:flex;gap:10px;border:1.5px solid var(--line);border-radius:12px;padding:10px;margin-bottom:10px}
+.atk-draft.off{opacity:.5}
+.atk-dbody{flex:1;display:flex;flex-direction:column;gap:6px;min-width:0}
+.atk-dt{font-weight:700}
+.atk-dd{min-height:64px}
+.atk-dmeta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px;color:var(--tx2)}
+.atk-dpts{width:56px;padding:3px 6px;border:1px solid var(--line);border-radius:7px}
+.atk-ddue{padding:3px 6px;border:1px solid var(--line);border-radius:7px}

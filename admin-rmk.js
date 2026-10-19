@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.3.0';
+const RMK_VERSION = '1.4.0';
 const RMK_CHANGELOG = [
+  {
+    v: '1.4.0', date: '19.10.2026', title: 'Задачи сотрудников и «Узнать место товара»',
+    items: [
+      'Касса: новый раздел «Задачи». Когда с витрины продают пару, появляется задача «Секция · Полка · Место пустое — поставьте товар». Выполнение — скан пары, она сама привязывается к месту на планограмме.',
+      'Ежедневная задача «Проверить витрину» (секции по кругу), задачи от администратора и от ИИ. За каждую задачу начисляются бонус-баллы, прогресс виден в «Мой заработок».',
+      'Касса: кнопка с камерой «Место» — сканируете штрихкод и видите секцию, полку, место и план магазина, чтобы вернуть товар на место.',
+      'Админка: раздел «Задачи сотрудников» — список и подтверждение, новая задача, ИИ-генератор задач по продажам и диагностикам сотрудника, рейтинг, настройки баллов.'
+    ],
+  },
   {
     v: '1.3.0', date: '17.10.2026', title: 'Новый раздел «SMS рассылка» (OsonSMS)',
     items: [
@@ -1131,6 +1140,7 @@ const VIEW_META = {
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
   sms:       { title: 'SMS рассылка', sub: 'Сообщения клиентам дисконтных карт, после диагностики и автоматические напоминания' },
+  tasks:     { title: 'Задачи сотрудников', sub: 'Пополнение витрин по планограмме, задачи от администратора и ИИ, баллы и рейтинг' },
   buyers:    { title: 'Покупатели', sub: 'Клиенты по дисконтным картам: история покупок и бонусные баллы' },
   doctors:   { title: 'Продажи по врачам', sub: 'Отчёт о продажах и бонусах врачей' },
   bonuses:   { title: 'Бонусы сотрудников', sub: 'Бонус кассиров от продаж: свод, настройка % и отметка выплат' },
@@ -1155,7 +1165,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1276,6 +1286,7 @@ function renderView(force) {
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
   else if (v === 'sms') renderSms(force);
+  else if (v === 'tasks') renderTasks(force);
   else if (v === 'buyers') renderBuyers(force);
   else if (v === 'doctors') renderDoctors(force);
   else if (v === 'bonuses') renderBonuses(force);

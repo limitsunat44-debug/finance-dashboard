@@ -10,6 +10,11 @@
 
 ---
 
+## 1.4.0 — 19.10.2026 — Задачи сотрудников + «Узнать место товара»
+- Backend `1c-sync-barcodes/api/tasks.js`: list/count/get/complete/snooze/skip/summary/locate (касса), admin-list/admin-create/admin-act/employees/employee-stats/ai-generate/settings/settings-save/sync (админка); cron `*/15 4-15 * * *`.
+- app_state: `tasks:<warehouse_id>` = {list, syncedAt, dailyYmd, rot}, `tasks_settings` (баллы low/mid/high 3/5/8, проверка 3, 1 балл = 0 с., подтверждение ручных/ИИ). Restock — по планограмме `planogram:<wh>` (слоты с u[]), выполнение сканом пары → planoSave + planoLogAdd.
+- Front: `tasks-kassa.js/css` (касса: экраны Задачи/Задача/Сканер/Выполнено, кнопка «Место», блок в «Мой заработок»), `admin-tasks.js/css` (view `tasks`).
+
 ## 1.3.0 — 17.10.2026 — SMS рассылка (OsonSMS)
 - Backend `1c-sync-barcodes/api/sms.js`: audience/preview/templates/rules/ai-generate/campaign-*/process/campaigns/optout/status; cron `*/10 4-14 * * *` (очередь + автоправила после 11:00).
 - app_state: sms_settings, sms_templates, sms_auto_rules, sms_optout, sms_last_sent, sms_campaigns, `sms_c:<id>`, `sms_auto_log:<rule>`, sms_auto_lastrun, sms_lock. txn_id `<campaign>-<i>` (идемпотентно).

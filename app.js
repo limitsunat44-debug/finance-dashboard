@@ -14252,6 +14252,8 @@ function pmobSaleDone() {
         }
     }
     pmobShow('saledone');
+    // Задачи: проданная пара могла освободить место на витрине → обновить счётчик задач.
+    try { if (window.tkPoke) window.tkPoke(); } catch (_) {}
 }
 
 // seller_ref текущей смены (продавец). Касса видит только своё.
@@ -14323,6 +14325,9 @@ async function pmobLoadEarnings() {
         }
     } catch (e) {
         setB('pmobEarnChkToday', '—'); setB('pmobEarnChkMonth', '—'); setB('pmobEarnRetMonth', '—');
+    } finally {
+        // Задачи: прогресс и бонус-баллы за задачи (tasks-kassa.js)
+        try { if (window.tkEarnings) window.tkEarnings(); } catch (_) {}
     }
 }
 

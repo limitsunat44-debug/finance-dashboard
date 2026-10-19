@@ -7,8 +7,15 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.4.2';
+const RMK_VERSION = '1.4.3';
 const RMK_CHANGELOG = [
+  {
+    v: '1.4.3', date: '20.10.2026', title: 'ИИ обновлён до Claude Sonnet 5.5 + единая настройка модели',
+    items: [
+      'Весь ИИ в РМК переведён на Claude Sonnet 5.5: отчёты и ассистент в Telegram, бот расходов, SMS-тексты, задачи сотрудникам, финансовый анализ, проверка скриншотов DC/Alif при инкассации.',
+      'Настройки РМК → «ИИ-модель»: одна настройка для всего ИИ, меняется без правки кода. Кнопка «Проверить» и при желании отдельная модель для каждой функции.'
+    ],
+  },
   {
     v: '1.4.2', date: '19.10.2026', title: 'Новый экран «Чеки продаж»',
     items: [
@@ -4552,6 +4559,8 @@ async function renderSettings(force) {
         </div>
       </div>
 
+      ${state.allowedTabs === '*' ? '<div id="aiModelCard"></div>' : ''}
+
       ${state.allowedTabs === '*' ? `
       <div class="card card-pad">
         <div class="card-h-row"><h3>Синхронизация цен из 1С</h3></div>
@@ -4568,6 +4577,7 @@ async function renderSettings(force) {
       </div>
       ` : ''}
     `;
+    if (typeof renderAiModelCard === 'function' && $('aiModelCard')) renderAiModelCard();
     bumpSync();
   } catch (e) {
     box.innerHTML = errBar('Не удалось загрузить настройки: ' + (e.message || e));

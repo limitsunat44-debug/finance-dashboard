@@ -10,6 +10,12 @@
 
 ---
 
+## 1.4.3 — 20.10.2026 — ИИ → Claude Sonnet 5.5, единая настройка модели
+- Backend `api/_ai.js`: единый вызов Anthropic (`aiMessages`/`aiText`/`aiModel`). Модель: app_state `ai_settings` {model, models{kind}} → env `AI_MODEL` → `claude-sonnet-5-5`. temperature/top_p не передаются (модели 5.x их отклоняют), max_tokens ≥ 1024.
+- Переведены: daily-report (report), tg-webhook (bot), tg-rashod (rashod), sms (sms), tasks (tasks), pos fin-ai-* (finance), incass verify (incass). Удалены REPORT_CLAUDE_MODEL/ANTHROPIC_MODEL/INCASS_VERIFY_MODEL.
+- `api/ai.js`: get / test / save / announce (разовое объявление в группы ИИ, защита от повтора app_state `ai_announce:*`).
+- Front: блок «🤖 ИИ-модель» в Настройках РМК (`renderAiModelCard` в admin-analytics.js).
+
 ## 1.4.2 — 19.10.2026 — Новый экран «Чеки продаж»
 - Backend `api/analytics.js`: `action=sales-detail&from&to[&wh]` (только чтение) — pos_receipts(op_type=sale) + pos_receipt_items + фото по штрихкоду (stock_units→product_variants→products/product_photos) + stock_unit_returns по sale_receipt_ref_1c + клиент/бонусы из orto.cards; KPI с дельтами, payMethods. `inChunks` теперь параллельный (6 потоков).
 - Front: `renderSales2` в `admin-analytics.js` вместо `renderReceipts` (view `receipts`, `#rcBody`); редактирование — существующий `openReceiptEditModal` через `receipt-items`.

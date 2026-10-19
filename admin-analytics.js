@@ -420,3 +420,49 @@ function slSide(r) {
     <h4>История</h4>
     <div class="an-hist">${hist.map(h => `<div><i></i><b>${h[0]}</b><small>${h[1]} · ${h[2]}</small></div>`).join('')}</div>`;
 }
+
+// ═════════════ 4) НАСТРОЙКА ИИ-МОДЕЛИ (единая для всего РМК) ═════════════
+async function aiSetApi(action, body) {
+  const res = await svcFetch(`${BARCODE_SVC_URL}/api/ai?action=${action}`, {
+    method: body ? 'POST' : 'GET', timeoutMs: 120000, retries: 0,
+    headers: { 'X-Provision-Secret': BARCODE_SVC_SECRET, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d.ok === false) throw new Error(d.error || `HTTP ${res.status}`);
+  return d;
+}
+async function renderAiModelCard() {
+  const box = $('aiModelCard'); if (!box) return;
+  box.innerHTML = '<div class="card card-pad"><div class="muted">⏳ Загружаю настройку ИИ…</div></div>';
+  let d;
+  try { d = await aiSetApi('get'); } catch (e) { box.innerHTML = `<div class="card card-pad">${errBar('ИИ-модель: ' + e.message)}</div>`; return; }
+  const known = d.list.map(m => m.id);
+  const sel = (id, val, withInherit) => `<select class="fselect" id="${id}">${withInherit ? `<option value="">— как основная —</option>` : ''}${d.list.map(m => `<option value="${m.id}" ${val === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}${val && !known.includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''}</select>`;
+  const cur = d.list.find(m => m.id === d.model);
+  box.innerHTML = `<div class="card card-pad an-ai">
+    <div class="card-h-row"><h3>🤖 ИИ-модель</h3><span class="muted sm">${d.updatedAt ? 'изменено ' + dushTime(d.updatedAt, true) + (d.updatedBy ? ' · ' + esc(d.updatedBy) : '') : 'по умолчанию'}</span></div>
+    <div class="muted" style="font-size:13px;margin-bottom:12px">Одна настройка для всего ИИ в РМК: отчёты и ассистент в Telegram, бот расходов, SMS, задачи, финансовый анализ, проверка скриншотов инкассации. Меняется здесь — без правки кода, действует в течение минуты.</div>
+    <div class="an-ai-row"><label>Основная модель</label>${sel('aiMain', d.model)}<span class="muted sm">${cur ? esc(cur.note) : esc(d.model)}</span></div>
+    <details class="an-ai-adv"><summary>Отдельная модель для функции (необязательно)</summary>
+      ${Object.entries(d.kinds).map(([k, l]) => `<div class="an-ai-row"><label>${esc(l)}</label>${sel('aiK_' + k, d.models[k] || '', true)}</div>`).join('')}
+    </details>
+    <div class="an-ai-btns"><button class="btn" id="aiTest">⚡ Проверить</button><button class="btn btn-primary" id="aiSave">💾 Сохранить</button></div>
+    <div id="aiMsg" class="muted sm" style="margin-top:10px"></div>
+  </div>`;
+  const msg = (t, bad) => { const m = $('aiMsg'); m.innerHTML = t; m.className = bad ? 'red sm' : 'muted sm'; };
+  $('aiTest').addEventListener('click', async () => {
+    msg('⏳ Отправляю тестовый запрос…');
+    try { const r = await aiSetApi('test', { model: $('aiMain').value }); msg(`✅ ${esc(r.model)} отвечает за ${(r.ms / 1000).toFixed(1).replace('.', ',')} с: «${esc(r.text)}»`); }
+    catch (e) { msg('❌ ' + esc(e.message), true); }
+  });
+  $('aiSave').addEventListener('click', async () => {
+    const models = {}; Object.keys(d.kinds).forEach(k => { const v = ($('aiK_' + k) || {}).value; if (v) models[k] = v; });
+    msg('⏳ Проверяю модель и сохраняю…'); $('aiSave').disabled = true;
+    try {
+      let by = 'admin'; try { by = (JSON.parse(localStorage.getItem('orto_admin_rmk_auth') || '{}').user) || by; } catch (_) {}
+      await aiSetApi('save', { model: $('aiMain').value, models, by });
+      await renderAiModelCard(); msg('✅ Сохранено. Новая модель начнёт работать в течение минуты.');
+    } catch (e) { msg('❌ ' + esc(e.message), true); $('aiSave').disabled = false; }
+  });
+}

@@ -371,18 +371,29 @@ function init3d() {
     updateWallFade();
     G.renderer.render(G.scene, G.cam);
     G.label.render(G.scene, G.cam);
-    if ((G.fr = (G.fr || 0) + 1) % 8 === 0) declutter();
+    if ((G.fr = (G.fr || 0) + 1) % 8 === 0) { labelScale(); declutter(); }
   })();
 }
+// Плашки категорий: чем дальше камера — тем мельче (0.8…1), чтобы не закрывали витрины.
+function labelScale() {
+  const host = $('pg3d'); if (!host || !G.cam) return;
+  const dist = G.cam.position.distanceTo(G.ctl.target);
+  const s = Math.max(0.8, Math.min(1, 15 / Math.max(1, dist)));
+  const v = s.toFixed(2); if (host.dataset.pgs !== v) { host.dataset.pgs = v; host.style.setProperty('--pgs', v); }
+}
+// Наложение плашек: налезающая сворачивается до иконки (название — по наведению); если и так мешает — сдвигается.
 function declutter() {
   const els = [...document.querySelectorAll('#pg3d .pg-cat')];
-  els.forEach(e => { e.style.marginTop = '0px'; });
-  const rs = els.map(e => ({ e, r: e.getBoundingClientRect() })).sort((a, b) => a.r.top - b.r.top);
-  for (let i = 0; i < rs.length; i++) for (let j = 0; j < i; j++) {
-    const A = rs[j].r, B = rs[i].r;
-    if (A.left < B.right && B.left < A.right && A.top < B.bottom && B.top < A.bottom) {
-      const dy = A.bottom - B.top + 6; rs[i].e.style.marginTop = dy + 'px';
-      rs[i].r = rs[i].e.getBoundingClientRect();
+  const inn = (e) => e.firstElementChild || e;
+  els.forEach(e => { e.style.marginTop = '0px'; e.classList.remove('mini'); });
+  const rs = els.map(e => ({ e, r: inn(e).getBoundingClientRect() })).sort((a, b) => a.r.top - b.r.top);
+  const hit = (A, B) => A.left < B.right && B.left < A.right && A.top < B.bottom && B.top < A.bottom;
+  for (let i = 0; i < rs.length; i++) {
+    if (!rs.slice(0, i).some(o => hit(o.r, rs[i].r))) continue;
+    rs[i].e.classList.add('mini'); rs[i].r = inn(rs[i].e).getBoundingClientRect();
+    for (let j = 0; j < i; j++) {
+      const A = rs[j].r, B = rs[i].r;
+      if (hit(A, B)) { rs[i].e.style.marginTop = (parseFloat(rs[i].e.style.marginTop) || 0) + (A.bottom - B.top + 3) + 'px'; rs[i].r = inn(rs[i].e).getBoundingClientRect(); }
     }
   }
 }
@@ -699,7 +710,8 @@ function addCategoryLabels() {
     const ic = CAT_IC.find(([re]) => re.test(cat)) || [null, '▦', '#eef2f7'];
     const el = document.createElement('div'); el.className = 'pg-cat';
     el.title = fs.map(f => f.name).join(', ');
-    el.innerHTML = `<span class="ic" style="background:${ic[2]}">${ic[1]}</span><span><b>${esc(cat)}</b><small>${plural(ids.size, 'модель', 'модели', 'моделей')} · ${pairs} пар</small></span>`;
+    el.title = `${cat}: ${plural(ids.size, 'модель', 'модели', 'моделей')} · ${pairs} пар\n${fs.map(f => f.name).join(', ')}`;
+    el.innerHTML = `<span class="pg-cat-in"><span class="ic" style="background:${ic[2]}">${ic[1]}</span><span class="tx"><b>${esc(cat)}</b><small>${plural(ids.size, 'модель', 'модели', 'моделей')} · ${pairs} пар</small></span></span>`;
     el.addEventListener('pointerdown', (e) => { e.stopPropagation(); select({ k: 'fx', fid: fs[0].id }); });
     const lo = new CSS2DObject(el); lo.position.set(x, hh + 0.55, y); G.root.add(lo);
   }));

@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.4.0';
+const RMK_VERSION = '1.4.1';
 const RMK_CHANGELOG = [
+  {
+    v: '1.4.1', date: '19.10.2026', title: 'Врачи × продавцы, новые возвраты, компактная планограмма',
+    items: [
+      'Планограмма: плашки категорий («Обувь для девочек», «Мужская обувь» и т. д.) стали компактнее на компьютере и телефоне, уменьшаются при отдалении, а налезающие сворачиваются в иконку (название — при наведении).',
+      'Новый раздел «Врачи × продавцы»: какой продавец чаще отмечает какого врача, топ-3 врачей каждого продавца, детализация, экспорт CSV и «Анализ предвзятости» — пары, где почти все чеки врача в магазине отмечает один продавец.',
+      'Возвраты: новый экран с подробностями — номера и даты чека возврата и покупки, через сколько дней вернули, товар с фото и размером, сумма, способ выплаты клиенту (наличные/безнал/обмен), причина, клиент, кто оформил, статус. Клик по строке открывает карточку возврата с историей.'
+    ],
+  },
   {
     v: '1.4.0', date: '19.10.2026', title: 'Задачи сотрудников и «Узнать место товара»',
     items: [
@@ -1136,13 +1144,14 @@ const VIEW_META = {
   overview:  { title: 'Обзор',              sub: 'Главная панель управления РМК' },
   shift:     { title: 'Управление сменой',  sub: 'Просмотр и управление сменами касс' },
   receipts:  { title: 'Чеки продаж',        sub: 'Список всех чеков за выбранный период' },
-  returns:   { title: 'Возвраты',           sub: 'Чеки-возвраты за выбранный период' },
+  returns:   { title: 'Возвраты',           sub: 'Список возвратов с детальной информацией: товар, чеки, суммы, способ выплаты, причина' },
   discounts: { title: 'Скидки',            sub: 'Сводка применённых скидок за период' },
   cards:     { title: 'Дисконтные карты', sub: 'Виртуальные карты клиентов, врачей и сотрудников' },
   sms:       { title: 'SMS рассылка', sub: 'Сообщения клиентам дисконтных карт, после диагностики и автоматические напоминания' },
   tasks:     { title: 'Задачи сотрудников', sub: 'Пополнение витрин по планограмме, задачи от администратора и ИИ, баллы и рейтинг' },
   buyers:    { title: 'Покупатели', sub: 'Клиенты по дисконтным картам: история покупок и бонусные баллы' },
   doctors:   { title: 'Продажи по врачам', sub: 'Отчёт о продажах и бонусах врачей' },
+  docsellers: { title: 'Продажи по врачам и продавцам', sub: 'Анализ продаж, отмеченных врачами, по продавцам и выявление возможной предвзятости' },
   bonuses:   { title: 'Бонусы сотрудников', sub: 'Бонус кассиров от продаж: свод, настройка % и отметка выплат' },
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
@@ -1165,7 +1174,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1282,13 +1291,14 @@ function renderView(force) {
   if (v === 'overview') renderOverview(force);
   else if (v === 'shift') renderShift(force);
   else if (v === 'receipts') renderReceipts(force);
-  else if (v === 'returns') renderReturns(force);
+  else if (v === 'returns') renderReturns2(force);
   else if (v === 'discounts') renderDiscounts(force);
   else if (v === 'cards') renderCards(force);
   else if (v === 'sms') renderSms(force);
   else if (v === 'tasks') renderTasks(force);
   else if (v === 'buyers') renderBuyers(force);
   else if (v === 'doctors') renderDoctors(force);
+  else if (v === 'docsellers') renderDocSellers(force);
   else if (v === 'bonuses') renderBonuses(force);
   else if (v === 'search') renderSearch(force);
   else if (v === 'history') renderHistory(force);

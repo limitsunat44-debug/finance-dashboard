@@ -10,6 +10,11 @@
 
 ---
 
+## 1.4.1 — 19.10.2026 — Врачи × продавцы, детальные возвраты, компактная планограмма
+- Backend `1c-sync-barcodes/api/analytics.js` (только чтение): `action=doctor-sellers` (KPI с дельтами к прошлому периоду, топ врачей, продавцы с долей чеков с врачом vs коллеги, пары продавец×врач: доля, lift, level high/mid, why) и `action=returns-detail` (stock_unit_returns + pos_receipts возврата/продажи + товар/фото + клиент из orto.cards).
+- Front: `admin-analytics.js/css` — view `docsellers` (новый пункт меню) и `renderReturns2` вместо старого экрана возвратов (фильтры, KPI, чипы причин, таблица, выезжающая карточка).
+- Планограмма: компактные плашки `.pg-cat` (desktop/mobile), масштаб по дистанции `--pgs` 0.8–1, `declutter()` сворачивает налезающие плашки в иконку.
+
 ## 1.4.0 — 19.10.2026 — Задачи сотрудников + «Узнать место товара»
 - Backend `1c-sync-barcodes/api/tasks.js`: list/count/get/complete/snooze/skip/summary/locate (касса), admin-list/admin-create/admin-act/employees/employee-stats/ai-generate/settings/settings-save/sync (админка); cron `*/15 4-15 * * *`.
 - app_state: `tasks:<warehouse_id>` = {list, syncedAt, dailyYmd, rot}, `tasks_settings` (баллы low/mid/high 3/5/8, проверка 3, 1 балл = 0 с., подтверждение ручных/ИИ). Restock — по планограмме `planogram:<wh>` (слоты с u[]), выполнение сканом пары → planoSave + planoLogAdd.

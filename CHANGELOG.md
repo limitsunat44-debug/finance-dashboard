@@ -10,6 +10,10 @@
 
 ---
 
+## 1.4.2 — 19.10.2026 — Новый экран «Чеки продаж»
+- Backend `api/analytics.js`: `action=sales-detail&from&to[&wh]` (только чтение) — pos_receipts(op_type=sale) + pos_receipt_items + фото по штрихкоду (stock_units→product_variants→products/product_photos) + stock_unit_returns по sale_receipt_ref_1c + клиент/бонусы из orto.cards; KPI с дельтами, payMethods. `inChunks` теперь параллельный (6 потоков).
+- Front: `renderSales2` в `admin-analytics.js` вместо `renderReceipts` (view `receipts`, `#rcBody`); редактирование — существующий `openReceiptEditModal` через `receipt-items`.
+
 ## 1.4.1 — 19.10.2026 — Врачи × продавцы, детальные возвраты, компактная планограмма
 - Backend `1c-sync-barcodes/api/analytics.js` (только чтение): `action=doctor-sellers` (KPI с дельтами к прошлому периоду, топ врачей, продавцы с долей чеков с врачом vs коллеги, пары продавец×врач: доля, lift, level high/mid, why) и `action=returns-detail` (stock_unit_returns + pos_receipts возврата/продажи + товар/фото + клиент из orto.cards).
 - Front: `admin-analytics.js/css` — view `docsellers` (новый пункт меню) и `renderReturns2` вместо старого экрана возвратов (фильтры, KPI, чипы причин, таблица, выезжающая карточка).

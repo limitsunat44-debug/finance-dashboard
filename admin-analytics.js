@@ -273,3 +273,150 @@ function rtSide(r) {
     <h4>История</h4>
     <div class="an-hist">${hist.map(h => `<div><i></i><b>${h[0]}</b><small>${h[1]} · ${h[2]}</small></div>`).join('')}</div>`;
 }
+
+// ═════════════ 3) ЧЕКИ ПРОДАЖ (детально, в стиле «Возвратов») ═════════════
+const SL = { from: '', to: '', wh: '', seller: '', method: '', status: '', doctor: '', client: '', no: '', q: '', page: 1, per: 20, sel: '', data: null };
+const SL_ST = { paid: ['Оплачен', 'ok'], partial: ['Частичный возврат', 'am'], returned: ['Возвращён', 'no'], voided: ['Аннулирован', 'gr'] };
+async function renderSales2(force) {
+  const box = $('rcBody'); if (!box) return;
+  if (!SL.from) { SL.from = dushToday(); SL.to = dushToday(); }
+  if (!SL.data || force) {
+    box.innerHTML = '<div class="loading">⏳ Загружаю чеки…</div>';
+    try { SL.data = await anApi('sales-detail', `&from=${SL.from}&to=${SL.to}${SL.wh ? '&wh=' + SL.wh : ''}`); bumpSync(); }
+    catch (e) { box.innerHTML = errBar('Не удалось загрузить чеки: ' + e.message); return; }
+  }
+  slDraw();
+}
+function slFiltered() {
+  const f = SL; const s = (x) => String(x || '').toLowerCase();
+  return SL.data.receipts.filter(r => {
+    if (f.seller && r.seller !== f.seller) return false;
+    if (f.method && !r.pays.some(p => p.label === f.method)) return false;
+    if (f.status === 'edited') { if (!r.edited) return false; } else if (f.status === 'disc') { if (!(r.disc > 0)) return false; } else if (f.status && r.status !== f.status) return false;
+    if (f.doctor === '__any') { if (!r.doctor) return false; } else if (f.doctor === '__none') { if (r.doctor) return false; } else if (f.doctor && r.doctor !== f.doctor) return false;
+    if (f.client) { const c = r.client; if (!c || !(s(c.name) + ' ' + s(c.phone) + ' ' + s(c.card)).includes(s(f.client))) return false; }
+    if (f.no && !s(r.no).includes(s(f.no))) return false;
+    if (f.q && !r.items.some(i => (s(i.name) + ' ' + s(i.sku) + ' ' + s(i.barcode)).includes(s(f.q)))) return false;
+    return true;
+  });
+}
+function slDraw() {
+  const box = $('rcBody'); const d = SL.data; if (!box || !d) return;
+  const rows = slFiltered();
+  const K = d.kpi, all = d.receipts;
+  const sellers = [...new Set(all.map(r => r.seller).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const methods = d.payMethods.map(x => x.label);
+  const doctors = [...new Set(all.map(r => r.doctor).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+  const pagesN = Math.max(1, Math.ceil(rows.length / SL.per)); if (SL.page > pagesN) SL.page = pagesN;
+  const page = rows.slice((SL.page - 1) * SL.per, SL.page * SL.per);
+  if (SL.sel && !rows.some(r => r.id === SL.sel)) SL.sel = '';
+  const cur = rows.find(r => r.id === SL.sel);
+  const fsum = rows.filter(r => r.status !== 'voided').reduce((a, r) => a + r.total, 0);
+  const opt = (arr, v, allL) => `<option value="">${allL}</option>` + arr.map(x => `<option ${v === x ? 'selected' : ''}>${esc(x)}</option>`).join('');
+  const kc = (ic, tone, label, v, dlt, sub) => `<div class="an-kpi"><span class="an-kic ${tone}">${ic}</span><div><div class="an-kl">${label}</div><div class="an-kv">${v} ${dlt || ''}</div>${sub ? `<div class="an-ks">${sub}</div>` : ''}</div></div>`;
+  const pc = (x) => String(x).replace('.', ',');
+  const pagesBtns = (() => { const out = []; for (let i = 1; i <= pagesN; i++) if (i === 1 || i === pagesN || Math.abs(i - SL.page) <= 2) out.push(i); else if (out[out.length - 1] !== '…') out.push('…'); return out.map(i => i === '…' ? '<span class="muted">…</span>' : `<button data-slpage="${i}" class="${SL.page === i ? 'on' : ''}">${i}</button>`).join(''); })();
+  const stOpts = [['paid', 'Оплачен'], ['partial', 'Частичный возврат'], ['returned', 'Возвращён'], ['voided', 'Аннулирован'], ['edited', 'Изменён администратором'], ['disc', 'Со скидкой']];
+  box.innerHTML = `<div class="an an-sl">
+    <div class="card card-pad an-filters">
+      <div class="an-f"><label>Период продажи</label><div class="an-range"><input type="date" class="finput" id="slFrom" value="${SL.from}"><span>—</span><input type="date" class="finput" id="slTo" value="${SL.to}"></div></div>
+      <div class="an-f"><label>Магазин</label><select class="fselect" id="slWh"><option value="">Все магазины</option>${d.shops.map(s => `<option value="${s.wh}" ${SL.wh === s.wh ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></div>
+      <div class="an-f"><label>Продавец</label><select class="fselect" id="slSel">${opt(sellers, SL.seller, 'Все продавцы')}</select></div>
+      <div class="an-f"><label>Способ оплаты</label><select class="fselect" id="slMethod">${opt(methods, SL.method, 'Все способы')}</select></div>
+      <div class="an-f"><label>Статус</label><select class="fselect" id="slStatus"><option value="">Все статусы</option>${stOpts.map(([k, l]) => `<option value="${k}" ${SL.status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <div class="an-f"><label>Врач</label><select class="fselect" id="slDoc"><option value="">Все чеки</option><option value="__any" ${SL.doctor === '__any' ? 'selected' : ''}>Только с врачом</option><option value="__none" ${SL.doctor === '__none' ? 'selected' : ''}>Без врача</option>${doctors.map(x => `<option ${SL.doctor === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
+      <div class="an-f"><label>Клиент</label><input class="finput" id="slClient" value="${esc(SL.client)}" placeholder="🔍 ФИО, телефон, номер карты…"></div>
+      <div class="an-f"><label>Номер чека</label><input class="finput" id="slNo" value="${esc(SL.no)}" placeholder="RMK-…"></div>
+      <div class="an-f"><label>Товар</label><input class="finput" id="slQ" value="${esc(SL.q)}" placeholder="🔍 Название, артикул, штрихкод…"></div>
+      <div class="an-f an-fb"><button class="btn" id="slReset">↻ Сбросить</button><button class="btn btn-primary" id="slApply">▽ Применить</button><button class="btn btn-ghost" id="slExport">⭳ Экспорт</button></div>
+    </div>
+    <div class="an-kpis">
+      ${kc('🧾', 'g', 'Всего чеков', fmtInt(K.count.v), anDelta(K.count.d), 'к предыдущему периоду')}
+      ${kc('💵', 'g', 'Сумма продаж', anS(K.sum.v), anDelta(K.sum.d))}
+      ${kc('📊', 'b', 'Средний чек', anS(K.avg.v), anDelta(K.avg.d))}
+      ${kc('👟', 'gr', 'Продано товаров', fmtInt(K.qty.v) + ' шт.', anDelta(K.qty.d))}
+      ${kc('🏷', 'am', 'Скидки', anS(K.disc.v), '', `в ${fmtInt(K.disc.count)} чеках`)}
+      ${kc('🩺', 'b', 'С врачом / с картой', `${pc(K.doctor.pct)}% <span class="muted sm">/ ${pc(K.card.pct)}%</span>`, '', `${fmtInt(K.doctor.count)} с врачом · ${fmtInt(K.card.count)} с картой`)}
+      ${kc('↩', 'r', 'Возвраты по чекам', fmtInt(K.returns.count), '', K.returns.count ? anS(K.returns.sum) : 'возвратов нет')}
+    </div>
+    ${d.payMethods.length ? `<div class="an-reasons">${d.payMethods.map(x => `<button data-slm="${esc(x.label)}" class="${SL.method === x.label ? 'on' : ''}">${rtPayIc(x.label)} ${esc(x.label)} <b>${x.count}</b> <span>${anS(x.sum)}</span></button>`).join('')}</div>` : ''}
+    <div class="card card-pad">
+      <div class="tbl-wrap"><table class="tbl an-tbl an-rtt"><thead><tr><th>Чек</th><th>Товары</th><th class="r">Кол-во</th><th class="r">Сумма</th><th>Способ оплаты</th><th>Продавец</th><th>Врач</th><th>Клиент</th><th>Статус</th></tr></thead>
+      <tbody>${page.map(r => { const st = SL_ST[r.status] || [r.status, 'gr']; const i0 = r.items[0] || { name: 'Товар', size: '' }; return `<tr data-slid="${esc(r.id)}" class="${SL.sel === r.id ? 'on' : ''}${r.status === 'voided' ? ' an-void' : ''}">
+        <td class="nw"><b>${esc(r.no || '—')}</b><div class="muted sm">${dushTime(r.at, true)}</div><div class="muted sm">${esc(r.shop)}</div></td>
+        <td><div class="an-prod">${i0.photo ? `<img src="${esc(i0.photo)}" alt="" loading="lazy">` : '<span class="an-noimg">👟</span>'}<span><b>${esc(i0.name)}</b><small>${i0.size ? 'Размер ' + esc(i0.size) : ''}${r.items.length > 1 ? `${i0.size ? ' · ' : ''}<span class="an-more">+ ещё ${r.items.length - 1}</span>` : ''}</small></span></div></td>
+        <td class="r tnum">${fmtInt(r.qty)}</td>
+        <td class="r tnum"><b>${anS(r.total)}</b>${r.disc > 0 ? `<div class="muted sm">скидка ${anS(r.disc)}</div>` : ''}</td>
+        <td>${r.pays.map(p => `<div class="nw">${rtPayIc(p.label)} ${esc(p.label)}${r.pays.length > 1 ? ` <span class="muted sm">${anS(p.amount)}</span>` : ''}</div>`).join('') || '—'}</td>
+        <td>${esc(r.seller || '—')}</td><td>${r.doctor ? esc(r.doctor) : '<span class="muted">—</span>'}</td>
+        <td>${r.client ? esc(r.client.name || r.client.phone || 'карта') : '<span class="muted">—</span>'}</td>
+        <td><span class="an-st ${st[1]}">${st[0]}</span>${r.edited ? '<div><span class="an-st gr sm2">изменён</span></div>' : ''}</td></tr>`; }).join('') || '<tr><td colspan="9" class="tbl-empty">За выбранный период чеков нет</td></tr>'}</tbody></table></div>
+      <div class="an-pager"><span class="muted">Показано ${rows.length ? (SL.page - 1) * SL.per + 1 : 0}–${Math.min(rows.length, SL.page * SL.per)} из ${rows.length} · на сумму ${anS(fsum)}</span><span class="an-pages">${pagesBtns}</span>
+        <label class="muted">Показывать по <select class="fselect an-per" id="slPer">${[10, 20, 50, 100].map(n => `<option ${SL.per === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div>
+    </div>
+    ${cur ? `<div class="an-drawer-bg" id="slSideBg"></div><div class="an-side an-drawer">${slSide(cur)}</div>` : ''}
+  </div>`;
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  const val = (id) => ($(id) || {}).value || '';
+  on('slApply', 'click', () => {
+    const nf = val('slFrom'), nt = val('slTo'), nw = val('slWh'); const reload = nf !== SL.from || nt !== SL.to || nw !== SL.wh;
+    Object.assign(SL, { from: nf, to: nt, wh: nw, seller: val('slSel'), method: val('slMethod'), status: val('slStatus'), doctor: val('slDoc'), client: val('slClient').trim(), no: val('slNo').trim(), q: val('slQ').trim(), page: 1 });
+    reload ? renderSales2(true) : slDraw();
+  });
+  ['slClient', 'slNo', 'slQ'].forEach(id => on(id, 'keydown', e => { if (e.key === 'Enter') $('slApply').click(); }));
+  on('slReset', 'click', () => { Object.assign(SL, { seller: '', method: '', status: '', doctor: '', client: '', no: '', q: '', page: 1 }); slDraw(); });
+  on('slPer', 'change', e => { SL.per = +e.target.value; SL.page = 1; slDraw(); });
+  on('slExport', 'click', () => anCsv(`cheki_${SL.from}_${SL.to}.csv`, ['№ чека', 'Дата', 'Магазин', 'Продавец', 'Врач', 'Товар', 'Артикул', 'Размер', 'Штрихкод', 'Кол-во', 'Цена', 'Скидка', 'Сумма позиции', 'Итого чека', 'Способ оплаты', 'Статус', 'Клиент', 'Телефон', 'Карта'],
+    rows.flatMap(r => (r.items.length ? r.items : [{}]).map(i => [r.no, dushTime(r.at, true), r.shop, r.seller, r.doctor, i.name, i.sku, i.size, i.barcode, i.qty, i.price, i.disc, i.sum, r.total, r.pays.map(p => `${p.label} ${p.amount}`).join(' + '), (SL_ST[r.status] || [r.status])[0] + (r.edited ? ' (изменён)' : ''), r.client && r.client.name, r.client && r.client.phone, r.client && r.client.card]))));
+  box.querySelectorAll('[data-slid]').forEach(tr => tr.addEventListener('click', () => { SL.sel = tr.dataset.slid; slDraw(); }));
+  box.querySelectorAll('[data-slpage]').forEach(b => b.addEventListener('click', () => { SL.page = +b.dataset.slpage; slDraw(); }));
+  box.querySelectorAll('[data-slm]').forEach(b => b.addEventListener('click', () => { SL.method = SL.method === b.dataset.slm ? '' : b.dataset.slm; SL.page = 1; slDraw(); }));
+  const closeSide = () => { SL.sel = ''; slDraw(); };
+  on('slSideClose', 'click', closeSide); on('slSideBg', 'click', closeSide);
+  on('slCopy', 'click', async () => { try { await navigator.clipboard.writeText(cur.no); $('slCopy').textContent = '✓ Скопировано'; } catch (_) {} });
+  on('slEdit', 'click', () => slEdit(cur));
+  if (cur && !SL._esc) { SL._esc = true; document.addEventListener('keydown', e => { if (e.key === 'Escape' && SL.sel && $('slSideBg') && !document.getElementById('rcEditOverlay')) { SL.sel = ''; slDraw(); } }); }
+}
+// Редактирование — существующая модалка админки (openReceiptEditModal), данные из receipt-items
+async function slEdit(r) {
+  const btn = $('slEdit'); if (btn) { btn.disabled = true; btn.textContent = '⏳ Загружаю…'; }
+  try {
+    if (!rcItemsCache[r.id]) rcItemsCache[r.id] = await posApi(`?action=receipt-items&ref=${encodeURIComponent(r.id)}`, { method: 'GET' });
+    const before = rcItemsCache[r.id];
+    openReceiptEditModal(r.id, r.no, document.createElement('div'));
+    const mo = new MutationObserver(() => {
+      if (document.getElementById('rcEditOverlay')) return;
+      mo.disconnect();
+      if (rcItemsCache[r.id] !== before) renderSales2(true); else slDraw();
+    });
+    mo.observe(document.body, { childList: true });
+  } catch (e) { alert('Не удалось открыть чек: ' + e.message); if (btn) { btn.disabled = false; btn.textContent = '✏️ Редактировать'; } }
+}
+function slSide(r) {
+  const st = SL_ST[r.status] || [r.status, 'gr'];
+  const kv = (k, v) => `<div class="an-kvr"><span>${k}</span><b>${v}</b></div>`;
+  const hist = [
+    [`Продажа · чек ${esc(r.no)}`, dushTime(r.at, true), esc(r.seller || '')],
+    r.client && r.client.bonus ? [`Начислено ${fmtInt(r.client.bonus)} бонусов на карту`, dushTime(r.at, true), esc(r.client.name || r.client.card || '')] : null,
+    r.edited ? [`Чек изменён администратором${r.origTotal != null && r.origTotal !== r.total ? ` · было ${anS(r.origTotal)}` : ''}`, r.editedAt ? dushTime(r.editedAt, true) : '—', esc(r.editedBy || '')] : null,
+    ...r.returns.map(x => [`Возврат ${esc(x.no || '')} · ${esc(x.reason)}`, dushTime(x.at, true), `${esc(x.by)} · ${anS(x.sum)}`]),
+    r.status === 'voided' ? ['Чек аннулирован', r.editedAt ? dushTime(r.editedAt, true) : '—', esc(r.editedBy || '')] : null,
+  ].filter(Boolean).sort((a, b) => 0);
+  const retBc = new Set(r.returns.map(x => x.barcode));
+  return `<div class="an-sh"><h3>Чек ${esc(r.no || '')}</h3><button class="an-x" id="slSideClose" title="Закрыть">✕</button></div>
+    <div class="an-stbox ${st[1]}"><span>${r.status === 'paid' ? '✓' : r.status === 'voided' ? '✕' : '↩'}</span><div><b>${r.status === 'paid' ? 'Продажа оплачена' : st[0]}</b><small>${dushTime(r.at, true)} · ${esc(r.shop)}</small></div><em class="an-st ${st[1]}">${st[0]}</em></div>
+    <div class="an-sbtns"><button class="btn btn-ghost" id="slCopy">⧉ Копировать №</button>${r.status !== 'voided' ? '<button class="btn" id="slEdit">✏️ Редактировать</button>' : ''}</div>
+    <h4>Информация о чеке</h4>
+    ${kv('№ чека', esc(r.no || '—'))}${kv('Дата и время', dushTime(r.at, true))}${kv('Магазин', esc(r.shop))}${kv('Продавец', esc(r.seller || '—'))}${kv('Врач (если был)', esc(r.doctor || '—'))}${kv('Источник', r.source === 'pos' ? 'Касса РМК' : esc(r.source || '—'))}
+    <h4>Товары · ${fmtInt(r.qty)} шт.</h4>
+    ${r.items.map(i => `<div class="an-pcard${retBc.has(i.barcode) ? ' ret' : ''}">${i.photo ? `<img src="${esc(i.photo)}" alt="">` : '<span class="an-noimg big">👟</span>'}<div><b>${esc(i.name)}</b>${i.sku ? `<small>Артикул: ${esc(i.sku)}</small>` : ''}${i.size ? `<small>Размер: ${esc(i.size)}</small>` : ''}${i.barcode ? `<small class="mono">${esc(i.barcode)}</small>` : ''}<small>${fmtInt(i.qty)} × ${anS(i.price)}${i.disc > 0 ? ` · скидка ${anS(i.disc)}${i.discPct ? ` (${Math.round(i.discPct)}%)` : ''}` : ''}</small>${retBc.has(i.barcode) ? '<small class="red">↩ возвращён</small>' : ''}<em>${anS(i.sum)}</em></div></div>`).join('') || '<div class="muted sm">Состав чека не найден</div>'}
+    <h4>Оплата</h4>
+    ${r.disc > 0 ? kv('Сумма без скидки', anS(r.gross)) + kv('Скидка', `<span class="red">−${anS(r.disc)}</span>`) : ''}
+    <div class="an-sum"><span>Итого оплачено</span><b>${anS(r.total)}</b></div>
+    ${r.pays.map(p => kv(`${rtPayIc(p.label)} ${esc(p.label)}`, anS(p.amount))).join('') || kv('Способ оплаты', '—')}
+    ${r.returns.length ? `<h4>Возвраты по чеку</h4>${r.returns.map(x => kv(`${esc(x.no || 'Возврат')} · ${dushTime(x.at, true)}`, anS(x.sum))).join('')}${kv('Возвращено всего', `<span class="red">${anS(r.retSum)}</span>`)}` : ''}
+    <h4>Клиент</h4>
+    ${r.client ? `<div class="an-client"><span>👤</span><div><b>${esc(r.client.name || 'Без имени')}</b>${r.client.phone ? `<small>📞 ${esc(r.client.phone)}</small>` : ''}${r.client.card ? `<small>💳 № карты: ${esc(r.client.card)}</small>` : ''}${r.client.bonus ? `<small>⭐ Начислено бонусов: ${fmtInt(r.client.bonus)}${r.client.bonusReversed ? ' (списаны при возврате)' : ''}</small>` : ''}</div></div>` : '<div class="muted sm">Покупка без дисконтной карты — клиент не известен</div>'}
+    <h4>История</h4>
+    <div class="an-hist">${hist.map(h => `<div><i></i><b>${h[0]}</b><small>${h[1]} · ${h[2]}</small></div>`).join('')}</div>`;
+}

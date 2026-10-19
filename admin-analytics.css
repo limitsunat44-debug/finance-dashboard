@@ -124,3 +124,20 @@ tr.an-flag.high td{background:#fff1f2}tr.an-flag.mid td{background:#fffbeb}
 .an-hist div{position:relative;display:flex;flex-direction:column}
 .an-hist i{position:absolute;left:-24px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--g2);border:2px solid #fff;box-shadow:0 0 0 1px #bbf7d0}
 .an-hist small{color:var(--tx2)}
+/* чеки продаж */
+.an-st.am{background:#fffbeb;color:#b45309}
+.an-st.sm2{font-size:10px;padding:1px 6px;margin-top:3px;display:inline-block}
+.an-stbox.am{border-color:#fde68a;background:#fffbeb}.an-stbox.am>span{background:#d97706}
+.an-stbox.no{border-color:#fecdd3;background:#fff1f2}.an-stbox.no>span{background:#e11d48}
+.an-stbox.gr{border-color:#e5e7eb;background:#f9fafb}.an-stbox.gr>span{background:#6b7280}
+.an-more{color:var(--g3);font-weight:700}
+.an-void td{opacity:.55;text-decoration:line-through}
+.an-pcard.ret{border-color:#fecdd3;background:#fff7f8}
+.an-pcard+.an-pcard{margin-top:8px}
+.an-sbtns{display:flex;gap:8px;margin:-2px 0 6px}
+.an-sbtns .btn{flex:1;justify-content:center}
+.an-sl .an-kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.an-sl .an-kpi{padding:12px;gap:10px}
+.an-sl .an-kic{width:38px;height:38px;font-size:17px}
+.an-sl .an-kv{font-size:19px}
+@media (max-width:600px){.an-fb{flex-wrap:wrap;width:100%}.an-fb .btn{flex:1 1 30%;justify-content:center;min-width:0;padding-left:8px;padding-right:8px}}

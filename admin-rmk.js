@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.4.3';
+const RMK_VERSION = '1.5.0';
 const RMK_CHANGELOG = [
+  {
+    v: '1.5.0', date: '20.10.2026', title: 'ИИ-агенты: 12 помощников в Telegram и в админке',
+    items: [
+      '12 ИИ-агентов: касса и инкассация, пополнение, залежавшийся товар, честность (видит только владелец), возвраты, клиенты, врачи, сотрудники, финансы, склад, открытие Худжанда и помощник продавца. Все цифры агенты берут из базы, а важные выводы перепроверяет второй ИИ.',
+      'Telegram-группа агентов: о срочном пишут сразу (расхождение инкассации, аннулированный или исправленный чек, большая скидка, массовое списание), сводка приходит в 21:30, недельный разбор — в понедельник в 9:00. У каждой карточки есть кнопки «Верно», «Неверно», «Задача», «Не показывать» и «Подробнее». Если ответить на сообщение агента, можно продолжить с ним разговор.',
+      'Складской агент показывает полную историю пары по штрихкоду: когда пришла, перемещалась, продавалась, когда, кем и почему была списана. По команде «верни <штрихкод> в <склад>» он восстанавливает пару, но только после подтверждения кнопкой и с бэкапом.',
+      'Админка → «🤖 ИИ-агенты»: лента находок с отметками, сводки и идеи, включение и выключение агентов, их точность, «Запустить сейчас», история товара и настройки времени и порогов.',
+      'Касса → «Ещё» → «Спросить ИИ»: помощник продавца знает наличие по магазинам и размерам, подскажет замену и как ответить покупателю.'
+    ],
+  },
   {
     v: '1.4.3', date: '20.10.2026', title: 'ИИ обновлён до Claude Sonnet 5.5 + единая настройка модели',
     items: [
@@ -1166,6 +1176,7 @@ const VIEW_META = {
   tasks:     { title: 'Задачи сотрудников', sub: 'Пополнение витрин по планограмме, задачи от администратора и ИИ, баллы и рейтинг' },
   buyers:    { title: 'Покупатели', sub: 'Клиенты по дисконтным картам: история покупок и бонусные баллы' },
   doctors:   { title: 'Продажи по врачам', sub: 'Отчёт о продажах и бонусах врачей' },
+  agents: { title: 'ИИ-агенты', sub: 'Агенты следят за кассами, складом, клиентами и финансами, присылают находки и идеи в Telegram' },
   docsellers: { title: 'Продажи по врачам и продавцам', sub: 'Анализ продаж, отмеченных врачами, по продавцам и выявление возможной предвзятости' },
   bonuses:   { title: 'Бонусы сотрудников', sub: 'Бонус кассиров от продаж: свод, настройка % и отметка выплат' },
   search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
@@ -1189,7 +1200,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'agents', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1311,6 +1322,7 @@ function renderView(force) {
   else if (v === 'cards') renderCards(force);
   else if (v === 'sms') renderSms(force);
   else if (v === 'tasks') renderTasks(force);
+  else if (v === 'agents') renderAgents(force);
   else if (v === 'buyers') renderBuyers(force);
   else if (v === 'doctors') renderDoctors(force);
   else if (v === 'docsellers') renderDocSellers(force);

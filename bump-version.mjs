@@ -76,6 +76,7 @@ try {
   src = src.replace(/(admin-sms\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(admin-tasks\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(admin-analytics\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  src = src.replace(/(admin-agents\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   if (src !== before) { writeFileSync(p, src); changed++; }
 } catch (_) { /* admin-rmk.html может не существовать — пропускаем */ }
 

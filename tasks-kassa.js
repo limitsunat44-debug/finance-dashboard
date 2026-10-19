@@ -406,6 +406,7 @@
       const ref = $('pmobMoreHistory');
       menu.insertBefore(mk('tkMoreTasks', '✅', 'Задачи <i class="tk-badge tk-badge-in" style="display:none"></i>', openTasks), ref || null);
       menu.insertBefore(mk('tkMoreLocate', '📷', 'Узнать место товара', openLocate), ref || null);
+      menu.insertBefore(mk('tkMoreAsk', '🤖', 'Спросить ИИ (помощник продавца)', openAsk), ref || null);
     }
   }
 
@@ -436,6 +437,48 @@
         <button class="tk-earn-row" data-earn="1"><span class="tk-earn-chk">○</span><span>Осталось</span><b>${td.open || 0}</b>${ICON.chev}</button>`;
     } catch (e) { box.innerHTML = '<div class="tk-earn-title">Прогресс задач</div><div class="tk-empty">Не удалось загрузить</div>'; }
   }
+
+  // ── «Спросить ИИ»: помощник продавца ──────────────────
+  const ASK = { hist: [], busy: false };
+  function openAsk() {
+    let root = $('tkAsk');
+    if (!root) {
+      root = document.createElement('div'); root.id = 'tkAsk'; root.className = 'tk-root';
+      root.innerHTML = `<section class="tk-scr">
+        <header class="tk-head"><button class="tk-ib" data-ask="close" aria-label="Назад">${ICON.back}</button><h1>Помощник продавца</h1><span style="width:38px"></span></header>
+        <div class="tk-ask-hint">Спросите про наличие, размеры, замену товара или как ответить покупателю. Отвечает ИИ по реальным остаткам.</div>
+        <div class="tk-ask-chips">${['Нет нужного размера — что предложить и где есть?', 'Чем отличаются эти стельки и что посоветовать?', 'Покупатель говорит «дорого» — что ответить?'].map(q => `<button type="button" data-askq="${esc(q)}">${esc(q)}</button>`).join('')}</div>
+        <div class="tk-ask-log" id="tkAskLog"></div>
+        <div class="tk-ask-bar"><textarea id="tkAskIn" rows="2" placeholder="Например: есть ли Icemen 101 размер 38-39?"></textarea><button type="button" id="tkAskGo">Спросить</button></div>
+      </section>`;
+      document.body.appendChild(root);
+      root.querySelector('[data-ask="close"]').addEventListener('click', () => { root.style.display = 'none'; document.body.classList.remove('tk-on'); });
+      root.querySelectorAll('[data-askq]').forEach(b => b.addEventListener('click', () => { $('tkAskIn').value = b.dataset.askq; $('tkAskIn').focus(); }));
+      $('tkAskGo').addEventListener('click', askSend);
+      $('tkAskIn').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askSend(); } });
+    }
+    root.style.display = ''; document.body.classList.add('tk-on'); askDraw();
+  }
+  function askDraw() {
+    const log = $('tkAskLog'); if (!log) return;
+    log.innerHTML = ASK.hist.map(m => `<div class="tk-ask-m ${m.who}">${esc(m.text).replace(/\n/g, '<br>')}</div>`).join('') + (ASK.busy ? '<div class="tk-ask-m ai wait">Думаю…</div>' : '');
+    log.scrollTop = log.scrollHeight; const btn = $('tkAskGo'); if (btn) btn.disabled = ASK.busy;
+  }
+  async function askSend() {
+    const inp = $('tkAskIn'); const q = (inp.value || '').trim(); if (!q || ASK.busy) return;
+    ASK.hist.push({ who: 'me', text: q }); inp.value = ''; ASK.busy = true; askDraw();
+    const sh = (typeof POS !== 'undefined' && POS.shift) || {};
+    try {
+      const base = typeof BARCODE_SVC_URL !== 'undefined' ? BARCODE_SVC_URL : 'https://1c-sync-barcodes.vercel.app';
+      const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 90000);
+      const r = await fetch(base + '/api/agents?action=seller-ask', { method: 'POST', signal: ctl.signal, headers: { 'Content-Type': 'application/json', 'X-Provision-Secret': SECRET() }, body: JSON.stringify({ question: q, shop: sh.shop_name || sh.sale_warehouse_name || '', seller: sh.seller_name || '' }) });
+      clearTimeout(tm);
+      const d = await r.json().catch(() => ({ ok: false, error: 'Нет связи с сервером' }));
+      ASK.hist.push({ who: 'ai', text: d.ok ? (d.answer || '—') : ('Ошибка: ' + (d.error || r.status)) });
+    } catch (e) { ASK.hist.push({ who: 'ai', text: e.name === 'AbortError' ? 'Долго нет ответа, попробуйте ещё раз.' : 'Нет связи с сервером.' }); }
+    ASK.busy = false; if (ASK.hist.length > 20) ASK.hist = ASK.hist.slice(-20); askDraw();
+  }
+  window.tkOpenAsk = openAsk;
 
   function boot() {
     mount(); injectEntrances();

@@ -438,7 +438,8 @@ async function renderAiModelCard() {
   let d;
   try { d = await aiSetApi('get'); } catch (e) { box.innerHTML = `<div class="card card-pad">${errBar('ИИ-модель: ' + e.message)}</div>`; return; }
   const known = d.list.map(m => m.id);
-  const sel = (id, val, withInherit) => `<select class="fselect" id="${id}">${withInherit ? `<option value="">— как основная —</option>` : ''}${d.list.map(m => `<option value="${m.id}" ${val === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}${val && !known.includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''}</select>`;
+  const inhName = (k) => { const dm = d.kindDefaults && d.kindDefaults[k]; const m = dm && d.list.find(x => x.id === dm); return dm ? `— по умолчанию: ${esc(m ? m.name : dm)} —` : '— как основная —'; };
+  const sel = (id, val, withInherit) => `<select class="fselect" id="${id}">${withInherit ? `<option value="">${inhName(String(id).replace(/^aiK_/, ''))}</option>` : ''}${d.list.map(m => `<option value="${m.id}" ${val === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}${val && !known.includes(val) ? `<option value="${esc(val)}" selected>${esc(val)}</option>` : ''}</select>`;
   const cur = d.list.find(m => m.id === d.model);
   box.innerHTML = `<div class="card card-pad an-ai">
     <div class="card-h-row"><h3>🤖 ИИ-модель</h3><span class="muted sm">${d.updatedAt ? 'изменено ' + dushTime(d.updatedAt, true) + (d.updatedBy ? ' · ' + esc(d.updatedBy) : '') : 'по умолчанию'}</span></div>

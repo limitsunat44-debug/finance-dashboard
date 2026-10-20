@@ -1378,17 +1378,17 @@ function renderFxPanel(P, fx) {
           <div class="pg-hooks" style="grid-template-columns:repeat(${gr.length},minmax(0,1fr))">${gr.map((list, hk) => `<div class="pg-hook"><div class="pg-hook-n">К${hk + 1}</div>${hookShow(list).map(o => {
             const stt = slotStatus(o.sl); const p = o.sl.p && S.products.get(o.sl.p);
             const isSel = S.sel && S.sel.k === 'slot' && S.sel.si === si && S.sel.ki === o.ki;
-            return `<div class="pg-cell ${o.sl.p ? '' : 'empty'} ${isSel ? 'sel' : ''}" data-si="${si}" data-ki="${o.ki}" title="${esc(p ? p.name + ' — ' + (p.here || 0) + ' пар' : 'Пустой крючок')}" style="--c:${ST_COLOR[stt]};${p && p.photo ? `background-image:url('${esc(p.photo)}')` : ''}"></div>`;
+            return `<div class="pg-cell ${o.sl.p ? '' : 'empty'} ${isSel ? 'sel' : ''}" data-si="${si}" data-ki="${o.ki}" title="${esc(p ? p.name + ' — ' + (p.here || 0) + ' пар' : 'Пустой крючок')}" style="--c:${ST_COLOR[stt]};${p && p.photo ? `background-image:url('${esc(p.photo)}')` : ''}">${p ? `<b class="pg-cnt">${p.here || 0}</b>${p.photo ? '' : `<span class="pg-cname">${esc(p.name)}</span>`}` : ''}</div>`;
           }).join('')}${list.some(o => o.sl.p) ? `<button class="pg-hook-add" data-hadd="${si}:${hk}" title="Повесить ещё товар на этот крючок">＋</button>` : ''}</div>`).join('')}</div></div>`;
         continue;
       }
       h += `<div class="pg-shelf"><div class="pg-shelf-h"><span>Полка ${si + 1}${si === fx.shelves.length - 1 ? ' (верх)' : si === 0 ? ' (низ)' : ''} · ${sh.slots.length} мест</span>
         <button class="pg-mini qr" data-sqr="${si}" title="QR и состав полки">▦ QR</button>
         ${S.edit ? `<span class="pg-row"><button class="pg-mini" data-sm="${si}" title="Убрать место">−</button><button class="pg-mini" data-sp="${si}" title="Добавить место">+</button><button class="pg-mini" data-sdel="${si}" title="Удалить полку">✕</button></span>` : ''}</div>
-        <div class="pg-cells" style="grid-template-columns:repeat(${sh.slots.length},1fr)">${sh.slots.map((sl, ki) => {
+        <div class="pg-cells" style="--n:${sh.slots.length}">${sh.slots.map((sl, ki) => {
           const stt = slotStatus(sl); const p = sl.p && S.products.get(sl.p);
           const isSel = S.sel && S.sel.k === 'slot' && S.sel.si === si && S.sel.ki === ki;
-          return `<div class="pg-cell ${sl.p ? '' : 'empty'} ${isSel ? 'sel' : ''}" data-si="${si}" data-ki="${ki}" title="${esc(p ? p.name + ' — ' + (p.here || 0) + ' пар' : 'Пустое место')}" style="--c:${ST_COLOR[stt]};${p && p.photo ? `background-image:url('${esc(p.photo)}')` : ''}"></div>`;
+          return `<div class="pg-cell ${sl.p ? '' : 'empty'} ${isSel ? 'sel' : ''}" data-si="${si}" data-ki="${ki}" title="${esc(p ? p.name + ' — ' + (p.here || 0) + ' пар' : 'Пустое место')}" style="--c:${ST_COLOR[stt]};${p && p.photo ? `background-image:url('${esc(p.photo)}')` : ''}">${p ? `<b class="pg-cnt">${p.here || 0}</b>${p.photo ? '' : `<span class="pg-cname">${esc(p.name)}</span>`}` : ''}</div>`;
         }).join('')}</div></div>`;
     }
     h += `</div>`;
@@ -1558,7 +1558,7 @@ function renderSlotPanel(P, sel) {
     const gr = hookGroups(sh);
     h += `<h4>Ряд ${sel.si + 1}</h4><div class="pg-hooks" style="grid-template-columns:repeat(${gr.length},minmax(0,1fr))">${gr.map((list, hk) => `<div class="pg-hook"><div class="pg-hook-n">К${hk + 1}</div>${hookShow(list).map(o => { const pp = o.sl.p && S.products.get(o.sl.p); return `<div class="pg-cell ${o.sl.p ? '' : 'empty'} ${o.ki === sel.ki ? 'sel' : ''}" data-ki="${o.ki}" style="--c:${ST_COLOR[slotStatus(o.sl)]};${pp && pp.photo ? `background-image:url('${esc(pp.photo)}')` : ''}"></div>`; }).join('')}</div>`).join('')}</div>`;
   } else
-  h += `<h4>Полка ${sel.si + 1}</h4><div class="pg-cells" style="grid-template-columns:repeat(${sh.slots.length},1fr)">${sh.slots.map((s2, ki) => { const pp = s2.p && S.products.get(s2.p); return `<div class="pg-cell ${s2.p ? '' : 'empty'} ${ki === sel.ki ? 'sel' : ''}" data-ki="${ki}" style="--c:${ST_COLOR[slotStatus(s2)]};${pp && pp.photo ? `background-image:url('${esc(pp.photo)}')` : ''}" title="${esc(pp ? pp.name : 'Пусто')}"></div>`; }).join('')}</div>`;
+  h += `<h4>Полка ${sel.si + 1}</h4><div class="pg-cells" style="--n:${sh.slots.length}">${sh.slots.map((s2, ki) => { const pp = s2.p && S.products.get(s2.p); return `<div class="pg-cell ${s2.p ? '' : 'empty'} ${ki === sel.ki ? 'sel' : ''}" data-ki="${ki}" style="--c:${ST_COLOR[slotStatus(s2)]};${pp && pp.photo ? `background-image:url('${esc(pp.photo)}')` : ''}" title="${esc(pp ? pp.name : 'Пусто')}"></div>`; }).join('')}</div>`;
   P.innerHTML = h;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on('bkZone', 'click', () => select(null));

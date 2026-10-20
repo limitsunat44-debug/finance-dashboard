@@ -27,6 +27,7 @@ const TYPES = {
   wall:    { label: 'Настенный стеллаж', shelves: true,  w: 2.4, d: 0.4, h: 2.4, n: 6, m: 6, color: '#f8fafc', zone: 'hall' },
   island:  { label: 'Островная витрина', shelves: true,  w: 1.4, d: 0.8, h: 1.3, n: 3, m: 4, color: '#ffffff', zone: 'hall' },
   table:   { label: 'Стол-подиум',       shelves: true,  w: 1.2, d: 0.7, h: 0.75, n: 1, m: 4, color: '#f5f0e8', zone: 'hall' },
+  pegboard:{ label: 'Стенд с крючками',  shelves: true,  hooks: true, w: 1.8, d: 0.22, h: 2.3, n: 5, m: 7, color: '#e9e44c', zone: 'hall' },
   rack:    { label: 'Стеллаж склада',    shelves: true,  w: 2.0, d: 0.5, h: 2.2, n: 5, m: 8, color: '#e2e8f0', zone: 'stock' },
   cash:    { label: 'Касса',             shelves: false, w: 1.8, d: 0.7, h: 1.0, color: '#ffffff' },
   bench:   { label: 'Пуф / скамья',      shelves: false, w: 1.4, d: 0.45, h: 0.45, color: '#94a3b8' },
@@ -64,7 +65,39 @@ const SHELF_URL = 'https://finance-orto.vercel.app/s';
 const shelfSid = (fx, si) => `${fx.id}-${si + 1}`;
 const shelfUrl = (fx, si) => `${SHELF_URL}/${S.wh.slice(0, 8)}/${shelfSid(fx, si)}`;
 const shelfPos = (fx, si) => { const n = (fx.shelves || []).length; return n > 1 ? (si === 0 ? ' · низ' : si === n - 1 ? ' · верх' : '') : ''; };
-const shelfName = (fx, si) => `${fx.name} · Полка ${si + 1}`;
+const isPeg = (fx) => !!fx && fx.type === 'pegboard';
+const rowWord = (fx) => isPeg(fx) ? 'Ряд' : 'Полка';
+const shelfName = (fx, si) => `${fx.name} · ${rowWord(fx)} ${si + 1}`;
+// Стенд с крючками: ряд = «полка», sh.hooks — число крючков, у каждого места sl.h — номер крючка (0..hooks-1).
+// На одном крючке может висеть несколько товаров (несколько мест с одинаковым h).
+function pegNorm(fx) {
+  if (!isPeg(fx)) return;
+  (fx.shelves || []).forEach(sh => {
+    sh.slots = sh.slots || [];
+    sh.hooks = Math.max(1, Math.min(20, Number(sh.hooks) || TYPES.pegboard.m));
+    const cnt = Array(sh.hooks).fill(0);
+    sh.slots.forEach(sl => { if (Number.isInteger(sl.h) && sl.h >= 0 && sl.h < sh.hooks && sl.p) cnt[sl.h]++; });
+    sh.slots.forEach(sl => {
+      if (Number.isInteger(sl.h) && sl.h >= 0 && sl.h < sh.hooks) return;
+      let best = 0; for (let i = 1; i < sh.hooks; i++) if (cnt[i] < cnt[best]) best = i;
+      sl.h = best; if (sl.p) cnt[best]++;
+    });
+    for (let h = 0; h < sh.hooks; h++) if (!sh.slots.some(sl => sl.h === h)) sh.slots.push({ p: null, q: 1, h });
+  });
+}
+function hookGroups(sh) {
+  const g = Array.from({ length: Math.max(1, sh.hooks || 1) }, () => []);
+  sh.slots.forEach((sl, ki) => { const h = Math.min(g.length - 1, Math.max(0, sl.h | 0)); g[h].push({ sl, ki }); });
+  return g;
+}
+// место для показа на крючке: сначала товары, пустое — только если крючок пуст
+const hookShow = (list) => { const f = list.filter(o => o.sl.p); return f.length ? f : list.slice(0, 1); };
+function pegAddToHook(fx, si, h) {
+  const sh = fx.shelves[si];
+  let ki = sh.slots.findIndex(sl => sl.h === h && !sl.p);
+  if (ki < 0) { if (sh.slots.length >= 60) { toast('В ряду слишком много мест', true); return null; } sh.slots.push({ p: null, q: 1, h }); ki = sh.slots.length - 1; }
+  return ki;
+}
 const storeName = () => (STORES.find(s => s.wh === S.wh) || {}).name || '';
 const QRM = new Map();
 function qrMatrix(text) {
@@ -104,7 +137,7 @@ function labelCanvas(fx, si, k) {
   x.strokeRect(k * 0.6, k * 0.6, c.width - k * 1.2, c.height - k * 1.2);
   x.textAlign = 'center'; x.textBaseline = 'alphabetic'; x.fillStyle = '#0f172a';
   fitFont(x, fx.name, k * 35, Math.round(k * 4.4), 700); x.fillText(fx.name, c.width / 2, k * 6.6);
-  const t2 = `Полка ${si + 1}${shelfPos(fx, si)}`;
+  const t2 = `${rowWord(fx)} ${si + 1}${shelfPos(fx, si)}`;
   fitFont(x, t2, k * 35, Math.round(k * 6.2), 800); x.fillText(t2, c.width / 2, k * 13.8);
   drawQr(x, shelfUrl(fx, si), Math.round(k * 5), Math.round(k * 15.2), Math.round(k * 30));
   x.fillStyle = '#475569';
@@ -215,6 +248,7 @@ function mkFx(type, o) {
   const t = TYPES[type];
   const fx = { id: uid('f'), zone: o.zone || t.zone || 'hall', type, name: o.name || t.label, category: o.category || '', x: o.x, y: o.y, w: o.w || t.w, d: o.d || t.d, h: o.h || t.h, rot: o.rot || 0 };
   if (t.shelves) fx.shelves = mkShelves(o.n || t.n, o.m || t.m);
+  if (t.hooks) fx.shelves.forEach(sh => { sh.hooks = o.m || t.m; sh.slots.forEach((sl, i) => { sl.h = i; }); });
   return fx;
 }
 function defaultLayout() {
@@ -263,9 +297,10 @@ function zoneFx(zone) { return S.layout.fixtures.filter(f => f.zone === zone); }
 function fxById(id) { return S.layout.fixtures.find(f => f.id === id); }
 function fxStats(fx) {
   const ids = new Set(); let empty = 0, low = 0, out = 0, slots = 0, restock = 0;
+  if (isPeg(fx)) (fx.shelves || []).forEach(sh => hookGroups(sh).forEach(list => { if (!list.some(o => o.sl.p)) empty++; }));
   (fx.shelves || []).forEach(sh => sh.slots.forEach(sl => {
     slots++; const st = slotStatus(sl);
-    if (st === 'empty') empty++; else ids.add(sl.p);
+    if (st === 'empty') { if (!isPeg(fx)) empty++; } else ids.add(sl.p);
     if (st === 'low') low++; if (st === 'out') out++; if (st === 'restock') restock++;
   }));
   let pairs = 0, sold30 = 0;
@@ -296,6 +331,7 @@ async function loadAll() {
   try {
     const g = await api(`?action=planogram-get&wh=${S.wh}`);
     S.layout = g.layout || defaultLayout();
+    (S.layout.fixtures || []).forEach(pegNorm);
     S.version = g.layout ? g.layout.version : null;
     if (!g.layout) setDirty(true);
     await loadStock();
@@ -334,7 +370,7 @@ function changed(rebuild3d = true) { setDirty(true); renderAll(rebuild3d); }
 
 // ═══════════════════════ 3D ═══════════════════════
 const G = { renderer: null, label: null, scene: null, cam: null, ctl: null, root: null, walls: [], pick: [], tex: new Map(), drag: null, built: false };
-if (/[?&]debug=1/.test(location.search)) window.__pg = { G, S };
+if (/[?&]debug=1/.test(location.search)) window.__pg = { G, S, renderAll: (...a) => renderAll(...a), pegNorm, select: (x) => select(x) };
 const SHARED_GEO = new Set();
 function init3d() {
   const host = $('pg3d');
@@ -716,6 +752,61 @@ function addCategoryLabels() {
     const lo = new CSS2DObject(el); lo.position.set(x, hh + 0.55, y); G.root.add(lo);
   }));
 }
+// ряд крючков стенда: крючок-штырь, на нём упаковки (передняя — первая), статус — метка над крючком
+function pegRow3d(fx, g, add, sh, si, y, W, D) {
+  const groups = hookGroups(sh); const mh = groups.length;
+  const left = 0.17, x0 = -W / 2 + left, cw = (W - left - 0.04) / mh;
+  const zb = -D / 2 + 0.03, rodL = Math.max(0.1, Math.min(0.2, D - 0.03));
+  const hookM = mat('#a1a1aa', { metalness: 0.75, roughness: 0.3 });
+  const pw = Math.min(0.16, cw * 0.84), ph = pw * 1.75;
+  groups.forEach((list, h) => {
+    const x = x0 + cw * (h + 0.5);
+    const rod = add(new THREE.CylinderGeometry(0.0045, 0.0045, rodL, 8), hookM, x, y, zb + rodL / 2, false); rod.rotation.x = Math.PI / 2; rod.castShadow = false;
+    add(new THREE.SphereGeometry(0.008, 8, 6), hookM, x, y + 0.004, zb + rodL, false);
+    const show = hookShow(list);
+    const st = worstStatus(list.map(o => slotStatus(o.sl)));
+    const tag = add(new THREE.BoxGeometry(0.05, 0.016, 0.004), mat(ST_COLOR[st], { emissive: ST_COLOR[st], emissiveIntensity: st === 'empty' ? 0 : 0.45 }), x, y + 0.03, zb + 0.004);
+    tag.userData = { fid: fx.id, si, ki: show[0].ki, slot: true }; tag.castShadow = false;
+    show.forEach((o, j) => {
+      const ud = { fid: fx.id, si, ki: o.ki, slot: true };
+      const z = zb + rodL - 0.012 - j * Math.min(0.022, (rodL - 0.03) / Math.max(1, show.length));
+      const dx = j * 0.01, dy = j * 0.006;
+      const isSel = S.sel && S.sel.k === 'slot' && S.sel.fid === fx.id && S.sel.si === si && S.sel.ki === o.ki;
+      const cy = y - 0.006 - ph / 2 + dy;
+      if (o.sl.p) {
+        const p = S.products.get(o.sl.p);
+        const m = p ? pegPack(p, ud, pw, ph) : new THREE.Mesh(new THREE.BoxGeometry(pw, ph, 0.012), mat('#94a3b8'));
+        if (!p) { m.userData = ud; G.pick.push(m); }
+        m.position.set(x + dx, cy, z); g.add(m);
+      } else {
+        const e = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pmat('emptyPeg' + (S.edit ? 1 : 0), () => new THREE.MeshBasicMaterial({ color: '#64748b', transparent: true, opacity: S.edit ? 0.28 : 0.1, depthWrite: false })));
+        e.position.set(x, cy, z); e.userData = ud; g.add(e); G.pick.push(e);
+      }
+      if (isSel) { const hb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(pw + 0.02, ph + 0.02, 0.03)), new THREE.LineBasicMaterial({ color: '#2563eb' })); hb.position.set(x + dx, cy, z); g.add(hb); }
+    });
+  });
+  if (S.showQr) {
+    const n = fx.shelves.length;
+    const key = 'qrM' + shelfSid(fx, si) + '|' + fx.name + '|' + n;
+    const qm = pmat(key, () => { const tx = new THREE.CanvasTexture(labelCanvas(fx, si, 6)); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return new THREE.MeshBasicMaterial({ map: tx, toneMapped: false }); });
+    const qw = Math.min(0.12, left - 0.04), qh = qw * 1.3;
+    const qp = new THREE.Mesh(new THREE.PlaneGeometry(qw, qh), qm);
+    qp.position.set(-W / 2 + 0.02 + qw / 2, y - qh / 2 + 0.02, zb + 0.006);
+    qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
+  }
+}
+// упаковка стелек: тонкий пакет с фото спереди и белой «шапкой» с отверстием для крючка
+function pegPack(p, ud, w, h) {
+  const tex = p.photo ? photoTex(p.photo) : null;
+  const side = mat('#e5e7eb', { roughness: 0.4 });
+  const front = tex ? pmat('ph:' + p.photo, () => new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 })) : mat('#60a5fa');
+  const grp = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(w, h * 0.86, 0.012), [side, side, side, side, front, side]);
+  body.position.y = -h * 0.07; body.castShadow = true; body.userData = ud; G.pick.push(body); grp.add(body);
+  const cap = new THREE.Mesh(new THREE.BoxGeometry(w * 0.92, h * 0.14, 0.006), mat('#f8fafc', { roughness: 0.3, transparent: true, opacity: 0.92 }));
+  cap.position.y = h * 0.43; cap.userData = ud; G.pick.push(cap); grp.add(cap);
+  return grp;
+}
 function blob(g, w, d) {
   const m = new THREE.Mesh(new THREE.PlaneGeometry(w + 0.35, d + 0.35), pmat('blobM', () => new THREE.MeshBasicMaterial({ map: blobTex(), transparent: true, depthWrite: false, opacity: 0.55 })));
   m.rotation.x = -Math.PI / 2; m.position.y = 0.004; m.renderOrder = 1; g.add(m);
@@ -758,6 +849,14 @@ function buildFx(fx) {
         }
       }
       top = Hh - 0.22; slotZ = D * 0.04;
+    } else if (fx.type === 'pegboard') {
+      // перфопанель с крючками (как в салоне: жёлтая стена, ряды крючков)
+      const pegY = pmat('pegY', () => { const tx = pegTex().clone(); tx.needsUpdate = true; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(Math.max(2, Math.round(W * 3)), Math.max(2, Math.round(Hh * 3))); return new THREE.MeshStandardMaterial({ map: tx, color: '#ece65a', roughness: 0.65 }); });
+      const bh = Hh - 0.2;
+      const back = add(RB(W, bh, 0.03, 0.008), pegY, 0, 0.2 + bh / 2, -D / 2 + 0.015);
+      G.backs.push({ mesh: back, g, rot: fx.rot });
+      add(new THREE.BoxGeometry(W, 0.2, 0.05), white, 0, 0.1, -D / 2 + 0.025);
+      base = 0.66; top = Hh - 0.1;
     } else if (fx.type === 'island') {
       add(RB(W, 0.32, D, 0.03), white, 0, 0.16, 0);
       add(RB(W + 0.02, 0.035, D + 0.02, 0.012), woodM, 0, 0.335, 0);
@@ -772,6 +871,7 @@ function buildFx(fx) {
     }
     (fx.shelves || []).forEach((sh, si) => {
       const y = n > 1 ? base + (top - base) * si / (n - 1) : base;
+      if (isPeg(fx)) { pegRow3d(fx, g, add, sh, si, y, W, D); return; }
       const isBaseLevel = (fx.type === 'island' && si === 0) || fx.type === 'table';
       if (!isBaseLevel) {
         if (fx.type === 'island') {
@@ -1027,11 +1127,13 @@ function svgPlan(host, opts) {
     else h += `<rect x="${-fx.w / 2}" y="${-fx.d / 2}" width="${fx.w}" height="${fx.d}" rx="0.04" fill="${fill}" stroke="${sel ? '#2563eb' : '#64748b'}" stroke-width="${sel ? 0.07 : 0.03}"/>`;
     if (t.shelves && fx.shelves && fx.shelves.length) {
       // колонки мест: худший статус по всем полкам в этой колонке
-      const m = Math.max(...fx.shelves.map(s => s.slots.length));
+      const peg = isPeg(fx);
+      const m = peg ? Math.max(...fx.shelves.map(s => s.hooks || 1)) : Math.max(...fx.shelves.map(s => s.slots.length));
       const cw = (fx.w - 0.06) / m;
       for (let k = 0; k < m; k++) {
-        const st = worstStatus(fx.shelves.map(s => slotStatus(s.slots[k])).filter(Boolean).filter(x => x !== 'empty')) ;
-        const allEmpty = fx.shelves.every(s => !s.slots[k] || !s.slots[k].p);
+        const col = peg ? fx.shelves.flatMap(s => s.slots.filter(x => x.h === k)) : fx.shelves.map(s => s.slots[k]).filter(Boolean);
+        const st = worstStatus(col.map(slotStatus).filter(x => x !== 'empty'));
+        const allEmpty = col.every(x => !x.p);
         h += `<rect x="${-fx.w / 2 + 0.03 + k * cw + cw * 0.08}" y="${fx.d / 2 - 0.13}" width="${cw * 0.84}" height="0.09" rx="0.02" fill="${allEmpty ? '#e2e8f0' : ST_COLOR[st]}"/>`;
       }
       if (S.showQr && !opts.mini && window.qrcode) {
@@ -1041,7 +1143,7 @@ function svgPlan(host, opts) {
           const isS = S.sel && S.sel.k === 'shelf' && S.sel.fid === fx.id && S.sel.si === si;
           h += `<rect x="${qx - 0.015}" y="${qy - 0.015}" width="${qs + 0.03}" height="${qs + 0.03 + qs * 0.34}" rx="0.02" fill="#fff" stroke="${isS ? '#2563eb' : '#94a3b8'}" stroke-width="${isS ? 0.035 : 0.012}" data-qrsi="${si}" style="cursor:pointer"/>`;
           h += `<image href="${qrDataUrl(shelfUrl(fx, si))}" x="${qx}" y="${qy}" width="${qs}" height="${qs}" data-qrsi="${si}" style="cursor:pointer;image-rendering:pixelated"/>`;
-          h += `<text x="${qx + qs / 2}" y="${qy + qs + qs * 0.22}" font-size="${qs * 0.24}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-weight="700" pointer-events="none">П${si + 1}</text>`;
+          h += `<text x="${qx + qs / 2}" y="${qy + qs + qs * 0.22}" font-size="${qs * 0.24}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-weight="700" pointer-events="none">${isPeg(fx) ? 'Р' : 'П'}${si + 1}</text>`;
         });
       }
     }
@@ -1229,7 +1331,7 @@ function addFx(type) {
   const z = S.layout.zones[S.zone]; const b = polyBounds(z.polygon);
   const fx = mkFx(type, { zone: S.zone, x: r2((b.x0 + b.x1) / 2), y: r2((b.y0 + b.y1) / 2) });
   const same = S.layout.fixtures.filter(f => f.type === type && f.zone === S.zone).length + 1;
-  if (TYPES[type].shelves) fx.name = (type === 'rack' ? 'Стеллаж S-' : type === 'island' ? 'Остров I-' : type === 'table' ? 'Подиум T-' : 'Секция N-') + same;
+  if (TYPES[type].shelves) fx.name = (type === 'rack' ? 'Стеллаж S-' : type === 'island' ? 'Остров I-' : type === 'table' ? 'Подиум T-' : type === 'pegboard' ? 'Стенд К-' : 'Секция N-') + same;
   S.layout.fixtures.push(fx);
   S.sel = { k: 'fx', fid: fx.id };
   changed(true);
@@ -1264,9 +1366,22 @@ function renderFxPanel(P, fx) {
     </div>`;
   }
   if (t.shelves) {
-    h += `<h4>Полки и места ${S.edit ? '' : '<span class="pg-sub" style="text-transform:none;letter-spacing:0">(нажмите на место)</span>'}</h4><div class="pg-shelves">`;
+    const peg = isPeg(fx);
+    h += `<h4>${peg ? 'Ряды крючков' : 'Полки и места'} ${S.edit ? '' : `<span class="pg-sub" style="text-transform:none;letter-spacing:0">(${peg ? 'нажмите на товар или ＋ на крючке' : 'нажмите на место'})</span>`}</h4><div class="pg-shelves">`;
     for (let si = fx.shelves.length - 1; si >= 0; si--) {
       const sh = fx.shelves[si];
+      if (peg) {
+        const gr = hookGroups(sh); const items = sh.slots.filter(x => x.p).length;
+        h += `<div class="pg-shelf"><div class="pg-shelf-h"><span>Ряд ${si + 1}${si === fx.shelves.length - 1 ? ' (верх)' : si === 0 ? ' (низ)' : ''} · ${gr.length} крюч. · ${items} тов.</span>
+          <button class="pg-mini qr" data-sqr="${si}" title="QR и состав ряда">▦ QR</button>
+          ${S.edit ? `<span class="pg-row"><button class="pg-mini" data-hm="${si}" title="Убрать крючок">−</button><button class="pg-mini" data-hp="${si}" title="Добавить крючок">+</button><button class="pg-mini" data-sdel="${si}" title="Удалить ряд">✕</button></span>` : ''}</div>
+          <div class="pg-hooks" style="grid-template-columns:repeat(${gr.length},minmax(0,1fr))">${gr.map((list, hk) => `<div class="pg-hook"><div class="pg-hook-n">К${hk + 1}</div>${hookShow(list).map(o => {
+            const stt = slotStatus(o.sl); const p = o.sl.p && S.products.get(o.sl.p);
+            const isSel = S.sel && S.sel.k === 'slot' && S.sel.si === si && S.sel.ki === o.ki;
+            return `<div class="pg-cell ${o.sl.p ? '' : 'empty'} ${isSel ? 'sel' : ''}" data-si="${si}" data-ki="${o.ki}" title="${esc(p ? p.name + ' — ' + (p.here || 0) + ' пар' : 'Пустой крючок')}" style="--c:${ST_COLOR[stt]};${p && p.photo ? `background-image:url('${esc(p.photo)}')` : ''}"></div>`;
+          }).join('')}${list.some(o => o.sl.p) ? `<button class="pg-hook-add" data-hadd="${si}:${hk}" title="Повесить ещё товар на этот крючок">＋</button>` : ''}</div>`).join('')}</div></div>`;
+        continue;
+      }
       h += `<div class="pg-shelf"><div class="pg-shelf-h"><span>Полка ${si + 1}${si === fx.shelves.length - 1 ? ' (верх)' : si === 0 ? ' (низ)' : ''} · ${sh.slots.length} мест</span>
         <button class="pg-mini qr" data-sqr="${si}" title="QR и состав полки">▦ QR</button>
         ${S.edit ? `<span class="pg-row"><button class="pg-mini" data-sm="${si}" title="Убрать место">−</button><button class="pg-mini" data-sp="${si}" title="Добавить место">+</button><button class="pg-mini" data-sdel="${si}" title="Удалить полку">✕</button></span>` : ''}</div>
@@ -1277,9 +1392,9 @@ function renderFxPanel(P, fx) {
         }).join('')}</div></div>`;
     }
     h += `</div>`;
-    if (S.edit) h += `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить полку</button><button class="pg-btn sm" id="shAll">Мест на всех полках…</button></div>`;
-    h += `<h4>QR-коды полок</h4><div class="pg-qrgrid">${fx.shelves.map((_, si) => `<div class="pg-qrcard"><img src="${labelCanvas(fx, si, 5).toDataURL('image/png')}" alt="QR полка ${si + 1}" data-sqr="${si}"><button class="pg-mini" data-qpng="${si}">⬇ PNG</button></div>`).join('')}</div>
-      <div class="pg-row" style="margin-top:8px"><button class="pg-btn sm pri" id="fQrPdf">⬇ Скачать QR всех полок шкафа (PDF)</button></div>`;
+    if (S.edit) h += peg ? `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить ряд</button><button class="pg-btn sm" id="shAll">Крючков в каждом ряду…</button></div>` : `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить полку</button><button class="pg-btn sm" id="shAll">Мест на всех полках…</button></div>`;
+    h += `<h4>QR-коды ${peg ? 'рядов' : 'полок'}</h4><div class="pg-qrgrid">${fx.shelves.map((_, si) => `<div class="pg-qrcard"><img src="${labelCanvas(fx, si, 5).toDataURL('image/png')}" alt="QR полка ${si + 1}" data-sqr="${si}"><button class="pg-mini" data-qpng="${si}">⬇ PNG</button></div>`).join('')}</div>
+      <div class="pg-row" style="margin-top:8px"><button class="pg-btn sm pri" id="fQrPdf">⬇ Скачать QR всех ${peg ? 'рядов стенда' : 'полок шкафа'} (PDF)</button></div>`;
   }
   P.innerHTML = h;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
@@ -1301,13 +1416,32 @@ function renderFxPanel(P, fx) {
     S.layout.fixtures = S.layout.fixtures.filter(f => f.id !== fx.id); S.sel = null; changed(true);
   });
   on('fDone', 'click', () => select(null));
-  on('shAdd', 'click', () => { const m = fx.shelves.length ? fx.shelves[fx.shelves.length - 1].slots.length : (TYPES[fx.type].m || 4); fx.shelves.push({ slots: Array.from({ length: m }, () => ({ p: null, q: 1 })) }); changed(true); });
+  on('shAdd', 'click', () => { if (isPeg(fx)) { const hk = fx.shelves.length ? fx.shelves[fx.shelves.length - 1].hooks || TYPES.pegboard.m : TYPES.pegboard.m; fx.shelves.push({ hooks: hk, slots: Array.from({ length: hk }, (_, i) => ({ p: null, q: 1, h: i })) }); return changed(true); } const m = fx.shelves.length ? fx.shelves[fx.shelves.length - 1].slots.length : (TYPES[fx.type].m || 4); fx.shelves.push({ slots: Array.from({ length: m }, () => ({ p: null, q: 1 })) }); changed(true); });
   on('shAll', 'click', () => {
+    if (isPeg(fx)) {
+      const k = Number(prompt('Сколько крючков в каждом ряду?', String(fx.shelves[0] ? fx.shelves[0].hooks : TYPES.pegboard.m)));
+      if (!(k >= 1 && k <= 20)) return;
+      const cut = fx.shelves.reduce((a, sh) => a + sh.slots.filter(x => x.p && x.h >= k).length, 0);
+      if (cut && !confirm(`На убираемых крючках висят товары (${cut}). Продолжить?`)) return;
+      fx.shelves.forEach(sh => { sh.slots = sh.slots.filter(x => x.h < k); sh.hooks = k; });
+      pegNorm(fx); return changed(true);
+    }
     const m = Number(prompt('Сколько мест (пар) на каждой полке?', String(fx.shelves[0] ? fx.shelves[0].slots.length : 6)));
     if (!(m >= 1 && m <= 30)) return;
     fx.shelves.forEach(sh => { while (sh.slots.length < m) sh.slots.push({ p: null, q: 1 }); if (sh.slots.length > m) { const cut = sh.slots.slice(m).filter(s => s.p).length; if (cut && !confirm(`На полке убираются места с товаром (${cut}). Продолжить?`)) return; sh.slots.length = m; } });
     changed(true);
   });
+  P.querySelectorAll('[data-hp]').forEach(b => b.addEventListener('click', () => { const sh = fx.shelves[Number(b.dataset.hp)]; if ((sh.hooks || 1) >= 20) return; sh.hooks = (sh.hooks || 1) + 1; pegNorm(fx); changed(true); }));
+  P.querySelectorAll('[data-hm]').forEach(b => b.addEventListener('click', () => {
+    const sh = fx.shelves[Number(b.dataset.hm)]; if ((sh.hooks || 1) <= 1) return;
+    const last = sh.hooks - 1; const n = sh.slots.filter(x => x.h === last && x.p).length;
+    if (n && !confirm(`На последнем крючке висит товаров: ${n}. Убрать крючок?`)) return;
+    sh.slots = sh.slots.filter(x => x.h !== last); sh.hooks = last; if (S.sel && S.sel.k === 'slot') S.sel = { k: 'fx', fid: fx.id }; changed(true);
+  }));
+  P.querySelectorAll('[data-hadd]').forEach(b => b.addEventListener('click', () => {
+    const [si, hk] = b.dataset.hadd.split(':').map(Number); const ki = pegAddToHook(fx, si, hk); if (ki == null) return;
+    S.sel = { k: 'slot', fid: fx.id, si, ki }; changed(false); openPicker(fx, fx.shelves[si].slots[ki]);
+  }));
   P.querySelectorAll('[data-sp]').forEach(b => b.addEventListener('click', () => { const sh = fx.shelves[Number(b.dataset.sp)]; if (sh.slots.length >= 30) return; sh.slots.push({ p: null, q: 1 }); changed(true); }));
   P.querySelectorAll('[data-sm]').forEach(b => b.addEventListener('click', () => {
     const sh = fx.shelves[Number(b.dataset.sm)]; if (sh.slots.length <= 1) return;
@@ -1318,7 +1452,7 @@ function renderFxPanel(P, fx) {
     const si = Number(b.dataset.sdel); const sh = fx.shelves[si];
     if (fx.shelves.length <= 1) return toast('Должна остаться хотя бы одна полка', true);
     const n = sh.slots.filter(s => s.p).length;
-    if (n && !confirm(`На полке ${si + 1} привязано товаров: ${n}. Удалить полку?`)) return;
+    if (n && !confirm(`${rowWord(fx)} ${si + 1}: привязано товаров ${n}. Удалить?`)) return;
     fx.shelves.splice(si, 1); if (S.sel && S.sel.k === 'slot') S.sel = { k: 'fx', fid: fx.id }; changed(true);
   }));
   P.querySelectorAll('.pg-cell').forEach(c => c.addEventListener('click', () => select({ k: 'slot', fid: fx.id, si: Number(c.dataset.si), ki: Number(c.dataset.ki) })));
@@ -1337,7 +1471,7 @@ function renderShelfPanel(P, sel) {
   const sh = fx && fx.shelves && fx.shelves[sel.si];
   if (!sh) { S.sel = fx ? { k: 'fx', fid: fx.id } : null; return renderPanel(); }
   const items = sh.slots.map((sl, ki) => ({ sl, ki })).filter(x => x.sl.p);
-  let h = `<div class="pg-crumb"><a id="bkZone">${esc(S.layout.zones[fx.zone].name)}</a> › <a id="bkFx">${esc(fx.name)}</a> › Полка ${sel.si + 1}</div>`;
+  let h = `<div class="pg-crumb"><a id="bkZone">${esc(S.layout.zones[fx.zone].name)}</a> › <a id="bkFx">${esc(fx.name)}</a> › ${rowWord(fx)} ${sel.si + 1}</div>`;
   h += `<h3>${esc(shelfName(fx, sel.si))}</h3><div class="pg-sub">${esc(fx.category || TYPES[fx.type].label)} · ${sh.slots.length} мест · занято ${items.length}</div>`;
   h += `<div class="pg-qrbig"><img src="${labelCanvas(fx, sel.si, 9).toDataURL('image/png')}" alt="QR полки"></div>
     <div class="pg-actions"><button class="pg-btn pri" id="sqPng">⬇ Скачать PNG</button><button class="pg-btn" id="sqPdf">🖨 PDF для печати</button></div>
@@ -1381,6 +1515,12 @@ function suggestions(fx, excludeId) {
   const a = all.filter(catMatch).sort((x, y) => sc(y) - sc(x));
   return (a.length ? a : all.sort((x, y) => sc(y) - sc(x))).slice(0, 6);
 }
+function pegSlotTools(sh, sl) {
+  const on = sh.slots.filter(x => x.h === sl.h && x.p);
+  return `<h4>Крючок ${(sl.h | 0) + 1}${on.length ? ` · висит товаров: ${on.length}` : ''}</h4>
+    <div class="pg-grid2"><div class="pg-f"><label>Перевесить на крючок</label><select id="slHook">${Array.from({ length: sh.hooks || 1 }, (_, i) => `<option value="${i}" ${i === (sl.h | 0) ? 'selected' : ''}>Крючок ${i + 1}</option>`).join('')}</select></div>
+    <div class="pg-f"><label>&nbsp;</label>${sl.p ? '<button class="pg-btn" id="slHookAdd">＋ Ещё товар на этот крючок</button>' : ''}</div></div>`;
+}
 function renderSlotPanel(P, sel) {
   const fx = fxById(sel.fid);
   const sh = fx && fx.shelves && fx.shelves[sel.si];
@@ -1388,7 +1528,7 @@ function renderSlotPanel(P, sel) {
   if (!sl) { S.sel = fx ? { k: 'fx', fid: fx.id } : null; return renderPanel(); }
   const st = slotStatus(sl);
   const p = sl.p ? S.products.get(sl.p) : null;
-  let h = `<div class="pg-crumb"><a id="bkZone">${esc(S.layout.zones[fx.zone].name)}</a> › <a id="bkFx">${esc(fx.name)}</a> › Полка ${sel.si + 1} · место ${sel.ki + 1}</div>`;
+  let h = `<div class="pg-crumb"><a id="bkZone">${esc(S.layout.zones[fx.zone].name)}</a> › <a id="bkFx">${esc(fx.name)}</a> › ${isPeg(fx) ? `Ряд ${sel.si + 1} · крючок ${(sl.h | 0) + 1}` : `Полка ${sel.si + 1} · место ${sel.ki + 1}`}</div>`;
   if (sl.p) {
     h += `<div class="pg-prod">${p && p.photo ? `<img src="${esc(p.photo)}" alt="">` : '<div class="ph">👟</div>'}<div>
       <h3 style="font-size:15.5px">${esc(p ? p.name : 'Товар не найден')}</h3>
@@ -1402,16 +1542,22 @@ function renderSlotPanel(P, sel) {
     if (st === 'low' || st === 'out') h += `<div class="pg-note">⚠ ${st === 'out' ? 'Этой модели нет в магазине' : 'Осталось мало пар'} — стоит перевести модель в скидки или привезти, а на это место поставить модель с большим остатком.</div>`;
     if (st === 'restock') h += `<div class="pg-note restock">🟣 Пару с этого места продали, а модель ещё есть в магазине (${p ? p.here : 0} пар${stockPlace(sl.p) ? ', лежит: ' + esc(stockPlace(sl.p)) : ''}). Выставьте новую пару и отсканируйте её на кассе через QR полки.</div>`;
     if (st === 'slow') h += `<div class="pg-note">Модель есть, но за 30 дней не продавалась на этом магазине — кандидат на скидку или перенос на более видное место.</div>`;
-    h += `<div class="pg-actions"><button class="pg-btn pri" id="slSet">🔁 Заменить товар</button><button class="pg-btn danger" id="slClr">Убрать с места</button></div>`;
+    h += `<div class="pg-actions"><button class="pg-btn pri" id="slSet">🔁 Заменить товар</button><button class="pg-btn danger" id="slClr">${isPeg(fx) ? 'Снять с крючка' : 'Убрать с места'}</button></div>`;
+    if (isPeg(fx)) h += pegSlotTools(sh, sl);
   } else {
-    h += `<h3>Пустое место</h3><div class="pg-sub">${esc(fx.name)}${fx.category ? ' · ' + esc(fx.category) : ''}</div>
-      <div class="pg-actions"><button class="pg-btn pri" id="slSet" style="grid-column:span 2">＋ Привязать товар</button></div>`;
+    h += `<h3>${isPeg(fx) ? 'Пустой крючок' : 'Пустое место'}</h3><div class="pg-sub">${esc(fx.name)}${fx.category ? ' · ' + esc(fx.category) : ''}</div>
+      <div class="pg-actions"><button class="pg-btn pri" id="slSet" style="grid-column:span 2">＋ ${isPeg(fx) ? 'Повесить товар' : 'Привязать товар'}</button></div>`;
+    if (isPeg(fx)) h += pegSlotTools(sh, sl);
   }
   const sug = suggestions(fx, sl.p);
   if (!sl.p || st === 'low' || st === 'out' || st === 'slow') {
     h += `<h4>Предлагаем поставить сюда</h4><div class="pg-list">${sug.map(s => `<div class="pg-li" data-put="${s.id}">${prodThumb(s)}<div class="t"><b>${esc(s.name)}</b><small>продано 30 дн.: ${s.sold30} · не выставлена</small></div><div class="n">${s.here} пар</div></div>`).join('') || '<div class="pg-empty">Нет подходящих моделей с остатком &gt; 2</div>'}</div>`;
   }
   // соседние места этой полки
+  if (isPeg(fx)) {
+    const gr = hookGroups(sh);
+    h += `<h4>Ряд ${sel.si + 1}</h4><div class="pg-hooks" style="grid-template-columns:repeat(${gr.length},minmax(0,1fr))">${gr.map((list, hk) => `<div class="pg-hook"><div class="pg-hook-n">К${hk + 1}</div>${hookShow(list).map(o => { const pp = o.sl.p && S.products.get(o.sl.p); return `<div class="pg-cell ${o.sl.p ? '' : 'empty'} ${o.ki === sel.ki ? 'sel' : ''}" data-ki="${o.ki}" style="--c:${ST_COLOR[slotStatus(o.sl)]};${pp && pp.photo ? `background-image:url('${esc(pp.photo)}')` : ''}"></div>`; }).join('')}</div>`).join('')}</div>`;
+  } else
   h += `<h4>Полка ${sel.si + 1}</h4><div class="pg-cells" style="grid-template-columns:repeat(${sh.slots.length},1fr)">${sh.slots.map((s2, ki) => { const pp = s2.p && S.products.get(s2.p); return `<div class="pg-cell ${s2.p ? '' : 'empty'} ${ki === sel.ki ? 'sel' : ''}" data-ki="${ki}" style="--c:${ST_COLOR[slotStatus(s2)]};${pp && pp.photo ? `background-image:url('${esc(pp.photo)}')` : ''}" title="${esc(pp ? pp.name : 'Пусто')}"></div>`; }).join('')}</div>`;
   P.innerHTML = h;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
@@ -1419,9 +1565,11 @@ function renderSlotPanel(P, sel) {
   on('bkFx', 'click', () => select({ k: 'fx', fid: fx.id }));
   on('slSet', 'click', () => openPicker(fx, sl));
   on('slClr', 'click', () => { sl.p = null; sl.q = 1; delete sl.u; changed(true); });
+  on('slHook', 'change', (e) => { sl.h = Number(e.target.value); pegNorm(fx); changed(true); });
+  on('slHookAdd', 'click', () => { const ki = pegAddToHook(fx, sel.si, sl.h | 0); if (ki == null) return; S.sel = { k: 'slot', fid: fx.id, si: sel.si, ki }; changed(false); openPicker(fx, sh.slots[ki]); });
   on('slQ', 'change', (e) => { sl.q = Math.max(1, Math.min(20, Number(e.target.value) || 1)); changed(false); });
   P.querySelectorAll('[data-put]').forEach(el => el.addEventListener('click', () => assign(sl, el.dataset.put)));
-  P.querySelectorAll('.pg-cells .pg-cell').forEach(c => c.addEventListener('click', () => select({ k: 'slot', fid: fx.id, si: sel.si, ki: Number(c.dataset.ki) })));
+  P.querySelectorAll('.pg-cells .pg-cell, .pg-hooks .pg-cell').forEach(c => c.addEventListener('click', () => select({ k: 'slot', fid: fx.id, si: sel.si, ki: Number(c.dataset.ki) })));
   if (sl.p) loadDetail(sl.p);
 }
 async function loadDetail(pid) {
@@ -1456,7 +1604,7 @@ function openPicker(fx, sl) {
   const placed = placedIds();
   const local = [...S.products.values()].filter(p => p.here > 0).sort((a, b) => ((placed.has(a.id) ? 1 : 0) - (placed.has(b.id) ? 1 : 0)) || (b.sold30 - a.sold30) || (b.here - a.here));
   m.innerHTML = `<div class="pg-mbox"><h3>Привязать товар к месту</h3>
-    <div class="pg-sub" style="margin-bottom:8px">${esc(fx.name)} · полка ${S.sel.si + 1}, место ${S.sel.ki + 1}. Введите название, артикул или отсканируйте штрихкод пары.</div>
+    <div class="pg-sub" style="margin-bottom:8px">${esc(fx.name)} · ${isPeg(fx) ? `ряд ${S.sel.si + 1}, крючок ${((fx.shelves[S.sel.si].slots[S.sel.ki] || {}).h | 0) + 1}` : `полка ${S.sel.si + 1}, место ${S.sel.ki + 1}`}. Введите название, артикул или отсканируйте штрихкод пары.</div>
     <input class="pg-search" id="pkQ" placeholder="Поиск: название / артикул / штрихкод" autocomplete="off">
     <div class="pg-mlist" id="pkList"></div>
     <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="pkClose">Закрыть</button></div></div>`;

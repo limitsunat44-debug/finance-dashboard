@@ -10,6 +10,10 @@
 
 ---
 
+## 1.5.1 — 20.10.2026 — Планограмма: стенд с крючками
+- `planogram.js/css`: тип `pegboard` (ряд = shelf, `sh.hooks`, у места `sl.h`; несколько мест на крючке), 3D перфопанель, панель рядов/крючков, перевеска.
+- `pos.js` planoBind: для pegboard — пустой крючок или наименее занятый; view.items[].hook. `tasks.js`: «Ряд · Крючок», strip по крючкам (`lbl`). Касса/shelf.html — подписи.
+
 ## 1.5.0 — 20.10.2026 — ИИ-агенты (12 агентов, Telegram-группа, админка, касса)
 - Backend `api/agents.js` (cron */15 мин → tick; POST list/feed/save/act/run/unit-history/seller-ask), `_agents-core.js` (настройки `agents_settings`, состояние `agents_state`, группа `agents_chat`, находки `agf:<день>:<агент>`, память `agmem:<агент>`; проверка чисел кодом + verifier), `_agents-list.js` (12 агентов, факты считает код), `_unit-tools.js` (история экземпляра, превью/восстановление списанного с бэкапом `unitbak:*`).
 - `tg-webhook.js`: группа агентов (регистрация /agents, темы /topics, /run, кнопки `ag:<fid>:*`, диалог), подтверждение `unit_restore`/`agent_task`.

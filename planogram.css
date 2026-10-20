@@ -206,3 +206,10 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 @media (max-width:900px){.pg-goods{padding:6px 8px;font-size:12px}}
 .pg-wide .pg-li .t small em{font-style:normal;font-weight:800;color:#0f172a}
 @media (max-width:1320px) and (min-width:901px){.pg-brand-t{display:none}.pg-top{gap:8px}.pg-switch>span:last-child{font-size:13px}}
+/* стенд с крючками */
+.pg-hooks{display:grid;gap:4px}
+.pg-hook{display:flex;flex-direction:column;gap:3px;min-width:0;padding:3px;border-radius:7px;background:#fefce8;border:1px solid #fde68a}
+.pg-hook-n{font-size:9.5px;font-weight:700;color:#a16207;text-align:center;line-height:1}
+.pg-hook .pg-cell{height:38px}
+.pg-hook-add{border:1px dashed #d4a017;background:#fff;border-radius:6px;color:#a16207;font-size:13px;line-height:1;padding:3px 0;cursor:pointer}
+.pg-hook-add:hover{background:#fef9c3}

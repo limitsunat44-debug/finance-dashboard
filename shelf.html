@@ -58,7 +58,8 @@
   fetch(`${API}?action=planogram-shelf&w=${encodeURIComponent(w)}&s=${encodeURIComponent(s)}`, { headers: { 'X-Provision-Secret': SECRET } })
     .then(r => r.json()).then(d => {
       if (!d.ok) throw new Error(d.error || 'Ошибка');
-      const name = `${d.fixture.name} · Полка ${d.shelf.n}`;
+      const peg = d.fixture.type === 'pegboard';
+      const name = `${d.fixture.name} · ${peg ? 'Ряд' : 'Полка'} ${d.shelf.n}`;
       document.title = name + ' · РМК';
       $('t').textContent = name;
       $('st').textContent = `${STORES[String(d.wh).slice(0, 8)] || ''}${d.fixture.category ? ' · ' + d.fixture.category : ''}`;
@@ -67,7 +68,7 @@
       h += `<div class="card">${d.items.map(i => {
         const sizes = Object.keys(i.sizes || {}).sort((a, b) => (parseFloat(a) || 999) - (parseFloat(b) || 999));
         return `<div class="it">${i.photo ? `<img src="${esc(i.photo)}" alt="">` : '<div class="ph">👟</div>'}<div style="min-width:0">
-          <b>${esc(i.name)}</b><small>${i.price ? i.price.toLocaleString('ru-RU') + ' с. · ' : ''}в магазине ${i.here} пар${i.scanned ? ` · на полке ${i.onShelf}` : ''}</small>
+          <b>${i.hook ? `<span style="color:#a16207">Крючок ${i.hook} · </span>` : ''}${esc(i.name)}</b><small>${i.price ? i.price.toLocaleString('ru-RU') + ' с. · ' : ''}в магазине ${i.here} пар${i.scanned ? ` · на полке ${i.onShelf}` : ''}</small>
           <div><span class="pill ${i.status}">${LBL[i.status] || ''}</span></div>
           ${(() => { const l = i.units.filter(u => u.ts).sort((x, y) => String(y.ts).localeCompare(String(x.ts)))[0]; return l ? `<small style="display:block">📍 привязал(а): ${esc(l.by || '—')} · ${new Date(l.ts).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</small>` : ''; })()}
           ${i.units.length ? `<div class="units">${i.units.map(u => `<span class="u ${u.onShelf ? '' : (u.st === 'sold' ? 'sold' : 'gone')}">${esc(u.size)} · №${esc(String(u.bc).slice(-4))}</span>`).join('')}</div>` : ''}

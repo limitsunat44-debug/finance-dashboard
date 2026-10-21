@@ -27,6 +27,7 @@ const TYPES = {
   wall:    { label: 'Настенный стеллаж', shelves: true,  w: 2.4, d: 0.4, h: 2.4, n: 6, m: 6, color: '#f8fafc', zone: 'hall' },
   island:  { label: 'Островная витрина', shelves: true,  w: 1.4, d: 0.8, h: 1.3, n: 3, m: 4, color: '#ffffff', zone: 'hall' },
   table:   { label: 'Стол-подиум',       shelves: true,  w: 1.2, d: 0.7, h: 0.75, n: 1, m: 4, color: '#f5f0e8', zone: 'hall' },
+  counter2:{ label: 'Тумба двусторонняя', shelves: true, sides: true, w: 1.8, d: 0.8, h: 1.12, n: 2, m: 5, maxM: 10, color: '#d8b98a', zone: 'hall' },
   pegboard:{ label: 'Стенд с крючками',  shelves: true,  hooks: true, w: 1.8, d: 0.22, h: 2.3, n: 5, m: 7, color: '#e9e44c', zone: 'hall' },
   rack:    { label: 'Стеллаж склада',    shelves: true,  w: 2.0, d: 0.5, h: 2.2, n: 5, m: 8, color: '#e2e8f0', zone: 'stock' },
   cash:    { label: 'Касса',             shelves: false, w: 1.8, d: 0.7, h: 1.0, color: '#ffffff' },
@@ -64,9 +65,11 @@ function toast(msg, err) {
 const SHELF_URL = 'https://finance-orto.vercel.app/s';
 const shelfSid = (fx, si) => `${fx.id}-${si + 1}`;
 const shelfUrl = (fx, si) => `${SHELF_URL}/${S.wh.slice(0, 8)}/${shelfSid(fx, si)}`;
-const shelfPos = (fx, si) => { const n = (fx.shelves || []).length; return n > 1 ? (si === 0 ? ' · низ' : si === n - 1 ? ' · верх' : '') : ''; };
+const shelfPos = (fx, si) => { if (fx.type === 'counter2') return si === 0 ? ' · спереди' : ' · сзади'; const n = (fx.shelves || []).length; return n > 1 ? (si === 0 ? ' · низ' : si === n - 1 ? ' · верх' : '') : ''; };
 const isPeg = (fx) => !!fx && fx.type === 'pegboard';
-const rowWord = (fx) => isPeg(fx) ? 'Ряд' : 'Полка';
+const isC2 = (fx) => !!fx && fx.type === 'counter2';
+const rowWord = (fx) => isPeg(fx) ? 'Ряд' : isC2(fx) ? 'Сторона' : 'Полка';
+const c2Side = (si) => si === 0 ? ' (спереди)' : ' (сзади)';
 const shelfName = (fx, si) => `${fx.name} · ${rowWord(fx)} ${si + 1}`;
 // Стенд с крючками: ряд = «полка», sh.hooks — число крючков, у каждого места sl.h — номер крючка (0..hooks-1).
 // На одном крючке может висеть несколько товаров (несколько мест с одинаковым h).
@@ -795,6 +798,61 @@ function pegRow3d(fx, g, add, sh, si, y, W, D) {
     qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
   }
 }
+// коробки обуви на нижних полках тумбы (декор, обе стороны)
+function c2Boxes(g, add, W, D, y1, y2, topY) {
+  const boxM = pmat('c2box', () => new THREE.MeshStandardMaterial({ color: '#ee6a2c', roughness: 0.55 }));
+  const lidM = pmat('c2lid', () => new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.5 }));
+  const bw = 0.3, bh = 0.11, bd = D / 2 - 0.06;
+  const cols = Math.max(1, Math.floor((W - 0.1) / (bw + 0.02)));
+  [[y1, y2], [y2 + 0.013, topY - 0.02]].forEach(([a, b]) => {
+    const rows = Math.max(1, Math.floor((b - a) / (bh + 0.006)) - (b - a > 0.3 ? 0 : 0));
+    [1, -1].forEach(sd => {
+      for (let c = 0; c < cols; c++) for (let r = 0; r < Math.min(rows, 3); r++) {
+        if ((c * 7 + r * 3 + (sd > 0 ? 1 : 2)) % 9 === 0) continue;
+        const x = -W / 2 + 0.06 + (bw + 0.02) * (c + 0.5) + ((W - 0.1) - cols * (bw + 0.02)) / 2;
+        const yy = a + bh / 2 + r * (bh + 0.004);
+        const bx = add(new THREE.BoxGeometry(bw, bh, bd), boxM, x, yy, sd * (bd / 2 + 0.02), false);
+        bx.castShadow = false;
+        add(new THREE.BoxGeometry(bw * 0.7, bh * 0.45, 0.003), lidM, x, yy, sd * (bd + 0.022), false);
+      }
+    });
+  });
+}
+// сторона тумбы: si=0 — спереди (+z), si=1 — сзади (−z); до 10 моделей в ряд
+function c2Side3d(fx, g, add, sh, si, y, W, D) {
+  const sd = si === 0 ? 1 : -1;
+  const m = sh.slots.length || 1, cw = (W - 0.1) / m;
+  const zf = sd * D * 0.26;
+  sh.slots.forEach((sl, ki) => {
+    const st = slotStatus(sl);
+    const x = -W / 2 + 0.05 + cw * (ki + 0.5);
+    const ud = { fid: fx.id, si, ki, slot: true };
+    const isSel = S.sel && S.sel.k === 'slot' && S.sel.fid === fx.id && S.sel.si === si && S.sel.ki === ki;
+    const p = sl.p ? S.products.get(sl.p) : null;
+    if (p) {
+      let o;
+      if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.3, cw / 0.19, (D * 0.42) / 0.25)); o.rotation.y = (sd > 0 ? 0 : Math.PI) + 0.32; }
+      else { o = prodBox(p, ud, cw * 0.8, false); if (sd < 0) o.rotation.y = Math.PI; }
+      o.position.set(x, y, zf); g.add(o);
+    } else if (sl.p) {
+      const o = add(new THREE.BoxGeometry(cw * 0.6, 0.08, 0.18), mat('#94a3b8'), x, y + 0.04, zf); o.userData = ud;
+    } else {
+      const e = new THREE.Mesh(new THREE.PlaneGeometry(cw * 0.8, D * 0.36), pmat('emptySlot' + (S.edit ? 1 : 0), () => new THREE.MeshBasicMaterial({ color: '#94a3b8', transparent: true, opacity: S.edit ? 0.32 : 0.12, depthWrite: false })));
+      e.rotation.x = -Math.PI / 2; e.position.set(x, y + 0.002, zf); e.userData = ud; g.add(e); G.pick.push(e);
+    }
+    const tag = add(new THREE.BoxGeometry(0.06, 0.022, 0.006), mat(ST_COLOR[st], { emissive: ST_COLOR[st], emissiveIntensity: st === 'empty' ? 0 : 0.45 }), x, y - 0.03, sd * (D / 2 + 0.018));
+    tag.userData = ud; tag.castShadow = false;
+    if (isSel) { const hb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(cw * 0.95, 0.2, D * 0.4)), new THREE.LineBasicMaterial({ color: '#2563eb' })); hb.position.set(x, y + 0.1, zf); g.add(hb); }
+  });
+  if (S.showQr) {
+    const key = 'qrM' + shelfSid(fx, si) + '|' + fx.name + '|' + fx.shelves.length;
+    const qm = pmat(key, () => { const tx = new THREE.CanvasTexture(labelCanvas(fx, si, 6)); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return new THREE.MeshBasicMaterial({ map: tx, toneMapped: false }); });
+    const qw = 0.1, qh = qw * 1.3;
+    const qp = new THREE.Mesh(new THREE.PlaneGeometry(qw, qh), qm);
+    qp.position.set(sd * (-W / 2 + 0.03 + qw / 2), y - 0.06 - qh / 2, sd * (D / 2 + 0.02)); if (sd < 0) qp.rotation.y = Math.PI;
+    qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
+  }
+}
 // упаковка стелек: тонкий пакет с фото спереди и белой «шапкой» с отверстием для крючка
 function pegPack(p, ud, w, h) {
   const tex = p.photo ? photoTex(p.photo) : null;
@@ -849,6 +907,20 @@ function buildFx(fx) {
         }
       }
       top = Hh - 0.22; slotZ = D * 0.04;
+    } else if (fx.type === 'counter2') {
+      // деревянная тумба: внизу открытые полки с коробками, сверху витрина, посередине — перегородка
+      const topY = Math.min(0.92, Hh - 0.16);
+      add(RB(W, 0.04, D, 0.01), woodM, 0, 0.02, 0);
+      add(RB(0.03, topY, D, 0.006), woodM, -W / 2 + 0.015, topY / 2, 0);
+      add(RB(0.03, topY, D, 0.006), woodM, W / 2 - 0.015, topY / 2, 0);
+      add(new THREE.BoxGeometry(W - 0.06, topY - 0.04, 0.02), woodM, 0, topY / 2, 0);
+      const midY = topY * 0.48;
+      add(new THREE.BoxGeometry(W - 0.06, 0.025, D - 0.02), woodM, 0, midY, 0);
+      add(RB(W + 0.03, 0.035, D + 0.03, 0.01), woodM, 0, topY, 0);
+      const woodD = pmat('woodD', () => new THREE.MeshStandardMaterial({ map: woodTex(), color: '#c9965c', roughness: 0.6 }));
+      add(RB(W - 0.04, Hh - topY, 0.03, 0.006), woodD, 0, topY + (Hh - topY) / 2, 0);
+      c2Boxes(g, add, W, D, 0.04, midY, topY);
+      base = topY + 0.018; top = base; slotZ = D * 0.26; both = false;
     } else if (fx.type === 'pegboard') {
       // перфопанель с крючками (как в салоне: жёлтая стена, ряды крючков)
       const pegY = pmat('pegY', () => { const tx = pegTex().clone(); tx.needsUpdate = true; tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(Math.max(2, Math.round(W * 3)), Math.max(2, Math.round(Hh * 3))); return new THREE.MeshStandardMaterial({ map: tx, color: '#ece65a', roughness: 0.65 }); });
@@ -872,6 +944,7 @@ function buildFx(fx) {
     (fx.shelves || []).forEach((sh, si) => {
       const y = n > 1 ? base + (top - base) * si / (n - 1) : base;
       if (isPeg(fx)) { pegRow3d(fx, g, add, sh, si, y, W, D); return; }
+      if (isC2(fx)) { c2Side3d(fx, g, add, sh, si, base, W, D); return; }
       const isBaseLevel = (fx.type === 'island' && si === 0) || fx.type === 'table';
       if (!isBaseLevel) {
         if (fx.type === 'island') {
@@ -1331,7 +1404,7 @@ function addFx(type) {
   const z = S.layout.zones[S.zone]; const b = polyBounds(z.polygon);
   const fx = mkFx(type, { zone: S.zone, x: r2((b.x0 + b.x1) / 2), y: r2((b.y0 + b.y1) / 2) });
   const same = S.layout.fixtures.filter(f => f.type === type && f.zone === S.zone).length + 1;
-  if (TYPES[type].shelves) fx.name = (type === 'rack' ? 'Стеллаж S-' : type === 'island' ? 'Остров I-' : type === 'table' ? 'Подиум T-' : type === 'pegboard' ? 'Стенд К-' : 'Секция N-') + same;
+  if (TYPES[type].shelves) fx.name = (type === 'rack' ? 'Стеллаж S-' : type === 'island' ? 'Остров I-' : type === 'table' ? 'Подиум T-' : type === 'pegboard' ? 'Стенд К-' : type === 'counter2' ? 'Тумба Т2-' : 'Секция N-') + same;
   S.layout.fixtures.push(fx);
   S.sel = { k: 'fx', fid: fx.id };
   changed(true);
@@ -1367,7 +1440,7 @@ function renderFxPanel(P, fx) {
   }
   if (t.shelves) {
     const peg = isPeg(fx);
-    h += `<h4>${peg ? 'Ряды крючков' : 'Полки и места'} ${S.edit ? '' : `<span class="pg-sub" style="text-transform:none;letter-spacing:0">(${peg ? 'нажмите на товар или ＋ на крючке' : 'нажмите на место'})</span>`}</h4><div class="pg-shelves">`;
+    h += `<h4>${peg ? 'Ряды крючков' : isC2(fx) ? 'Стороны тумбы' : 'Полки и места'} ${S.edit ? '' : `<span class="pg-sub" style="text-transform:none;letter-spacing:0">(${peg ? 'нажмите на товар или ＋ на крючке' : 'нажмите на место'})</span>`}</h4><div class="pg-shelves">`;
     for (let si = fx.shelves.length - 1; si >= 0; si--) {
       const sh = fx.shelves[si];
       if (peg) {
@@ -1382,9 +1455,9 @@ function renderFxPanel(P, fx) {
           }).join('')}${list.some(o => o.sl.p) ? `<button class="pg-hook-add" data-hadd="${si}:${hk}" title="Повесить ещё товар на этот крючок">＋</button>` : ''}</div>`).join('')}</div></div>`;
         continue;
       }
-      h += `<div class="pg-shelf"><div class="pg-shelf-h"><span>Полка ${si + 1}${si === fx.shelves.length - 1 ? ' (верх)' : si === 0 ? ' (низ)' : ''} · ${sh.slots.length} мест</span>
+      h += `<div class="pg-shelf"><div class="pg-shelf-h"><span>${isC2(fx) ? `Сторона ${si + 1}${c2Side(si)}` : `Полка ${si + 1}${si === fx.shelves.length - 1 ? ' (верх)' : si === 0 ? ' (низ)' : ''}`} · ${sh.slots.length} мест</span>
         <button class="pg-mini qr" data-sqr="${si}" title="QR и состав полки">▦ QR</button>
-        ${S.edit ? `<span class="pg-row"><button class="pg-mini" data-sm="${si}" title="Убрать место">−</button><button class="pg-mini" data-sp="${si}" title="Добавить место">+</button><button class="pg-mini" data-sdel="${si}" title="Удалить полку">✕</button></span>` : ''}</div>
+        ${S.edit ? `<span class="pg-row"><button class="pg-mini" data-sm="${si}" title="Убрать место">−</button><button class="pg-mini" data-sp="${si}" title="Добавить место">+</button>${isC2(fx) ? '' : `<button class="pg-mini" data-sdel="${si}" title="Удалить полку">✕</button>`}</span>` : ''}</div>
         <div class="pg-cells" style="--n:${sh.slots.length}">${sh.slots.map((sl, ki) => {
           const stt = slotStatus(sl); const p = sl.p && S.products.get(sl.p);
           const isSel = S.sel && S.sel.k === 'slot' && S.sel.si === si && S.sel.ki === ki;
@@ -1392,9 +1465,9 @@ function renderFxPanel(P, fx) {
         }).join('')}</div></div>`;
     }
     h += `</div>`;
-    if (S.edit) h += peg ? `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить ряд</button><button class="pg-btn sm" id="shAll">Крючков в каждом ряду…</button></div>` : `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить полку</button><button class="pg-btn sm" id="shAll">Мест на всех полках…</button></div>`;
-    h += `<h4>QR-коды ${peg ? 'рядов' : 'полок'}</h4><div class="pg-qrgrid">${fx.shelves.map((_, si) => `<div class="pg-qrcard"><img src="${labelCanvas(fx, si, 5).toDataURL('image/png')}" alt="QR полка ${si + 1}" data-sqr="${si}"><button class="pg-mini" data-qpng="${si}">⬇ PNG</button></div>`).join('')}</div>
-      <div class="pg-row" style="margin-top:8px"><button class="pg-btn sm pri" id="fQrPdf">⬇ Скачать QR всех ${peg ? 'рядов стенда' : 'полок шкафа'} (PDF)</button></div>`;
+    if (S.edit) h += isC2(fx) ? `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAll">Моделей на каждой стороне…</button></div>` : peg ? `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить ряд</button><button class="pg-btn sm" id="shAll">Крючков в каждом ряду…</button></div>` : `<div class="pg-row" style="margin-top:8px"><button class="pg-btn sm" id="shAdd">＋ Добавить полку</button><button class="pg-btn sm" id="shAll">Мест на всех полках…</button></div>`;
+    h += `<h4>QR-коды ${peg ? 'рядов' : isC2(fx) ? 'сторон' : 'полок'}</h4><div class="pg-qrgrid">${fx.shelves.map((_, si) => `<div class="pg-qrcard"><img src="${labelCanvas(fx, si, 5).toDataURL('image/png')}" alt="QR полка ${si + 1}" data-sqr="${si}"><button class="pg-mini" data-qpng="${si}">⬇ PNG</button></div>`).join('')}</div>
+      <div class="pg-row" style="margin-top:8px"><button class="pg-btn sm pri" id="fQrPdf">⬇ Скачать QR всех ${peg ? 'рядов стенда' : isC2(fx) ? 'сторон тумбы' : 'полок шкафа'} (PDF)</button></div>`;
   }
   P.innerHTML = h;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
@@ -1426,8 +1499,9 @@ function renderFxPanel(P, fx) {
       fx.shelves.forEach(sh => { sh.slots = sh.slots.filter(x => x.h < k); sh.hooks = k; });
       pegNorm(fx); return changed(true);
     }
-    const m = Number(prompt('Сколько мест (пар) на каждой полке?', String(fx.shelves[0] ? fx.shelves[0].slots.length : 6)));
-    if (!(m >= 1 && m <= 30)) return;
+    const mx = TYPES[fx.type].maxM || 30;
+    const m = Number(prompt(isC2(fx) ? `Сколько моделей на каждой стороне? (до ${mx})` : 'Сколько мест (пар) на каждой полке?', String(fx.shelves[0] ? fx.shelves[0].slots.length : 6)));
+    if (!(m >= 1 && m <= mx)) return;
     fx.shelves.forEach(sh => { while (sh.slots.length < m) sh.slots.push({ p: null, q: 1 }); if (sh.slots.length > m) { const cut = sh.slots.slice(m).filter(s => s.p).length; if (cut && !confirm(`На полке убираются места с товаром (${cut}). Продолжить?`)) return; sh.slots.length = m; } });
     changed(true);
   });
@@ -1442,7 +1516,7 @@ function renderFxPanel(P, fx) {
     const [si, hk] = b.dataset.hadd.split(':').map(Number); const ki = pegAddToHook(fx, si, hk); if (ki == null) return;
     S.sel = { k: 'slot', fid: fx.id, si, ki }; changed(false); openPicker(fx, fx.shelves[si].slots[ki]);
   }));
-  P.querySelectorAll('[data-sp]').forEach(b => b.addEventListener('click', () => { const sh = fx.shelves[Number(b.dataset.sp)]; if (sh.slots.length >= 30) return; sh.slots.push({ p: null, q: 1 }); changed(true); }));
+  P.querySelectorAll('[data-sp]').forEach(b => b.addEventListener('click', () => { const sh = fx.shelves[Number(b.dataset.sp)]; if (sh.slots.length >= (TYPES[fx.type].maxM || 30)) { toast(`Максимум ${TYPES[fx.type].maxM || 30} мест`, true); return; } sh.slots.push({ p: null, q: 1 }); changed(true); }));
   P.querySelectorAll('[data-sm]').forEach(b => b.addEventListener('click', () => {
     const sh = fx.shelves[Number(b.dataset.sm)]; if (sh.slots.length <= 1) return;
     const last = sh.slots[sh.slots.length - 1]; if (last.p && !confirm('На последнем месте есть товар. Убрать место?')) return;

@@ -123,7 +123,7 @@
   }
   function placeLine(t) {
     const p = t.place || {};
-    const parts = [TK.data && TK.data.shop, p.fixture, p.n ? (p.hook ? 'Ряд ' : 'Полка ') + p.n : '', p.hook ? 'Крючок ' + p.hook : (p.k ? 'Место ' + p.k : '')].filter(Boolean);
+    const parts = [TK.data && TK.data.shop, p.fixture, p.n ? (p.hook ? 'Ряд ' : (p.word || 'Полка') + ' ') + p.n : '', p.hook ? 'Крючок ' + p.hook : (p.k ? 'Место ' + p.k : '')].filter(Boolean);
     return parts.join(' · ');
   }
   function thumb(t) {
@@ -182,7 +182,7 @@
     const p = t.place || {}, pr = t.product || null;
     const open = t.status === 'open';
     let hero = '';
-    if (t.strip) hero = `<div class="tk-hero">${stripHtml(t.strip, true)}<div class="tk-hero-cap">${esc(p.fixture || '')} · ${p.hook ? `Ряд ${p.n} — крючок ${p.hook}` : `Полка ${p.n} — место ${p.k}`} выделено</div></div>`;
+    if (t.strip) hero = `<div class="tk-hero">${stripHtml(t.strip, true)}<div class="tk-hero-cap">${esc(p.fixture || '')} · ${p.hook ? `Ряд ${p.n} — крючок ${p.hook}` : `${p.word || 'Полка'} ${p.n} — место ${p.k}`} выделено</div></div>`;
     else if (t.kind === 'restock' && pr && pr.photo) hero = `<div class="tk-hero"><img class="tk-hero-img" src="${esc(pr.photo)}" alt=""></div>`;
     let body = hero + `<div class="tk-dh"><h2>${esc(t.kind === 'restock' ? (p.zone === 'stock' ? 'Разложить на складе' : 'Пополнить товар на витрине') : t.title)}</h2><span class="tk-pr ${PRIO_CLS[t.prio]}">${esc(t.prioLabel)}</span></div>`;
     if (p.fixture) body += `<div class="tk-loc">${ICON.pin}<span><b>${esc((t.shop || (TK.data && TK.data.shop) || ''))}</b><br>${esc([p.fixture, p.n ? 'Полка ' + p.n : '', p.k ? 'Место ' + p.k : ''].filter(Boolean).join(' · '))}${p.category ? ' · ' + esc(p.category) : ''}</span></div>`;
@@ -283,7 +283,7 @@
     const ex = $('tkScanExtra'); if (!ex) return;
     if (TK.mode === 'task' && TK.task) {
       const t = TK.task, pr = t.product || {};
-      ex.innerHTML = `<div class="tk-scanfor">${pr.photo ? `<img src="${esc(pr.photo)}" alt="">` : ''}<span><b>${esc(pr.name || '')}</b><i>${esc((t.place || {}).fixture || '')} · ${(t.place || {}).hook ? `Ряд ${(t.place || {}).n} · Крючок ${(t.place || {}).hook}` : `Полка ${(t.place || {}).n} · Место ${(t.place || {}).k}`}${t.need > 1 ? ` · нужно ${t.need} шт.` : ''}</i></span></div>
+      ex.innerHTML = `<div class="tk-scanfor">${pr.photo ? `<img src="${esc(pr.photo)}" alt="">` : ''}<span><b>${esc(pr.name || '')}</b><i>${esc((t.place || {}).fixture || '')} · ${(t.place || {}).hook ? `Ряд ${(t.place || {}).n} · Крючок ${(t.place || {}).hook}` : `${(t.place || {}).word || 'Полка'} ${(t.place || {}).n} · Место ${(t.place || {}).k}`}${t.need > 1 ? ` · нужно ${t.need} шт.` : ''}</i></span></div>
         ${t.placed ? `<button class="tk-btn out wide" data-tk="finish">Готово — больше пар нет (поставлено ${t.placed})</button>` : ''}`;
     } else ex.innerHTML = '';
   }
@@ -342,7 +342,7 @@
         const p = pl[0];
         h += `<div class="tk-sec">${p.zone === 'stock' ? 'Место на складе' : 'Место на витрине'}${p.exact ? '' : ' (место этой модели)'}</div>
           <div class="tk-placebox"><div class="tk-pb-top"><span class="tk-shop">${ICON.pin} ${esc(d.shop)}</span><button class="tk-link" data-tk="map">Показать на плане</button></div>
-          <div class="tk-pchips"><span>${esc(p.fixture)}</span>${p.hook ? `<span>Ряд ${p.n}</span><span>Крючок ${p.hook}</span>` : `<span>Полка ${p.n}</span><span>Место ${p.k}</span>`}</div>
+          <div class="tk-pchips"><span>${esc(p.fixture)}</span>${p.hook ? `<span>Ряд ${p.n}</span><span>Крючок ${p.hook}</span>` : `<span>${p.word || 'Полка'} ${p.n}</span><span>Место ${p.k}</span>`}</div>
           ${stripHtml(d.strip, false)}<div class="tk-mapwrap" id="tkLocMap" style="display:none">${mapSvg(d.map)}</div></div>`;
         if (pl.length > 1) h += `<div class="tk-small">Ещё места этой модели: ${pl.slice(1, 5).map(x => esc(x.hook ? `${x.fixture} · Р${x.n} · К${x.hook}` : `${x.fixture} · П${x.n} · М${x.k}`)).join('; ')}</div>`;
       } else {

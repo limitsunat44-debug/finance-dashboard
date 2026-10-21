@@ -59,7 +59,7 @@
     .then(r => r.json()).then(d => {
       if (!d.ok) throw new Error(d.error || 'Ошибка');
       const peg = d.fixture.type === 'pegboard';
-      const name = `${d.fixture.name} · ${peg ? 'Ряд' : 'Полка'} ${d.shelf.n}`;
+      const name = `${d.fixture.name} · ${peg ? 'Ряд' : d.fixture.type === 'counter2' ? 'Сторона' : 'Полка'} ${d.shelf.n}`;
       document.title = name + ' · РМК';
       $('t').textContent = name;
       $('st').textContent = `${STORES[String(d.wh).slice(0, 8)] || ''}${d.fixture.category ? ' · ' + d.fixture.category : ''}`;

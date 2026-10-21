@@ -38,7 +38,7 @@ function agDraw() {
     <div class="ag-top">
       <div class="ag-status">
         <span class="ag-dot ${S.enabled ? '' : 'off'}"></span><b>${S.enabled ? 'Агенты работают' : 'Агенты выключены'}</b>
-        <span class="muted">· Telegram: ${chat ? `<b>${esc(chat.title || 'группа')}</b>${chat.isForum ? ` · тем: ${chat.topics}` : ''}${chat.topicError ? ` · <span class="red">${esc(chat.topicError)}</span>` : ''}` : '<span class="red">группа не подключена — напишите /agents в группе агентов</span>'}</span>
+        <span class="muted">· Telegram: ${chat ? `<b>${esc(chat.title || 'группа')}</b>${chat.isForum ? ` · тем: ${chat.topics}` : ''}${chat.topicError ? ` · <span class="red">${esc(chat.topicError)}</span>` : ''}${chat.broken ? ` · <span class="red">бот не может писать в группу (${esc(chat.broken.error)}) — добавьте @Ortosalontj_bot в группу снова и напишите там /agents; пока сообщения идут вам в личку</span>` : ''}` : '<span class="red">группа не подключена — напишите /agents в группе агентов</span>'}</span>
         ${d.lastTick ? `<span class="muted">· проверка ${esc(d.lastTick.local || '')}${d.lastTick.urgent ? `, срочных: ${d.lastTick.urgent}` : ''}</span>` : ''}
       </div>
       <div class="ag-tabs">${[['feed', '📰 Лента'], ['runs', '🧠 Сводки и идеи'], ['agents', '🤖 Агенты'], ['unit', '🔎 История товара'], ['settings', '⚙ Настройки']].map(([k, l]) => `<button class="ag-tab ${AG.tab === k ? 'on' : ''}" data-agtab="${k}">${l}</button>`).join('')}</div>

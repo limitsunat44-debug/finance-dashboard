@@ -36,6 +36,30 @@ const TYPES = {
   mirror:  { label: 'Зеркало',           shelves: false, w: 0.6, d: 0.08, h: 1.8, color: '#dbeafe' },
   plant:   { label: 'Растение',          shelves: false, w: 0.5, d: 0.5, h: 1.3, color: '#16a34a' },
 };
+// v1.5.5: вид настенной секции (тип остаётся 'wall' — привязки товаров не меняются)
+const LOOKS = {
+  '':    'Шкаф с полками и коробками',
+  pins:  'Стена с держателями (пара на штырях)',
+  long:  'Длинные полки на цветной стене',
+  niche: 'Ниша с отдельными полочками',
+  hang:  'Стена с крючками (товар в пакетах)',
+};
+const BGS = {
+  white:    { label: 'Белая',       color: '#f3f4f2' },
+  concrete: { label: 'Серый бетон', color: '#b9bcbd' },
+  orange:   { label: 'Оранжевая',   color: '#f28c1e' },
+  yellow:   { label: 'Жёлтая',      color: '#e8e14b' },
+};
+const PRESETS = {
+  pinsC:  { label: 'Стена с держателями (бетон)',  look: 'pins',  bg: 'concrete', w: 1.8, n: 6, m: 3 },
+  pinsW:  { label: 'Стена с держателями (белая)',  look: 'pins',  bg: 'white',    w: 1.8, n: 5, m: 3 },
+  pinsO:  { label: 'Стена с держателями (оранж.)', look: 'pins',  bg: 'orange',   w: 2.4, n: 6, m: 4 },
+  longY:  { label: 'Полки на жёлтой стене',        look: 'long',  bg: 'yellow',   w: 1.8, n: 6, m: 8 },
+  longO:  { label: 'Полки на оранжевой стене',     look: 'long',  bg: 'orange',   w: 1.8, n: 6, m: 8 },
+  niche:  { label: 'Ниша с полочками',             look: 'niche', bg: 'white',    w: 1.0, n: 6, m: 2 },
+  hang:   { label: 'Стена с крючками (пакеты)',    look: 'hang',  bg: 'white',    w: 1.0, n: 6, m: 2 },
+};
+const wallLook = (fx) => (fx && fx.type === 'wall' && LOOKS[fx.look] && fx.look) || '';
 const ST_COLOR = { ok: '#16a34a', low: '#f59e0b', out: '#dc2626', restock: '#7c3aed', slow: '#64748b', empty: '#cbd5e1' };
 const ST_LABEL = { ok: 'Хорошо', low: 'Мало остатков', out: 'Нет в магазине', restock: 'Нет на витрине — есть на складе', slow: 'Нет продаж 30 дн.', empty: 'Пустое место' };
 const CATS = ['Женская обувь', 'Мужская обувь', 'Детская обувь', 'Обувь для мальчиков', 'Обувь для девочек', 'Ортопедические стельки', 'Ортопедические товары', 'Аксессуары', 'Акция / скидки'];
@@ -484,6 +508,27 @@ function pegTex() {
     for (let i = 8; i < w; i += 16) for (let j = 8; j < h; j += 16) { x.beginPath(); x.arc(i, j, 2.2, 0, 7); x.fill(); }
   }, true);
 }
+function concreteTex() {
+  return canvasTex('concrete', 512, 512, (x, w, h) => {
+    x.fillStyle = '#c9cccd'; x.fillRect(0, 0, w, h);
+    for (let i = 0; i < 2600; i++) { const v = 150 + Math.random() * 70 | 0; x.fillStyle = `rgba(${v},${v + 2},${v + 3},${0.05 + Math.random() * 0.12})`; const r = 2 + Math.random() * 14; x.beginPath(); x.arc(Math.random() * w, Math.random() * h, r, 0, 7); x.fill(); }
+    for (let i = 0; i < 40; i++) { x.strokeStyle = `rgba(120,124,126,${0.05 + Math.random() * 0.08})`; x.lineWidth = 1; x.beginPath(); const y = Math.random() * h; x.moveTo(0, y); x.bezierCurveTo(w * .3, y + 20 * Math.random(), w * .7, y - 20 * Math.random(), w, y + 5); x.stroke(); }
+  }, true);
+}
+function bgMat(bg) {
+  const b = BGS[bg] ? bg : 'white';
+  if (b === 'concrete') return pmat('bgConcrete', () => new THREE.MeshStandardMaterial({ map: concreteTex(), roughness: 0.92, emissive: '#9a9d9f', emissiveIntensity: 0.35 }));
+  return pmat('bg' + b, () => new THREE.MeshStandardMaterial({ color: BGS[b].color, roughness: 0.85, emissive: BGS[b].color, emissiveIntensity: b === 'white' ? 0.15 : 0.4 }));
+}
+// одна туфля в профиль (как на держателях/полочках в салоне)
+function shoeSide(p, ud, s) {
+  const { sole, upper } = shoeGeo();
+  const g = new THREE.Group();
+  const a = new THREE.Mesh(sole, mat('#f1f5f9', { roughness: 0.6 })); const b = new THREE.Mesh(upper, prodMat(p));
+  [a, b].forEach(m => { m.castShadow = true; m.userData = ud; g.add(m); G.pick.push(m); });
+  g.rotation.y = Math.PI / 2; g.scale.setScalar(s);
+  return g;
+}
 function blobTex() {
   return canvasTex('blob', 128, 128, (x, w, h) => {
     const g = x.createRadialGradient(w / 2, h / 2, 10, w / 2, h / 2, w / 2);
@@ -798,6 +843,84 @@ function pegRow3d(fx, g, add, sh, si, y, W, D) {
     qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
   }
 }
+// ряд настенной секции нового вида: pins — пара на двух штырях, long — длинная полка,
+// niche — отдельная полочка под каждое место, hang — крючок с пакетом
+function lookRow3d(fx, g, add, sh, si, y, W, D) {
+  const lk = wallLook(fx);
+  const RB = (w, h, d, r) => new RoundedBoxGeometry(w, h, d, 3, Math.min(r || 0.02, w / 2.1, h / 2.1, d / 2.1));
+  const white = mat('#fbfbfa', { roughness: 0.4 });
+  const rodM = pmat('acrylRod', () => new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.15, metalness: 0.3, transparent: true, opacity: 0.85 }));
+  const hookM = mat('#a1a1aa', { metalness: 0.75, roughness: 0.3 });
+  const zb = -D / 2 + 0.04;
+  const m = sh.slots.length || 1;
+  const pad = lk === 'niche' ? 0.06 : 0.12;
+  const cw = (W - pad * 2) / m;
+  if (lk === 'long') {
+    add(RB(W - 0.08, 0.035, D * 0.9, 0.006), white, 0, y - 0.0175, zb + D * 0.45 - 0.02);
+  }
+  sh.slots.forEach((sl, ki) => {
+    const st = slotStatus(sl);
+    const x = -W / 2 + pad + cw * (ki + 0.5);
+    const ud = { fid: fx.id, si, ki, slot: true };
+    const isSel = S.sel && S.sel.k === 'slot' && S.sel.fid === fx.id && S.sel.si === si && S.sel.ki === ki;
+    const p = sl.p ? S.products.get(sl.p) : null;
+    let zc = zb + 0.12, tagY = y - 0.035, tagZ = zb + 0.004;
+    if (lk === 'pins') {
+      const L = Math.min(0.2, D - 0.06);
+      [-0.055, 0.055].forEach(dx => {
+        const r = add(new THREE.CylinderGeometry(0.004, 0.004, L, 8), rodM, x + dx, y - 0.008, zb + L / 2, false); r.rotation.x = Math.PI / 2; r.castShadow = false;
+        add(new THREE.SphereGeometry(0.008, 8, 6), rodM, x + dx, y - 0.004, zb + L, false);
+      });
+      zc = zb + L * 0.55;
+    } else if (lk === 'niche') {
+      const sw = Math.min(cw * 0.86, 0.42), sd = Math.min(D * 0.75, 0.26);
+      add(RB(sw, 0.025, sd, 0.004), white, x, y - 0.0125, zb + sd / 2);
+      zc = zb + sd * 0.5; tagY = y - 0.012; tagZ = zb + sd + 0.002;
+    } else if (lk === 'long') {
+      zc = zb + D * 0.42; tagY = y - 0.018; tagZ = zb + D * 0.9 - 0.016;
+    } else if (lk === 'hang') {
+      const rodL = Math.max(0.1, Math.min(0.18, D - 0.06));
+      const rod = add(new THREE.CylinderGeometry(0.0045, 0.0045, rodL, 8), hookM, x, y, zb + rodL / 2, false); rod.rotation.x = Math.PI / 2; rod.castShadow = false;
+      add(new THREE.SphereGeometry(0.008, 8, 6), hookM, x, y + 0.004, zb + rodL, false);
+      zc = zb + rodL - 0.015;
+    }
+    if (lk === 'hang') {
+      const pw = Math.min(0.2, cw * 0.82), ph = pw * 1.5;
+      const cy = y - 0.006 - ph / 2;
+      if (p) { const o = pegPack(p, ud, pw, ph); o.position.set(x, cy, zc); g.add(o); }
+      else if (sl.p) { const o = add(new THREE.BoxGeometry(pw, ph, 0.012), mat('#94a3b8'), x, cy, zc); o.userData = ud; }
+      else { const e = new THREE.Mesh(new THREE.PlaneGeometry(pw, ph), pmat('emptyPeg' + (S.edit ? 1 : 0), () => new THREE.MeshBasicMaterial({ color: '#64748b', transparent: true, opacity: S.edit ? 0.28 : 0.1, depthWrite: false }))); e.position.set(x, cy, zc); e.userData = ud; g.add(e); G.pick.push(e); }
+      tagY = y + 0.03;
+      if (isSel) { const hb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(pw + 0.02, ph + 0.02, 0.03)), new THREE.LineBasicMaterial({ color: '#2563eb' })); hb.position.set(x, cy, zc); g.add(hb); }
+    } else {
+      const yy = y + 0.002;
+      if (p) {
+        let o;
+        if (lk === 'long') { if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.25, cw / 0.19, (D * 0.9) / 0.25)); o.rotation.y = 0.32; } else o = prodBox(p, ud, cw * 0.8, false); }
+        else if (isShoe(p)) o = shoeSide(p, ud, Math.min(1.25, (cw * 0.95) / 0.25));
+        else o = prodBox(p, ud, Math.min(cw * 0.7, 0.2), false);
+        o.position.set(x, yy, zc); g.add(o);
+      } else if (sl.p) {
+        const o = add(new THREE.BoxGeometry(Math.min(cw * 0.6, 0.22), 0.08, 0.1), mat('#94a3b8'), x, yy + 0.04, zc); o.userData = ud;
+      } else {
+        const e = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(cw * 0.7, 0.26), 0.12), pmat('emptySlot' + (S.edit ? 1 : 0), () => new THREE.MeshBasicMaterial({ color: '#94a3b8', transparent: true, opacity: S.edit ? 0.32 : 0.12, depthWrite: false })));
+        e.rotation.x = -Math.PI / 2; e.position.set(x, yy + 0.002, zc); e.userData = ud; g.add(e); G.pick.push(e);
+      }
+      if (isSel) { const hb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(Math.min(cw * 0.95, 0.34), 0.16, 0.2)), new THREE.LineBasicMaterial({ color: '#2563eb' })); hb.position.set(x, yy + 0.08, zc); g.add(hb); }
+    }
+    const tag = add(new THREE.BoxGeometry(0.06, 0.022, 0.005), mat(ST_COLOR[st], { emissive: ST_COLOR[st], emissiveIntensity: st === 'empty' ? 0 : 0.45 }), x, tagY, tagZ);
+    tag.userData = ud; tag.castShadow = false;
+  });
+  if (S.showQr) {
+    const n = fx.shelves.length;
+    const key = 'qrM' + shelfSid(fx, si) + '|' + fx.name + '|' + n;
+    const qm = pmat(key, () => { const tx = new THREE.CanvasTexture(labelCanvas(fx, si, 6)); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return new THREE.MeshBasicMaterial({ map: tx, toneMapped: false }); });
+    const qw = Math.min(0.08, W * 0.08), qh = qw * 1.3;
+    const qp = new THREE.Mesh(new THREE.PlaneGeometry(qw, qh), qm);
+    qp.position.set(-W / 2 + 0.04 + qw / 2, y + 0.02 + qh / 2, zb + 0.005);
+    qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
+  }
+}
 // коробки обуви на нижних полках тумбы (декор, обе стороны)
 function c2Boxes(g, add, W, D, y1, y2, topY) {
   const boxM = pmat('c2box', () => new THREE.MeshStandardMaterial({ color: '#ee6a2c', roughness: 0.55 }));
@@ -885,7 +1008,23 @@ function buildFx(fx) {
   if (t.shelves) {
     const n = (fx.shelves || []).length;
     let base, top, slotZ = 0, both = false, tagZ = D / 2;
-    if (fx.type === 'wall' || fx.type === 'rack') {
+    if (wallLook(fx)) {
+      const lk = wallLook(fx);
+      const back = add(RB(W, Hh, 0.04, 0.006), bgMat(fx.bg || (lk === 'long' ? 'yellow' : lk === 'pins' ? 'concrete' : 'white')), 0, Hh / 2, -D / 2 + 0.02);
+      G.backs.push({ mesh: back, g, rot: fx.rot });
+      // белая окантовка панели и плинтус
+      const edge = mat('#fbfbfa', { roughness: 0.4 });
+      add(new THREE.BoxGeometry(0.035, Hh, 0.05), edge, -W / 2 + 0.017, Hh / 2, -D / 2 + 0.03, false);
+      add(new THREE.BoxGeometry(0.035, Hh, 0.05), edge, W / 2 - 0.017, Hh / 2, -D / 2 + 0.03, false);
+      add(new THREE.BoxGeometry(W, 0.08, 0.06), edge, 0, 0.04, -D / 2 + 0.03, false);
+      if (lk === 'niche') { // ниша: боковые стенки в глубину
+        add(RB(0.03, Hh, D, 0.006), edge, -W / 2 + 0.015, Hh / 2, 0);
+        add(RB(0.03, Hh, D, 0.006), edge, W / 2 - 0.015, Hh / 2, 0);
+      }
+      base = lk === 'long' ? 0.22 : lk === 'niche' ? 0.3 : 0.32;
+      top = Hh - (lk === 'long' ? 0.32 : lk === 'pins' ? 0.55 : 0.38);
+      slotZ = D * 0.04;
+    } else if (fx.type === 'wall' || fx.type === 'rack') {
       const isRack = fx.type === 'rack';
       const frameM = isRack ? mat('#94a3b8', { metalness: 0.5, roughness: 0.4 }) : white;
       const back = add(new THREE.BoxGeometry(W - 0.06, Hh - 0.1, 0.03), isRack ? mat('#e2e8f0') : woodM, 0, Hh / 2, -D / 2 + 0.02);
@@ -945,6 +1084,7 @@ function buildFx(fx) {
       const y = n > 1 ? base + (top - base) * si / (n - 1) : base;
       if (isPeg(fx)) { pegRow3d(fx, g, add, sh, si, y, W, D); return; }
       if (isC2(fx)) { c2Side3d(fx, g, add, sh, si, base, W, D); return; }
+      if (wallLook(fx)) { lookRow3d(fx, g, add, sh, si, y, W, D); return; }
       const isBaseLevel = (fx.type === 'island' && si === 0) || fx.type === 'table';
       if (!isBaseLevel) {
         if (fx.type === 'island') {
@@ -1349,7 +1489,7 @@ function renderZonePanel(P) {
         <div class="pg-f"><label>Ширина, м</label><input id="dW" type="number" step="0.1" value="${z.door ? z.door.w : 1}"></div>
       </div>
       <h4>Добавить объект</h4>
-      <div class="pg-add">${Object.entries(TYPES).filter(([k, t]) => S.zone === 'stock' ? ['rack', 'wall', 'table'].includes(k) : k !== 'rack').map(([k, t]) => `<button class="pg-btn sm" data-addfx="${k}">＋ ${esc(t.label)}</button>`).join('')}</div>`;
+      <div class="pg-add">${Object.entries(TYPES).filter(([k, t]) => S.zone === 'stock' ? ['rack', 'wall', 'table'].includes(k) : k !== 'rack').map(([k, t]) => `<button class="pg-btn sm" data-addfx="${k}">＋ ${esc(t.label)}</button>`).join('')}${S.zone === 'stock' ? '' : Object.entries(PRESETS).map(([k, t]) => `<button class="pg-btn sm" data-addpre="${k}">＋ ${esc(t.label)}</button>`).join('')}</div>`;
   } else {
     h += `<div class="pg-info">Нажмите на шкаф или место на полке, чтобы увидеть товар и остатки. Включите «Редактирование», чтобы двигать шкафы, менять полки и форму помещения.</div>`;
   }
@@ -1374,6 +1514,7 @@ function renderZonePanel(P) {
   P.innerHTML = h;
   P.querySelectorAll('[data-fx]').forEach(el => el.addEventListener('click', () => select({ k: 'fx', fid: el.dataset.fx })));
   P.querySelectorAll('[data-addfx]').forEach(el => el.addEventListener('click', () => addFx(el.dataset.addfx)));
+  P.querySelectorAll('[data-addpre]').forEach(el => el.addEventListener('click', () => addFx('wall', el.dataset.addpre)));
   P.querySelectorAll('[data-rs]').forEach(el => el.addEventListener('click', () => { const [fid, si, ki] = el.dataset.rs.split('|'); select({ k: 'slot', fid, si: Number(si), ki: Number(ki) }); }));
   const zl = $('zLog'); if (zl) zl.addEventListener('click', openLog);
   const zq = $('zQrPdf'); if (zq) zq.addEventListener('click', () => downloadPdf(zShelves, `${storeName()} - ${z.name}`));
@@ -1400,9 +1541,11 @@ function renderZonePanel(P) {
   ['dEdge', 'dT', 'dW'].forEach(id => on(id, 'change', doorUpd));
   on('zAllNp', 'click', () => openNotPlaced(notPlaced));
 }
-function addFx(type) {
+function addFx(type, preset) {
   const z = S.layout.zones[S.zone]; const b = polyBounds(z.polygon);
-  const fx = mkFx(type, { zone: S.zone, x: r2((b.x0 + b.x1) / 2), y: r2((b.y0 + b.y1) / 2) });
+  const pr = preset && PRESETS[preset];
+  const fx = mkFx(type, { zone: S.zone, x: r2((b.x0 + b.x1) / 2), y: r2((b.y0 + b.y1) / 2), ...(pr ? { w: pr.w, n: pr.n, m: pr.m } : {}) });
+  if (pr) { fx.look = pr.look; fx.bg = pr.bg; }
   const same = S.layout.fixtures.filter(f => f.type === type && f.zone === S.zone).length + 1;
   if (TYPES[type].shelves) fx.name = (type === 'rack' ? 'Стеллаж S-' : type === 'island' ? 'Остров I-' : type === 'table' ? 'Подиум T-' : type === 'pegboard' ? 'Стенд К-' : type === 'counter2' ? 'Тумба Т2-' : 'Секция N-') + same;
   S.layout.fixtures.push(fx);
@@ -1431,6 +1574,10 @@ function renderFxPanel(P, fx) {
       <div class="pg-f"><label>Y, м</label><input id="fY" type="number" step="0.05" value="${fx.y}"></div>
       <div class="pg-f"><label>Поворот, °</label><input id="fR" type="number" step="15" value="${fx.rot}"></div>
     </div>
+    ${fx.type === 'wall' ? `<div class="pg-grid2" style="margin-top:8px">
+      <div class="pg-f"><label>Вид секции</label><select id="fLook">${Object.entries(LOOKS).map(([k, l]) => `<option value="${k}" ${wallLook(fx) === k ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+      <div class="pg-f"><label>Цвет стены</label><select id="fBg" ${wallLook(fx) ? '' : 'disabled'}>${Object.entries(BGS).map(([k, b]) => `<option value="${k}" ${(fx.bg || '') === k ? 'selected' : ''}>${esc(b.label)}</option>`).join('')}</select></div>
+    </div>` : ''}
     <div class="pg-actions">
       <button class="pg-btn" id="fRot">↻ Повернуть 90°</button>
       <button class="pg-btn" id="fDup">⧉ Дублировать</button>
@@ -1480,6 +1627,8 @@ function renderFxPanel(P, fx) {
   on('fH', 'change', (e) => { fx.h = Math.max(0.2, num(e.target.value, fx.h)); changed(true); });
   on('fX', 'change', (e) => { fx.x = num(e.target.value, fx.x); changed(true); });
   on('fY', 'change', (e) => { fx.y = num(e.target.value, fx.y); changed(true); });
+  on('fLook', 'change', (e) => { const v = e.target.value; if (v) { fx.look = v; if (!fx.bg) fx.bg = v === 'long' ? 'yellow' : v === 'pins' ? 'concrete' : 'white'; } else { delete fx.look; } changed(true); });
+  on('fBg', 'change', (e) => { fx.bg = e.target.value; changed(true); });
   on('fR', 'change', (e) => { fx.rot = ((num(e.target.value, fx.rot) % 360) + 360) % 360; changed(true); });
   on('fRot', 'click', () => { fx.rot = (fx.rot + 90) % 360; changed(true); });
   on('fDup', 'click', () => { const c = clone(fx); c.id = uid('f'); c.x = r2(c.x + 0.4); c.y = r2(c.y + 0.4); c.name = fx.name + ' (копия)'; (c.shelves || []).forEach(sh => sh.slots.forEach(sl => { sl.p = null; delete sl.u; })); S.layout.fixtures.push(c); S.sel = { k: 'fx', fid: c.id }; changed(true); });

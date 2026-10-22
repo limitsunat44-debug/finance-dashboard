@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.5.5';
+const RMK_VERSION = '1.5.6';
 const RMK_CHANGELOG = [
+  {
+    v: '1.5.6', date: '23.10.2026', title: 'Поиск товаров: карточки, фильтры и адрес на витрине',
+    items: [
+      'Раздел «Поиск товаров» открывается сразу карточками с фото: размеры, цена, остаток по каждому складу и сколько пар на витрине.',
+      'Поиск по названию, артикулу, штрихкоду (полному или последним цифрам), бренду, поставщику, цвету и месту на витрине (например, B-1). Скан штрихкода сразу открывает товар и подсвечивает пару.',
+      'Фильтры: категория, бренд, размер, поставщик, склад, наличие на витрине, дата поступления, цена, количество, цвет, сезон, статус. Сортировка по умолчанию — по количеству, от большего к меньшему.',
+      'Панель товара: фото, размеры, вкладки «Остатки» (с кодами и EAN-13, как раньше), «Витрина», «Продажи», «Поступления», «Перемещения».',
+      'Адресное хранение: для каждого штрихкода показано место «Секция → Полка → Место» или «Нет на витрине»; ссылка открывает планограмму сразу на этом месте. Работает для любого магазина, как только у него появится схема витрины.',
+    ],
+  },
   {
     v: '1.5.5', date: '23.10.2026', title: 'Планограмма: вид секций как в салоне',
     items: [
@@ -1212,7 +1222,7 @@ const VIEW_META = {
   agents: { title: 'ИИ-агенты', sub: 'Агенты следят за кассами, складом, клиентами и финансами, присылают находки и идеи в Telegram' },
   docsellers: { title: 'Продажи по врачам и продавцам', sub: 'Анализ продаж, отмеченных врачами, по продавцам и выявление возможной предвзятости' },
   bonuses:   { title: 'Бонусы сотрудников', sub: 'Бонус кассиров от продаж: свод, настройка % и отметка выплат' },
-  search:    { title: 'Поиск товара', sub: 'Проверка остатка, цены и статуса по штрихкоду' },
+  search:    { title: 'Поиск товаров', sub: 'Товары, остатки по складам, места на витрине и подробная информация' },
   history:   { title: 'История товара', sub: 'Жизненный цикл экземпляра по штрихкоду' },
   productsales:{ title: 'Топ товаров', sub: 'Самые продаваемые товары, чеки, остатки по магазинам и рекомендации к закупке' },
   users:     { title: 'Пользователи', sub: 'Учётки касс/складов и веб-админы' },
@@ -1337,7 +1347,9 @@ function renderView(force) {
   }
   const v = state.view;
   const isReady = READY_VIEWS.includes(v);
-  document.body.classList.toggle('v-topgoods', v === 'productsales'); // у «Топ товаров» свой период и магазин
+  document.body.classList.toggle('v-topgoods', v === 'productsales');
+  document.body.classList.toggle('v-catalog', v === 'search'); // у «Поиска товаров» свои фильтры
+  if (v !== 'search') document.body.classList.remove('ct-det-open'); // у «Топ товаров» свой период и магазин
   // переключаем секции
   document.querySelectorAll('.view').forEach(s => s.classList.remove('active'));
   if (isReady) $('view-' + v).classList.add('active');
@@ -1361,7 +1373,7 @@ function renderView(force) {
   else if (v === 'doctors') renderDoctors(force);
   else if (v === 'docsellers') renderDocSellers(force);
   else if (v === 'bonuses') renderBonuses(force);
-  else if (v === 'search') renderSearch(force);
+  else if (v === 'search') { if (typeof renderCatalog === 'function') renderCatalog(force); else renderSearch(force); }
   else if (v === 'history') renderHistory(force);
   else if (v === 'productsales') renderTopGoods(force);
   else if (v === 'users') renderUsers(force);

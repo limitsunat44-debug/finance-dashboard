@@ -367,6 +367,12 @@ async function loadAll() {
     if (!S.layout) S.layout = defaultLayout();
   }
   $('pgLoading').style.display = 'none';
+  // ссылка из «Поиска товаров»: ?wh=…&fid=…&si=…&ki=… — сразу выделить место
+  if (DEEP && DEEP.fid && S.layout) {
+    const fx = (S.layout.fixtures || []).find(f => f.id === DEEP.fid);
+    if (fx) { S.zone = fx.zone || 'hall'; S.sel = Number.isFinite(DEEP.si) && Number.isFinite(DEEP.ki) ? { k: 'slot', fid: fx.id, si: DEEP.si, ki: DEEP.ki } : { k: 'fx', fid: fx.id }; }
+    DEEP = null;
+  }
   renderAll(true);
 }
 async function loadStock() {
@@ -2023,7 +2029,14 @@ function select(sel) {
 function setView(v) { S.view = v; if (v === '3d') S.shapeEdit = false; renderAll(true); }
 
 // ─────────── шапка ───────────
+let DEEP = null;
+try {
+  const u = new URLSearchParams(location.search);
+  if (u.get('wh') && STORES.some(s => s.wh === u.get('wh') && s.active)) S.wh = u.get('wh');
+  if (u.get('fid')) DEEP = { fid: u.get('fid'), si: u.get('si') != null ? Number(u.get('si')) : NaN, ki: u.get('ki') != null ? Number(u.get('ki')) : NaN };
+} catch (_) {}
 $('pgStore').innerHTML = STORES.map(s => `<option value="${s.wh}" ${s.active ? '' : 'disabled'}>${esc(s.name)}${s.active ? '' : ' — скоро'}</option>`).join('');
+$('pgStore').value = S.wh;
 $('pgStore').addEventListener('change', (e) => {
   if (S.dirty && !confirm('Есть несохранённые изменения. Перейти без сохранения?')) { e.target.value = S.wh; return; }
   S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();

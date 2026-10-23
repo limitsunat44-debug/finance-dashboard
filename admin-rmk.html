@@ -6,13 +6,13 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-sms.css?v=20261023-094954">
-  <link rel="stylesheet" href="admin-tasks.css?v=20261023-094954">
-  <link rel="stylesheet" href="admin-analytics.css?v=20261023-094954">
-  <link rel="stylesheet" href="admin-agents.css?v=20261023-094954">
-  <link rel="stylesheet" href="admin-catalog.css?v=20261023-094954">
-  <link rel="stylesheet" href="admin-topgoods.css?v=20261023-094954">
-  <link rel="stylesheet" href="admin-rmk.css?v=20261023-094954">
+  <link rel="stylesheet" href="admin-sms.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-tasks.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-analytics.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-agents.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-catalog.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-topgoods.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-rmk.css?v=20261023-180655">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -23,7 +23,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20261023-094954"></script>
+  <script src="fonts-dejavu.js?v=20261023-180655"></script>
 </head>
 <body>
 
@@ -70,38 +70,78 @@
       <nav class="sb-nav">
         <button class="sb-item active" data-view="overview"><span class="sb-ic">▦</span> Обзор</button>
         <button class="sb-item" data-view="shift"><span class="sb-ic">▤</span> Смена</button>
-        <button class="sb-item" data-view="receipts"><span class="sb-ic">🧾</span> Чеки продаж</button>
         <button class="sb-item" data-view="returns"><span class="sb-ic">↩</span> Возвраты</button>
-        <button class="sb-item" data-view="incass"><span class="sb-ic">💼</span> Инкассация</button>
-        <a class="sb-item" href="planogram.html" target="_blank" rel="noopener" style="text-decoration:none"><span class="sb-ic">🧭</span> Планограмма магазина ↗</a>
-        <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
-        <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
-        <button class="sb-item" data-view="buyers"><span class="sb-ic">👥</span> Покупатели</button>
-        <button class="sb-item" data-view="sms"><span class="sb-ic">💬</span> SMS рассылка</button>
-        <button class="sb-item" data-view="tasks"><span class="sb-ic">✅</span> Задачи сотрудников</button>
-        <button class="sb-item" data-view="agents"><span class="sb-ic">🤖</span> ИИ-агенты</button>
-        <button class="sb-item" data-view="doctors"><span class="sb-ic">🩺</span> Продажи по врачам</button>
-        <button class="sb-item" data-view="docsellers"><span class="sb-ic">⚖️</span> Врачи × продавцы</button>
-        <button class="sb-item" data-view="bonuses"><span class="sb-ic">🎁</span> Бонусы сотрудников</button>
-        <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товаров</button>
-        <button class="sb-item" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
-        <button class="sb-item" data-view="productsales"><span class="sb-ic">💹</span> Топ товаров</button>
-        <button class="sb-item" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
-        <button class="sb-item" data-view="devices"><span class="sb-ic">📱</span> Устройства касс</button>
-        <button class="sb-item" data-view="audit"><span class="sb-ic">📋</span> Журнал действий</button>
-        <button class="sb-item" data-view="settings"><span class="sb-ic">⚙</span> Настройки РМК</button>
-        <button class="sb-item" data-view="stats"><span class="sb-ic">📈</span> Статистика</button>
-        <button class="sb-item" data-view="monitoring"><span class="sb-ic">🖥</span> Мониторинг магазинов</button>
-        <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
-        <button class="sb-item" data-view="shiftreports"><span class="sb-ic">📊</span> Отчёты продаж за день</button>
-        <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
-        <button class="sb-item" data-view="writeoff"><span class="sb-ic">➖</span> Списание товаров</button>
-        <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
-        <button class="sb-item" data-view="inventory"><span class="sb-ic">📥</span> Инвентаризация</button>
-        <button class="sb-item" data-view="warehouse"><span class="sb-ic">🏢</span> Склад</button>
-        <button class="sb-item" data-view="transit"><span class="sb-ic">✈</span> Товары в пути</button>
-        <button class="sb-item" data-view="finance"><span class="sb-ic">💸</span> Выручка-Расходы</button>
-        <button class="sb-item" data-view="backups"><span class="sb-ic">💾</span> Бекапы</button>
+        <div class="sb-grp" data-grp="sales">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">💵</span> Продажи<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="receipts"><span class="sb-ic">🧾</span> Чеки продаж</button>
+            <button class="sb-item" data-view="doctors"><span class="sb-ic">🩺</span> Продажи по врачам</button>
+            <button class="sb-item" data-view="docsellers"><span class="sb-ic">⚖️</span> Врачи × продавцы</button>
+            <button class="sb-item" data-view="shiftreports"><span class="sb-ic">📊</span> Отчёты продаж за день</button>
+            <button class="sb-item" data-view="finance"><span class="sb-ic">💸</span> Выручка-Расходы</button>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="cash">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">💼</span> Касса и деньги<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="incass"><span class="sb-ic">💼</span> Инкассация</button>
+            <button class="sb-item" data-view="cashreport"><span class="sb-ic">💰</span> Отчёт по снятию ДС</button>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="goods">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">🏷</span> Товары<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="search"><span class="sb-ic">🔍</span> Поиск товаров</button>
+            <button class="sb-item" data-view="history"><span class="sb-ic">🕘</span> История товара</button>
+            <button class="sb-item" data-view="productsales"><span class="sb-ic">💹</span> Топ товаров</button>
+            <a class="sb-item" href="planogram.html" target="_blank" rel="noopener" style="text-decoration:none"><span class="sb-ic">🧭</span> Планограмма магазина ↗</a>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="stock">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">🏢</span> Склад<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
+            <button class="sb-item" data-view="writeoff"><span class="sb-ic">➖</span> Списание товаров</button>
+            <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
+            <button class="sb-item" data-view="inventory"><span class="sb-ic">📥</span> Инвентаризация</button>
+            <button class="sb-item" data-view="warehouse"><span class="sb-ic">🏢</span> Склад</button>
+            <button class="sb-item" data-view="transit"><span class="sb-ic">✈</span> Товары в пути</button>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="clients">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">👥</span> Клиенты и маркетинг<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="buyers"><span class="sb-ic">👥</span> Покупатели</button>
+            <button class="sb-item" data-view="cards"><span class="sb-ic">💳</span> Дисконтные карты</button>
+            <button class="sb-item" data-view="discounts"><span class="sb-ic">%</span> Скидки</button>
+            <button class="sb-item" data-view="sms"><span class="sb-ic">💬</span> SMS рассылка</button>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="staff">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">🧑‍💼</span> Сотрудники<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="tasks"><span class="sb-ic">✅</span> Задачи сотрудников</button>
+            <button class="sb-item" data-view="bonuses"><span class="sb-ic">🎁</span> Бонусы сотрудников</button>
+            <button class="sb-item" data-view="agents"><span class="sb-ic">🤖</span> ИИ-агенты</button>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="analytics">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">📈</span> Аналитика<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="stats"><span class="sb-ic">📈</span> Статистика</button>
+            <button class="sb-item" data-view="monitoring"><span class="sb-ic">🖥</span> Мониторинг магазинов</button>
+          </div>
+        </div>
+        <div class="sb-grp" data-grp="system">
+          <button class="sb-grp-h" type="button"><span class="sb-ic">⚙</span> Система<span class="sb-grp-ar">▾</span></button>
+          <div class="sb-grp-b">
+            <button class="sb-item" data-view="users"><span class="sb-ic">👤</span> Пользователи</button>
+            <button class="sb-item" data-view="devices"><span class="sb-ic">📱</span> Устройства касс</button>
+            <button class="sb-item" data-view="audit"><span class="sb-ic">📋</span> Журнал действий</button>
+            <button class="sb-item" data-view="settings"><span class="sb-ic">⚙</span> Настройки РМК</button>
+            <button class="sb-item" data-view="backups"><span class="sb-ic">💾</span> Бекапы</button>
+          </div>
+        </div>
       </nav>
 
       <button class="sb-version" id="btnVersion" title="История обновлений"><span class="sb-ic">✨</span> Версия <span id="sbVersionNum">—</span></button>
@@ -321,12 +361,12 @@
     </main>
   </div>
 
-  <script src="admin-sms.js?v=20261023-094954"></script>
-  <script src="admin-tasks.js?v=20261023-094954"></script>
-  <script src="admin-analytics.js?v=20261023-094954"></script>
-  <script src="admin-agents.js?v=20261023-094954"></script>
-  <script src="admin-catalog.js?v=20261023-094954"></script>
-  <script src="admin-topgoods.js?v=20261023-094954"></script>
-  <script src="admin-rmk.js?v=20261023-094954"></script>
+  <script src="admin-sms.js?v=20261023-180655"></script>
+  <script src="admin-tasks.js?v=20261023-180655"></script>
+  <script src="admin-analytics.js?v=20261023-180655"></script>
+  <script src="admin-agents.js?v=20261023-180655"></script>
+  <script src="admin-catalog.js?v=20261023-180655"></script>
+  <script src="admin-topgoods.js?v=20261023-180655"></script>
+  <script src="admin-rmk.js?v=20261023-180655"></script>
 </body>
 </html>

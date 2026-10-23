@@ -7,8 +7,16 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.5.7';
+const RMK_VERSION = '1.5.8';
 const RMK_CHANGELOG = [
+  {
+    v: '1.5.8', date: '23.10.2026', title: 'Поиск товаров: попап и бесконечная лента; меню по группам',
+    items: [
+      'Карточка товара в «Поиске товаров» открывается попапом по центру экрана: слева фото, данные и размеры, справа вкладки — таблицы больше не сжимаются. Закрыть — крестик, клик мимо или Esc.',
+      'Вместо страниц — бесконечная лента: товары догружаются сами при прокрутке вниз.',
+      'Боковое меню сгруппировано: Обзор, Смена, Возвраты — отдельно; «Продажи» (чеки, продажи по врачам, врачи × продавцы, отчёты продаж за день, выручка-расходы), «Касса и деньги», «Товары», «Склад», «Клиенты и маркетинг», «Сотрудники», «Аналитика», «Система». Группа с открытым разделом раскрывается сама.',
+    ],
+  },
   {
     v: '1.5.7', date: '23.10.2026', title: 'Ценники: цена всегда из РМК',
     items: [
@@ -1274,6 +1282,7 @@ async function bootApp() {
 
   // Ограничение доступа: скрываем неразрешённые пункты меню и выбираем стартовый
   applyTabAccess();
+  sbInitGroups();
 
   // навигация
   document.querySelectorAll('.sb-item').forEach(btn => {
@@ -1282,6 +1291,7 @@ async function bootApp() {
       if (!accCanView({ allowedTabs: state.allowedTabs }, v)) return; // запрет на неразрешённые
       document.querySelectorAll('.sb-item').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+      sbSyncGroups(true);
       state.view = v;
       renderView();
       toggleSidebar(false); // авто-закрытие меню после выбора раздела на мобильном
@@ -1315,6 +1325,37 @@ function applyTabAccess() {
     const activeBtn = document.querySelector('.sb-item[data-view="' + firstAllowed + '"]');
     if (activeBtn) activeBtn.classList.add('active');
   }
+}
+
+// Группы бокового меню (v1.5.8): раскрываются по клику, запоминаются; группа с активным пунктом открыта;
+// группы без доступных пунктов скрыты.
+const SB_GRP_LS = 'rmk_sb_groups';
+function sbGrpState() { try { return JSON.parse(localStorage.getItem(SB_GRP_LS) || '{}') || {}; } catch (_) { return {}; } }
+function sbInitGroups() {
+  document.querySelectorAll('.sb-grp').forEach(g => {
+    const h = g.querySelector('.sb-grp-h');
+    if (h && !h._bound) {
+      h._bound = true;
+      h.addEventListener('click', () => {
+        const open = !g.classList.contains('open');
+        g.classList.toggle('open', open);
+        const st = sbGrpState(); st[g.dataset.grp] = open; localStorage.setItem(SB_GRP_LS, JSON.stringify(st));
+      });
+    }
+  });
+  sbSyncGroups(false);
+}
+function sbSyncGroups(fromClick) {
+  const st = sbGrpState();
+  document.querySelectorAll('.sb-grp').forEach(g => {
+    const items = [...g.querySelectorAll('.sb-item')];
+    const visible = items.filter(b => b.style.display !== 'none');
+    g.style.display = visible.length ? '' : 'none';
+    const hasActive = items.some(b => b.classList.contains('active'));
+    g.classList.toggle('has-active', hasActive);
+    if (hasActive) g.classList.add('open');
+    else if (!fromClick) g.classList.toggle('open', !!st[g.dataset.grp]);
+  });
 }
 
 // Открыть/закрыть боковое меню на мобильных. force=true — открыть, false — закрыть, undefined — переключить.
@@ -1356,7 +1397,7 @@ function renderView(force) {
   const isReady = READY_VIEWS.includes(v);
   document.body.classList.toggle('v-topgoods', v === 'productsales');
   document.body.classList.toggle('v-catalog', v === 'search'); // у «Поиска товаров» свои фильтры
-  if (v !== 'search') document.body.classList.remove('ct-det-open'); // у «Топ товаров» свой период и магазин
+  if (v !== 'search') { document.body.classList.remove('ct-det-open'); if (typeof ctClose === 'function' && document.getElementById('ctModal')) ctClose(); } // у «Топ товаров» свой период и магазин
   // переключаем секции
   document.querySelectorAll('.view').forEach(s => s.classList.remove('active'));
   if (isReady) $('view-' + v).classList.add('active');

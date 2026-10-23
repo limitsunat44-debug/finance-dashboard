@@ -8,7 +8,7 @@
 // ═════════════════════════════════════════════════════════════════════
 const CT = {
   f: { q: '', cat: '', brand: '', size: '', supplier: '', wh: '', show: '', from: '', to: '', pmin: '', pmax: '', qmin: '', qmax: '', color: '', season: '', status: '', sort: 'qty_desc' },
-  page: 0, per: 24, data: null, pid: '', det: null, detTab: 'show', detWh: '', hlBc: '', open: {}, seq: 0, adv: localStorage.getItem('ct_adv') ? localStorage.getItem('ct_adv') === '1' : window.innerWidth > 700,
+  page: 0, per: 36, data: null, cards: [], more: false, loadingMore: false, io: null, pid: '', det: null, detTab: 'show', detWh: '', hlBc: '', open: {}, seq: 0, adv: localStorage.getItem('ct_adv') ? localStorage.getItem('ct_adv') === '1' : window.innerWidth > 700,
 };
 const CT_SORTS = [
   ['qty_desc', 'По количеству (убывание)'], ['qty_asc', 'По количеству (возрастание)'], ['sales', 'По продажам за 30 дн.'],
@@ -68,18 +68,65 @@ async function renderCatalog(force) {
     box.innerHTML = `<div class="ct-wrap">
       <div class="card ct-filters" id="ctFilters"></div>
       <div class="ct-chips" id="ctChips"></div>
-      <div class="ct-main">
-        <div class="ct-list">
-          <div class="ct-bar" id="ctBar"></div>
-          <div class="ct-grid" id="ctGrid"><div class="loading">⏳ Загружаю товары…</div></div>
-          <div class="ct-pager" id="ctPager"></div>
-        </div>
-        <aside class="card ct-det" id="ctDet"></aside>
+      <div class="ct-list">
+        <div class="ct-bar" id="ctBar"></div>
+        <div class="ct-grid" id="ctGrid"><div class="loading">⏳ Загружаю товары…</div></div>
+        <div class="ct-more-zone" id="ctMoreZone"></div>
       </div>
     </div>`;
     ctPaintFilters();
+    ctEnsureModal();
+    ctEnsureObserver();
   }
   await ctLoad(force);
+}
+
+// попап карточки товара — один на страницу, вне раскладки раздела
+function ctEnsureModal() {
+  if ($('ctModal')) return;
+  const m = document.createElement('div');
+  m.className = 'ct-modal'; m.id = 'ctModal';
+  m.innerHTML = '<div class="ct-det" id="ctDet" role="dialog" aria-modal="true"></div>';
+  document.body.appendChild(m);
+  m.addEventListener('mousedown', (e) => { if (e.target === m) ctClose(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && m.classList.contains('open')) ctClose(); });
+}
+// бесконечная прокрутка: следующая порция, когда низ списка близко
+function ctEnsureObserver() {
+  const z = $('ctMoreZone'); if (!z || !('IntersectionObserver' in window)) return;
+  if (CT.io) CT.io.disconnect();
+  CT.io = new IntersectionObserver((ents) => { if (ents.some(e => e.isIntersecting)) ctLoadMore(); }, { rootMargin: '900px 0px' });
+  CT.io.observe(z);
+}
+async function ctLoadMore() {
+  if (!CT.more || CT.loadingMore || !CT.data) return;
+  CT.loadingMore = true; ctPaintMore();
+  const seq = CT.seq; const page = CT.page + 1;
+  try {
+    const p = CT.page; CT.page = page;
+    const d = await posApi(ctQS(), { method: 'GET' });
+    if (seq !== CT.seq) { return; }
+    CT.data = { ...CT.data, ...d, cards: undefined };
+    const have = new Set(CT.cards.map(c => c.id));
+    const add = (d.cards || []).filter(c => !have.has(c.id));
+    CT.cards.push(...add);
+    CT.more = d.page < d.pages - 1;
+    const g = $('ctGrid'); if (g) g.insertAdjacentHTML('beforeend', add.map(ctCard).join(''));
+    ctBindCards();
+    void p;
+  } catch (e) {
+    CT.page = page - 1;
+    docToast('Не удалось загрузить ещё: ' + (e.message || e));
+  } finally { CT.loadingMore = false; ctPaintMore(); }
+  // если экран ещё не заполнен — догрузить сразу
+  const z = $('ctMoreZone'); if (CT.more && z && z.getBoundingClientRect().top < window.innerHeight + 900) setTimeout(ctLoadMore, 50);
+}
+function ctPaintMore() {
+  const z = $('ctMoreZone'); const d = CT.data; if (!z || !d) return;
+  if (CT.loadingMore) z.innerHTML = '<div class="ct-more-l"><span class="ct-spin"></span> Загружаю ещё товары…</div>';
+  else if (CT.more) z.innerHTML = `<button class="btn ct-more-btn" id="ctMoreBtn">Показать ещё (${ctNum(CT.cards.length)} из ${ctNum(d.total)})</button>`;
+  else z.innerHTML = d.total ? `<div class="ct-more-end">Показаны все ${ctNum(d.total)} ${plural(d.total, 'товар', 'товара', 'товаров')}</div>` : '';
+  const b = $('ctMoreBtn'); if (b) b.onclick = ctLoadMore;
 }
 
 function ctOpts(list, sel, first) {
@@ -133,17 +180,17 @@ async function ctLoad(force) {
   const grid = $('ctGrid'); if (grid && !CT.data) grid.innerHTML = '<div class="loading">⏳ Загружаю товары… (первый раз до 10 сек)</div>';
   if (grid && CT.data) grid.classList.add('ct-busy');
   try {
+    CT.page = 0;
     const d = await posApi(ctQS(force ? { fresh: '1' } : null), { method: 'GET' });
     if (seq !== CT.seq) return;
     const first = !CT.data;
-    CT.data = d;
+    CT.data = d; CT.cards = d.cards || []; CT.more = d.page < d.pages - 1;
     if (first) { const q = $('ctQ'); const v = q ? q.value : ''; const foc = document.activeElement === q; ctPaintFilters(); const q2 = $('ctQ'); if (q2) { q2.value = v; if (foc) q2.focus(); } }
     else ctRefreshFacets();
-    ctPaintChips(); ctPaintBar(); ctPaintGrid(); ctPaintPager();
+    ctPaintChips(); ctPaintBar(); ctPaintGrid(); ctPaintMore();
+    if (window.scrollY > 400 && !first) { const l = document.querySelector('.ct-chips'); if (l) l.scrollIntoView({ block: 'start' }); }
     // точное совпадение штрихкода — сразу открыть товар
     if (d.bcHit && d.bcHit.pid) { CT.hlBc = d.bcHit.bc; CT.detTab = 'show'; ctOpen(d.bcHit.pid, true); }
-    else if (CT.pid && !$('ctDet').classList.contains('open')) ctPaintDet();
-    if (!CT.pid) ctPaintDet();
     if (typeof bumpSync === 'function') bumpSync();
   } catch (e) {
     if (seq !== CT.seq) return;
@@ -171,9 +218,7 @@ function ctPaintChips() {
 function ctPaintBar() {
   const el = $('ctBar'); const d = CT.data; if (!el || !d) return;
   el.innerHTML = `<div class="ct-found">Найдено <b>${ctNum(d.total)}</b> ${plural(d.total, 'товар', 'товара', 'товаров')} · <span>${ctNum(d.totalQty)} шт.</span></div>
-    <div class="ct-bar-r"><label>Показывать по <select class="fselect" id="ctPer">${[24, 48, 96].map(n => `<option ${CT.per === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-    <button class="btn btn-sm" id="ctRefresh" title="Обновить остатки">↻</button></div>`;
-  $('ctPer').addEventListener('change', e => { CT.per = Number(e.target.value) || 24; CT.page = 0; ctLoad(); });
+    <div class="ct-bar-r"><button class="btn btn-sm" id="ctRefresh" title="Обновить остатки">↻ Обновить</button></div>`;
   $('ctRefresh').addEventListener('click', () => ctLoad(true));
 }
 function plural(n, a, b, c) { n = Math.abs(n) % 100; const n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
@@ -201,28 +246,35 @@ function ctCard(c) {
 }
 function ctPaintGrid() {
   const el = $('ctGrid'); const d = CT.data; if (!el || !d) return;
-  el.innerHTML = (d.cards || []).length ? d.cards.map(ctCard).join('') : '<div class="ct-nores">Ничего не найдено. Измените запрос или сбросьте фильтры.</div>';
-  el.querySelectorAll('.ct-card').forEach(a => a.addEventListener('click', (e) => {
-    if (e.target.closest('[data-more]')) { const id = e.target.closest('[data-more]').dataset.more; CT.open[id] = !CT.open[id]; ctPaintGrid(); return; }
-    CT.hlBc = ''; ctOpen(a.dataset.pid);
-  }));
+  el.innerHTML = CT.cards.length ? CT.cards.map(ctCard).join('') : '<div class="ct-nores">Ничего не найдено. Измените запрос или сбросьте фильтры.</div>';
+  ctBindCards();
 }
-function ctPaintPager() {
-  const el = $('ctPager'); const d = CT.data; if (!el || !d) return;
-  if (d.pages <= 1) { el.innerHTML = ''; return; }
-  const cur = d.page; const btn = (p, l, dis) => `<button class="btn btn-sm ${p === cur ? 'btn-primary' : ''}" data-pg="${p}" ${dis ? 'disabled' : ''}>${l}</button>`;
-  const pages = []; for (let i = Math.max(0, cur - 2); i <= Math.min(d.pages - 1, cur + 2); i++) pages.push(i);
-  el.innerHTML = btn(cur - 1, '← Назад', cur <= 0) + (pages[0] > 0 ? btn(0, '1') + (pages[0] > 1 ? '<span>…</span>' : '') : '') + pages.map(p => btn(p, String(p + 1))).join('')
-    + (pages[pages.length - 1] < d.pages - 1 ? (pages[pages.length - 1] < d.pages - 2 ? '<span>…</span>' : '') + btn(d.pages - 1, String(d.pages)) : '') + btn(cur + 1, 'Вперёд →', cur >= d.pages - 1);
-  el.querySelectorAll('[data-pg]').forEach(b => b.addEventListener('click', () => { CT.page = Number(b.dataset.pg); ctLoad(); const g = $('ctGrid'); if (g) g.scrollIntoView({ behavior: 'smooth', block: 'start' }); }));
+function ctBindCards() {
+  const el = $('ctGrid'); if (!el) return;
+  el.querySelectorAll('.ct-card:not([data-b])').forEach(a => {
+    a.dataset.b = '1';
+    a.addEventListener('click', (e) => {
+      const mb = e.target.closest('[data-more]');
+      if (mb) {
+        e.stopPropagation();
+        const id = mb.dataset.more; CT.open[id] = !CT.open[id];
+        const c = CT.cards.find(x => x.id === id);
+        if (c) { a.outerHTML = ctCard(c); ctBindCards(); }
+        return;
+      }
+      CT.hlBc = ''; ctOpen(a.dataset.pid);
+    });
+  });
 }
 
 // ——— панель товара ———
 async function ctOpen(pid, fromScan) {
   CT.pid = pid; CT.det = null;
   document.querySelectorAll('.ct-card').forEach(a => a.classList.toggle('sel', a.dataset.pid === pid));
-  const el = $('ctDet'); el.classList.add('open'); document.body.classList.add('ct-det-open');
-  el.innerHTML = '<div class="loading">⏳ Загружаю товар…</div>';
+  ctEnsureModal();
+  const el = $('ctDet'); $('ctModal').classList.add('open'); document.body.classList.add('ct-det-open');
+  el.innerHTML = '<div class="ct-det-h"><div class="ct-det-t">Загружаю товар…</div><button class="ct-x" id="ctX">' + CT_I.x + '</button></div><div class="loading">⏳ Загружаю товар…</div>';
+  $('ctX').onclick = ctClose;
   try {
     const d = await posApi(`?action=catalog&sub=detail&id=${encodeURIComponent(pid)}`, { method: 'GET' });
     if (CT.pid !== pid) return;
@@ -235,15 +287,11 @@ async function ctOpen(pid, fromScan) {
     ctPaintDet();
   } catch (e) { el.innerHTML = `<div class="ct-det-h"><b>Ошибка</b><button class="ct-x" id="ctX">${CT_I.x}</button></div>` + errBar(e.message || String(e)); const x = $('ctX'); if (x) x.onclick = ctClose; }
 }
-function ctClose() { CT.pid = ''; CT.det = null; CT.hlBc = ''; const el = $('ctDet'); el.classList.remove('open'); document.body.classList.remove('ct-det-open'); document.querySelectorAll('.ct-card.sel').forEach(a => a.classList.remove('sel')); ctPaintDet(); }
+function ctClose() { CT.pid = ''; CT.det = null; CT.hlBc = ''; const m = $('ctModal'); if (m) m.classList.remove('open'); document.body.classList.remove('ct-det-open'); document.querySelectorAll('.ct-card.sel').forEach(a => a.classList.remove('sel')); }
 function ctPaintDet() {
   const el = $('ctDet'); if (!el) return;
   const d = CT.det;
-  if (!d) {
-    if (CT.pid) return;
-    el.innerHTML = `<div class="ct-det-empty">${ctSvg('all', 40)}<b>Выберите товар</b><span>Нажмите на карточку — здесь появятся размеры, остатки, места на витрине, продажи, поступления и перемещения.</span><span class="muted">Сканер: отсканируйте штрихкод в поле поиска — товар откроется сам, а пара подсветится.</span></div>`;
-    return;
-  }
+  if (!d) return;
   const p = d.product;
   const photos = p.photos || [];
   const info = [
@@ -255,14 +303,17 @@ function ctPaintDet() {
   const TABS = [['stock', 'Остатки'], ['show', 'Витрина'], ['sales', 'Продажи'], ['recv', 'Поступления'], ['moves', 'Перемещения']];
   el.innerHTML = `
     <div class="ct-det-h"><div><div class="ct-det-t">${esc(p.name)} ${ctBadge(p.badge)}</div><div class="ct-det-s">${esc(p.sub || '')}</div></div><button class="ct-x" id="ctX" title="Закрыть">${CT_I.x}</button></div>
+    <div class="ct-det-body"><div class="ct-det-l">
     <div class="ct-det-top">
       <div class="ct-gal">${ctPhoto(photos[0], 'ct-gal-main')}${photos.length > 1 ? `<div class="ct-thumbs">${photos.slice(0, 5).map((u, i) => `<button data-ph="${i}" class="${i === 0 ? 'on' : ''}"><img src="${esc(u)}" alt="" loading="lazy"></button>`).join('')}</div>` : ''}</div>
       <dl class="ct-info">${info.map(([k, v, raw]) => `<dt>${esc(k)}:</dt><dd>${raw ? v : esc(v)}</dd>`).join('')}</dl>
     </div>
     <div class="ct-sec-t">Размеры в наличии <span class="muted">· всего ${ctNum(d.total)} шт.</span></div>
     <div class="ct-szgrid">${(d.sizes || []).length ? d.sizes.map(s => `<div><b>${esc(s.s)}</b><span>${ctNum(s.n)} шт.</span></div>`).join('') : '<span class="muted">Нет в наличии</span>'}</div>
+    </div><div class="ct-det-r">
     <div class="ct-tabs">${TABS.map(([k, l]) => `<button data-tab="${k}" class="${CT.detTab === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-    <div class="ct-tab" id="ctTab"></div>`;
+    <div class="ct-tab" id="ctTab"></div>
+    </div></div>`;
   $('ctX').onclick = ctClose;
   el.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { CT.detTab = b.dataset.tab; el.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('on', x === b)); ctPaintTab(); }));
   el.querySelectorAll('[data-ph]').forEach(b => b.addEventListener('click', () => { const m = el.querySelector('.ct-gal-main'); if (m && m.tagName === 'IMG') m.src = photos[Number(b.dataset.ph)]; el.querySelectorAll('[data-ph]').forEach(x => x.classList.toggle('on', x === b)); }));

@@ -10,6 +10,10 @@
 
 ---
 
+## 1.5.8 — 23.10.2026 — Поиск товаров: попап и бесконечная лента; меню по группам
+- `admin-catalog.js/.css`: карточка товара — модальное окно `#ctModal` (2 колонки, Esc/клик мимо закрывают); пагинация заменена бесконечной прокруткой (IntersectionObserver, порции по 36).
+- `admin-rmk.html/.css/.js`: группы бокового меню `.sb-grp` (раскрытие сохраняется в localStorage `rmk_sb_groups`, группа активного раздела открыта, группы без доступных пунктов скрыты).
+
 ## 1.5.7 — 23.10.2026 — Ценники: цена всегда из РМК
 - `app.js`: новая `rmkApplyPricesByBarcode(units)` — штрихкод → `stock_units.variant_id` → `product_variants.price` (иначе `products.price`), `price_old` — если больше новой.
 - `csApplyRmkPriceOverrides` больше не требует `price_overridden` и не ищет вариант через `c1_char_ref` (брался чужой вариант).

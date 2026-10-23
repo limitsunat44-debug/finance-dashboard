@@ -10,6 +10,11 @@
 
 ---
 
+## 1.5.7 — 23.10.2026 — Ценники: цена всегда из РМК
+- `app.js`: новая `rmkApplyPricesByBarcode(units)` — штрихкод → `stock_units.variant_id` → `product_variants.price` (иначе `products.price`), `price_old` — если больше новой.
+- `csApplyRmkPriceOverrides` больше не требует `price_overridden` и не ищет вариант через `c1_char_ref` (брался чужой вариант).
+- `bcEnsurePricesForUnits`: сначала цена РМК, 1С — только для экземпляров без цены в РМК; `bcApplyPriceToUnit` не перетирает цену РМК.
+
 ## 1.5.6 — 23.10.2026 — Поиск товаров: карточки, фильтры и адрес на витрине
 - Новый модуль `admin-catalog.js/.css` вместо таблицы «Поиск товара»; старая матрица размер×склад с кодами и EAN-13 — во вкладке «Остатки».
 - Backend: `api/_catalog.js`, `GET /api/pos?action=catalog&sub=board|detail` (только чтение, индекс кэшируется на 2 мин).

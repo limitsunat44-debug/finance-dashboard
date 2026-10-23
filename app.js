@@ -8769,6 +8769,7 @@ function bcEnrichUnit(u) {
 // СТАРАЯ (зачёркнутая, «до скидки») — берётся из Supabase (product_variants.price_old, задаётся вручную).
 // Если price_old в Supabase не задана — падаем на старую цену из 1С (если была скидка).
 function bcApplyPriceToUnit(u) {
+    if (u && u.rmkPrice) return; // цена из РМК главнее 1С
     const cache = barcodesState.priceCache || {};
     const pc = u.productC1Ref ? cache[u.productC1Ref] : null;
     if (!pc) return;
@@ -8815,7 +8816,8 @@ async function bcFetchPrices(productC1Ref) {
 
 // Загрузить цены для текущего выбранного товара и перепроставить на экземпляры
 async function bcEnsurePricesForUnits(units) {
-    const refs = [...new Set(units.map(u => u.productC1Ref).filter(Boolean))];
+    await rmkApplyPricesByBarcode(units);
+    const refs = [...new Set(units.filter(u => !u.rmkPrice).map(u => u.productC1Ref).filter(Boolean))];
     for (const ref of refs) { await bcFetchPrices(ref); }
     // Подгружаем ручные старые цены (price_old) из Supabase по характеристикам этих экземпляров
     const chars = [...new Set(units.map(u => u.charRef).filter(Boolean))];
@@ -10033,34 +10035,57 @@ function csPrintLabels58x40(units) {
 // Цена из РМК: если у варианта цена переопределена в админке (price_overridden=true),
 // берём product_variants.price (рМК), а НЕ цену из 1С. Связь:
 // stock_units.c1_char_ref → variant_id → product_variants(price, price_overridden).
-async function csApplyRmkPriceOverrides(units) {
+async function csApplyRmkPriceOverrides(units) { await rmkApplyPricesByBarcode(units); }
+
+// ЦЕНА ИЗ РМК — главный источник для всех ценников (v1.5.7).
+// Штрихкод → stock_units.variant_id (вариант именно этого экземпляра) → product_variants.price;
+// если у варианта цены нет — products.price. 1С используется только как запасной вариант,
+// когда цены в РМК нет вообще. Старая (зачёркнутая) цена — product_variants.price_old, если больше новой.
+async function rmkApplyPricesByBarcode(units) {
     try {
-        const chars = [...new Set((units || []).map(u => u.charRef).filter(Boolean))];
-        if (!chars.length) return;
-        // c1_char_ref → variant_id
-        const { data: su } = await ortobotClient
-            .from('stock_units')
-            .select('c1_char_ref,variant_id')
-            .in('c1_char_ref', chars)
-            .not('variant_id', 'is', null);
-        const varByChar = {};
-        (su || []).forEach(r => { if (!varByChar[r.c1_char_ref]) varByChar[r.c1_char_ref] = r.variant_id; });
-        const variantIds = [...new Set(Object.values(varByChar))];
-        if (!variantIds.length) return;
-        const { data: pv } = await ortobotClient
-            .from('product_variants')
-            .select('id,price,price_overridden')
-            .in('id', variantIds);
-        const rmkByVariant = {}; // variant_id → {price, overridden}
-        (pv || []).forEach(v => { rmkByVariant[v.id] = { price: (v.price != null ? Number(v.price) : null), overridden: v.price_overridden === true }; });
+        if (!Array.isArray(units) || !units.length) return;
+        const bcs = [...new Set(units.map(u => String(u.unique_barcode || '')).filter(Boolean))];
+        const varByBc = {};
+        for (let i = 0; i < bcs.length; i += 150) {
+            const { data, error } = await ortobotClient.from('stock_units')
+                .select('unique_barcode,variant_id,status').in('unique_barcode', bcs.slice(i, i + 150));
+            if (error) throw error;
+            (data || []).forEach(r => {
+                if (!r.variant_id) return;
+                // один код может встретиться дважды — приоритет экземпляру в наличии
+                if (!varByBc[r.unique_barcode] || r.status === 'in_stock') varByBc[r.unique_barcode] = r.variant_id;
+            });
+        }
+        const vids = [...new Set(units.map(u => varByBc[u.unique_barcode] || u.variantId).filter(Boolean))];
+        if (!vids.length) return;
+        const vById = {};
+        for (let i = 0; i < vids.length; i += 150) {
+            const { data, error } = await ortobotClient.from('product_variants')
+                .select('id,price,price_old,product_id,currency').in('id', vids.slice(i, i + 150));
+            if (error) throw error;
+            (data || []).forEach(v => { vById[v.id] = v; });
+        }
+        const pids = [...new Set(Object.values(vById).map(v => v.product_id).filter(Boolean))];
+        const pPrice = {};
+        for (let i = 0; i < pids.length; i += 150) {
+            const { data } = await ortobotClient.from('products').select('id,price').in('id', pids.slice(i, i + 150));
+            (data || []).forEach(p => { pPrice[p.id] = Number(p.price) || 0; });
+        }
         units.forEach(u => {
-            const vid = u.charRef ? varByChar[u.charRef] : null;
-            const rec = vid ? rmkByVariant[vid] : null;
-            if (rec && rec.overridden && rec.price != null) {
-                u.priceNew = rec.price;   // цена рМК перекрывает 1С
-            }
+            const vid = varByBc[u.unique_barcode] || u.variantId;
+            const v = vid ? vById[vid] : null;
+            if (!v) return;
+            const vp = Number(v.price) || 0;
+            const price = vp > 0 ? vp : (pPrice[v.product_id] || 0);
+            if (!(price > 0)) return;
+            u.variantId = vid;
+            u.priceNew = price;
+            u.rmkPrice = true;
+            const old = Number(v.price_old) || 0;
+            u.priceOld = old > price ? old : null;
+            if (v.currency) u.currency = v.currency;
         });
-    } catch (e) { console.warn('csApplyRmkPriceOverrides:', e); }
+    } catch (e) { console.warn('rmkApplyPricesByBarcode:', e); }
 }
 
 // Фолбэк для нативно оприходованных товаров (без 1С).

@@ -79,6 +79,7 @@ try {
   src = src.replace(/(admin-agents\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(admin-topgoods\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   src = src.replace(/(admin-catalog\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
+  src = src.replace(/(admin-restock\.(?:js|css)\?v=)[^"'\s>]*/g, `$1${VERSION}`);
   if (src !== before) { writeFileSync(p, src); changed++; }
 } catch (_) { /* admin-rmk.html может не существовать — пропускаем */ }
 

@@ -6,13 +6,14 @@
   <title>РМК · Администратор</title>
   <link rel="icon" href="favicon-32.png" sizes="32x32">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="admin-sms.css?v=20261023-180655">
-  <link rel="stylesheet" href="admin-tasks.css?v=20261023-180655">
-  <link rel="stylesheet" href="admin-analytics.css?v=20261023-180655">
-  <link rel="stylesheet" href="admin-agents.css?v=20261023-180655">
-  <link rel="stylesheet" href="admin-catalog.css?v=20261023-180655">
-  <link rel="stylesheet" href="admin-topgoods.css?v=20261023-180655">
-  <link rel="stylesheet" href="admin-rmk.css?v=20261023-180655">
+  <link rel="stylesheet" href="admin-sms.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-tasks.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-analytics.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-agents.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-catalog.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-topgoods.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-restock.css?v=20261025-194103">
+  <link rel="stylesheet" href="admin-rmk.css?v=20261025-194103">
   <!-- Supabase JS (тот же CDN, что и в дашборде) -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <!-- Chart.js для графика продаж по часам и донатов -->
@@ -23,7 +24,7 @@
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
   <!-- Шрифт с кириллицей для PDF (русский текст в документе перемещения) -->
-  <script src="fonts-dejavu.js?v=20261023-180655"></script>
+  <script src="fonts-dejavu.js?v=20261025-194103"></script>
 </head>
 <body>
 
@@ -103,6 +104,7 @@
             <button class="sb-item" data-view="receiving"><span class="sb-ic">📦</span> Поступление товаров</button>
             <button class="sb-item" data-view="writeoff"><span class="sb-ic">➖</span> Списание товаров</button>
             <button class="sb-item" data-view="transfer"><span class="sb-ic">🔄</span> Перемещение</button>
+            <button class="sb-item" data-view="restock"><span class="sb-ic">🔁</span> Товары для перемещения</button>
             <button class="sb-item" data-view="inventory"><span class="sb-ic">📥</span> Инвентаризация</button>
             <button class="sb-item" data-view="warehouse"><span class="sb-ic">🏢</span> Склад</button>
             <button class="sb-item" data-view="transit"><span class="sb-ic">✈</span> Товары в пути</button>
@@ -326,6 +328,11 @@
           <div id="trBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
 
+        <!-- ═══ ТОВАРЫ ДЛЯ ПЕРЕМЕЩЕНИЯ ═══ -->
+        <section class="view" id="view-restock">
+          <div id="rsBody"><div class="loading">⏳ Загрузка…</div></div>
+        </section>
+
         <section class="view" id="view-inventory">
           <div id="invBody"><div class="loading">⏳ Загрузка…</div></div>
         </section>
@@ -361,12 +368,13 @@
     </main>
   </div>
 
-  <script src="admin-sms.js?v=20261023-180655"></script>
-  <script src="admin-tasks.js?v=20261023-180655"></script>
-  <script src="admin-analytics.js?v=20261023-180655"></script>
-  <script src="admin-agents.js?v=20261023-180655"></script>
-  <script src="admin-catalog.js?v=20261023-180655"></script>
-  <script src="admin-topgoods.js?v=20261023-180655"></script>
-  <script src="admin-rmk.js?v=20261023-180655"></script>
+  <script src="admin-sms.js?v=20261025-194103"></script>
+  <script src="admin-tasks.js?v=20261025-194103"></script>
+  <script src="admin-analytics.js?v=20261025-194103"></script>
+  <script src="admin-agents.js?v=20261025-194103"></script>
+  <script src="admin-catalog.js?v=20261025-194103"></script>
+  <script src="admin-topgoods.js?v=20261025-194103"></script>
+  <script src="admin-restock.js?v=20261025-194103"></script>
+  <script src="admin-rmk.js?v=20261025-194103"></script>
 </body>
 </html>

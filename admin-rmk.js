@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.5.8';
+const RMK_VERSION = '1.5.9';
 const RMK_CHANGELOG = [
+  {
+    v: '1.5.9', date: '26.10.2026', title: 'Новая вкладка «Товары для перемещения»',
+    items: [
+      'Склад → «Товары для перемещения»: какие размеры нужно привезти в магазин, где их нет, и откуда взять — с Основного склада (если там от 2 шт.) или из другого магазина (если там от 2 шт.). Источник всегда оставляет себе 1 шт., в Основной склад ничего не перемещается.',
+      'Остатки по всем складам в одной строке, приоритет по продажам магазина за 30 дней, фильтры по магазину, источнику, категории, бренду, размеру и приоритету. Товары догружаются при прокрутке.',
+      'Можно выбрать строки и конкретные экземпляры (штрихкоды) и создать документы перемещения — они попадают в обычный журнал «Перемещение» (черновиком или сразу проведёнными). Товары из непроведённых перемещений повторно не предлагаются.',
+      'Вкладка доступна Умеду.',
+    ],
+  },
   {
     v: '1.5.8', date: '23.10.2026', title: 'Поиск товаров: попап и бесконечная лента; меню по группам',
     items: [
@@ -1015,7 +1024,7 @@ const ADMIN_ACCOUNTS = {
   // Ограниченный доступ: Перемещение товаров + Поступление товара + Поиск/История товара
   // (вкладка receiving включает: новый документ, документы поступления, поставщики — создание/редактирование)
   // search — проверка остатка/цены/статуса по штрихкоду; history — жизненный цикл экземпляра.
-  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'receiving', 'search', 'history', 'transit'] },
+  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'restock', 'receiving', 'search', 'history', 'transit'] },
 };
 // true, если у аккаунта есть хоть какой-то доступ в админку
 function accHasAccess(acc) {
@@ -1250,6 +1259,7 @@ const VIEW_META = {
   incass:    { title: 'Инкассация', sub: 'Квитанции кассиров при закрытии смены: наличные в пакетах, переводы кошельков, расхождения' },
   shiftreports:{ title: 'Отчёты по продажам за день', sub: 'Отчёт по каждой закрытой смене: чеки, способы оплаты, нал/безнал' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
+  restock:   { title: 'Товары для перемещения', sub: 'Товары, которых нет в магазинах, но они есть на Основном складе или в других магазинах' },
   inventory: { title: 'Инвентаризация', sub: 'Пересчёт склада: сессии, акт расхождений и применение изменений' },
   warehouse: { title: 'Остатки и оценка складов', sub: 'Актуальная информация об остатках товаров на складах' },
   transit:   { title: 'Товары в пути', sub: 'Учёт отправок от поставщиков и контроль получения товара' },
@@ -1258,7 +1268,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'agents', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'agents', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'restock', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1396,8 +1406,9 @@ function renderView(force) {
   const v = state.view;
   const isReady = READY_VIEWS.includes(v);
   document.body.classList.toggle('v-topgoods', v === 'productsales');
-  document.body.classList.toggle('v-catalog', v === 'search'); // у «Поиска товаров» свои фильтры
-  if (v !== 'search') { document.body.classList.remove('ct-det-open'); if (typeof ctClose === 'function' && document.getElementById('ctModal')) ctClose(); } // у «Топ товаров» свой период и магазин
+  document.body.classList.toggle('v-catalog', v === 'search');
+  document.body.classList.toggle('v-restock', v === 'restock'); // у «Поиска товаров» свои фильтры
+  if (v !== 'search' && v !== 'restock') { document.body.classList.remove('ct-det-open'); if (typeof ctClose === 'function' && document.getElementById('ctModal')) ctClose(); } // у «Топ товаров» свой период и магазин
   // переключаем секции
   document.querySelectorAll('.view').forEach(s => s.classList.remove('active'));
   if (isReady) $('view-' + v).classList.add('active');
@@ -1434,6 +1445,7 @@ function renderView(force) {
   else if (v === 'shiftreports') renderShiftReports(force);
   else if (v === 'incass') renderIncass(force);
   else if (v === 'transfer') renderTransfer(force);
+  else if (v === 'restock') { if (typeof renderRestock === 'function') renderRestock(force); }
   else if (v === 'inventory') renderInventory(force);
   else if (v === 'warehouse') renderWarehouse(force);
   else if (v === 'transit') renderTransit(force);

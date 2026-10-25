@@ -7,8 +7,15 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.5.9';
+const RMK_VERSION = '1.6.0';
 const RMK_CHANGELOG = [
+  {
+    v: '1.6.0', date: '26.10.2026', title: 'Перемещение в «Интернет магазин» — только администраторам',
+    items: [
+      'У пользователей с ограниченным доступом (Умед) «Интернет магазин» не показывается в списке «Куда» при новом перемещении.',
+      'Черновик перемещения в «Интернет магазин» такие пользователи провести не могут — кнопка «Провести» заменена предупреждением. Администраторы работают как раньше.',
+    ],
+  },
   {
     v: '1.5.9', date: '26.10.2026', title: 'Новая вкладка «Товары для перемещения»',
     items: [
@@ -6918,7 +6925,7 @@ function trDocCardHTML() {
       <div class="tr-actions tr-doc-actions">
         ${posted
           ? '<button class="tr-btn tr-btn-outline" id="trUnpost">↩ Отменить проведение</button>'
-          : '<button class="tr-btn tr-btn-primary" id="trPost">✓ Провести</button>'}
+          : (trInetDenied(d.to_warehouse_id) ? '<div class="errbar">⚠ ' + TR_INET_MSG + '. Провести документ может администратор.</div>' : '<button class="tr-btn tr-btn-primary" id="trPost">✓ Провести</button>')}
         <button class="tr-btn tr-btn-outline" id="trDocPrint">🖨 Печать</button>
         <button class="tr-btn tr-btn-danger" id="trDocDelete">🗑 Удалить документ</button>
       </div>
@@ -6930,7 +6937,7 @@ function trBindDocCard() {
   const on = (id, fn) => { const el = $(id); if (el) el.addEventListener('click', fn); };
   const d = TR.jDoc || {};
   on('trDocBack', () => { TR.jDoc = null; trPaint(); });
-  on('trPost', () => trDocAction('transfer-doc-post', { id: d.id }));
+  on('trPost', () => { if (trInetDenied(d.to_warehouse_id)) { const e = $('trDocErr'); if (e) e.innerHTML = errBar(TR_INET_MSG); return; } trDocAction('transfer-doc-post', { id: d.id }); });
   on('trUnpost', () => trDocAction('transfer-doc-unpost', { id: d.id }));
   on('trDocPrint', () => trPrintDocData(d)); // данные уже загружены — печатаем напрямую
   on('trAddItemBtn', trDocAddItem);
@@ -7161,8 +7168,9 @@ function trGroupUnits(g) { return g.rows.reduce((s, r) => s + (Number(r.qty) || 
 
 // ── Экран 1: выбор складов ──
 function trSetupHTML() {
-  const opts = (sel) => TR.warehouses.map(w =>
+  const opts = (sel, isTo) => TR.warehouses.filter(w => !(isTo && trInetDenied(w.id))).map(w =>
     `<option value="${esc(w.c1Ref)}" ${sel === w.c1Ref ? 'selected' : ''}>${esc(w.name)}</option>`).join('');
+  if (trInetDenied(TR.toRef)) { TR.toRef = ''; TR.toName = ''; }
   return `
   <div class="tr-wrap">
     <div class="tr-card tr-setup">
@@ -7170,7 +7178,7 @@ function trSetupHTML() {
       <label class="tr-fld"><span>Откуда (склад-отправитель)</span>
         <select id="trFrom" class="tr-select"><option value="">— выберите склад —</option>${opts(TR.fromRef)}</select></label>
       <label class="tr-fld"><span>Куда (склад-получатель)</span>
-        <select id="trTo" class="tr-select"><option value="">— выберите склад —</option>${opts(TR.toRef)}</select></label>
+        <select id="trTo" class="tr-select"><option value="">— выберите склад —</option>${opts(TR.toRef, true)}</select></label>
       <label class="tr-fld"><span>Комментарий (необязательно)</span>
         <input type="text" id="trComment" class="tr-input" maxlength="200" placeholder="Напр. плановое пополнение" value="${esc(TR.comment)}"></label>
       <div class="tr-info">
@@ -7373,6 +7381,7 @@ function trBind() {
       const err = $('trSetupErr');
       if (!TR.fromRef || !TR.toRef) { err.innerHTML = errBar('Выберите оба склада'); return; }
       if (TR.fromRef === TR.toRef) { err.innerHTML = errBar('Склады отправителя и получателя должны отличаться'); return; }
+      if (trInetDenied(TR.toRef)) { err.innerHTML = errBar(TR_INET_MSG); return; }
       TR.step = 'scan'; trPaint();
     });
   } else if (TR.step === 'scan') {
@@ -7403,6 +7412,12 @@ function trBind() {
   }
 }
 
+// v1.6.0: перемещение в «Интернет магазин» — только администраторам (полный доступ)
+const TR_INET_WH = 'f1d6d375-f379-4b0f-b881-c24fbcfa2e84';
+function trIsAdmin() { return state.allowedTabs === '*'; }
+function trIsInet(refOrId) { const w = TR.warehouses.find(x => x.c1Ref === refOrId || x.id === refOrId); return String(refOrId) === TR_INET_WH || !!(w && w.id === TR_INET_WH); }
+function trInetDenied(refOrId) { return !trIsAdmin() && !!refOrId && trIsInet(refOrId); }
+const TR_INET_MSG = 'Перемещение в «Интернет магазин» могут делать только администраторы';
 function trWhName(ref) { const w = TR.warehouses.find(x => x.c1Ref === ref); return w ? w.name : ''; }
 
 // ── сканер ──
@@ -7485,6 +7500,7 @@ async function trHandleScan(barcode) {
 async function trDoTransfer() {
   if (TR.busy) return;
   const err = $('trConfirmErr');
+  if (trInetDenied(TR.toRef)) { if (err) err.innerHTML = errBar(TR_INET_MSG); return; }
   const btn = $('trDoTransfer');
   TR.busy = true;
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Создаю документ в 1С…'; }

@@ -18,7 +18,7 @@ const LS_AUTH = 'orto_admin_rmk_auth';
 // Магазины. Сейчас работаем по Айни; остальные подключаются добавлением строки.
 const STORES = [
   { wh: '5ca2d3e6-29c1-4d1a-aeee-832fa513e2e2', name: 'Ортосалон «Айни»', active: true },
-  { wh: '19db06fa-deb5-47db-acd7-486c5bc679d0', name: 'Ортосалон «Сиёма»', active: false },
+  { wh: '19db06fa-deb5-47db-acd7-486c5bc679d0', name: 'Ортосалон «Сиёма»', active: true },
   { wh: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Ортосалон «Худжанд»', active: false },
   { wh: '8f0bf6e3-1ffc-4267-8f4b-1e79179dd2a7', name: 'Ортосалон «Сити-Молл»', active: false },
 ];
@@ -49,6 +49,8 @@ const BGS = {
   concrete: { label: 'Серый бетон', color: '#b9bcbd' },
   orange:   { label: 'Оранжевая',   color: '#f28c1e' },
   yellow:   { label: 'Жёлтая',      color: '#e8e14b' },
+  pink:     { label: 'Розовая',     color: '#f2a7c8' },
+  blue:     { label: 'Голубая',     color: '#a9c8ef' },
 };
 const PRESETS = {
   pinsC:  { label: 'Стена с держателями (бетон)',  look: 'pins',  bg: 'concrete', w: 1.8, n: 6, m: 3 },
@@ -56,6 +58,8 @@ const PRESETS = {
   pinsO:  { label: 'Стена с держателями (оранж.)', look: 'pins',  bg: 'orange',   w: 2.4, n: 6, m: 4 },
   longY:  { label: 'Полки на жёлтой стене',        look: 'long',  bg: 'yellow',   w: 1.8, n: 6, m: 8 },
   longO:  { label: 'Полки на оранжевой стене',     look: 'long',  bg: 'orange',   w: 1.8, n: 6, m: 8 },
+  longP:  { label: 'Полки на розовой стене',       look: 'long',  bg: 'pink',     w: 1.6, n: 6, m: 6 },
+  longB:  { label: 'Полки на голубой стене',       look: 'long',  bg: 'blue',     w: 1.4, n: 6, m: 6 },
   niche:  { label: 'Ниша с полочками',             look: 'niche', bg: 'white',    w: 1.0, n: 6, m: 2 },
   hang:   { label: 'Стена с крючками (пакеты)',    look: 'hang',  bg: 'white',    w: 1.0, n: 6, m: 2 },
 };

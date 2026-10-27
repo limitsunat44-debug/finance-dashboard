@@ -2217,6 +2217,7 @@ function renderAll(rebuild3d) {
   if (is3d) setTimeout(resize3d, 0);
   const wb = $('pgWalk'); if (wb) wb.style.display = is3d && !G.walk ? '' : 'none';
   peopleOverlay();
+  if (HT.on) heatDraw();
 }
 function select(sel) {
   S.sel = sel;
@@ -2252,8 +2253,10 @@ function liveUi() {
     }
   }
   if (!$('pgLiveB')) {
-    box.innerHTML = `<button class="pg-live-b" id="pgLiveB" title="Показать людей в зале по камерам"></button><span id="pgLiveSt"></span>${isAdm ? '<button class="pg-live-c" id="pgCamCfg" title="Калибровка камер">⚙ Камеры</button>' : ''}`;
+    box.innerHTML = `<button class="pg-live-b" id="pgLiveB" title="Показать людей в зале по камерам"></button><span id="pgLiveSt"></span><button class="pg-live-b pg-heat-b" id="pgHeatB" title="Где покупатели проводят больше всего времени"></button>${isAdm ? '<button class="pg-live-c" id="pgCamCfg" title="Калибровка камер">⚙ Камеры</button>' : ''}`;
     $('pgLiveB').onclick = () => liveToggle(!LV.on);
+    $('pgHeatB').onclick = () => heatToggle(!HT.on);
+    heatUi();
     if (isAdm) $('pgCamCfg').onclick = openCamCfg;
   }
   const lb = $('pgLiveB'); lb.classList.toggle('on', LV.on); lb.textContent = '👥 ' + (LV.on ? 'Люди онлайн: вкл' : 'Люди онлайн');
@@ -2377,7 +2380,11 @@ async function openCamCfg() {
       <button class="pg-btn" id="ccMask" title="Нажимать, когда в магазине НЕТ людей: всё, что камера примет за человека (манекены, плакаты), будет игнорироваться">🧍 Запомнить манекены</button>
       <button class="pg-btn" id="ccMaskClr">Очистить манекены</button>
     </div>
-    <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="ccClose">Закрыть</button><button class="pg-btn pg-save" id="ccSave">Сохранить привязку</button></div></div>`;
+    <div class="pg-row pg-cc-set"><b>Telegram ortosalon_info (#камера):</b>
+      <label><input type="checkbox" id="ccAlOn" ${(cfg.alerts || {}).off ? '' : 'checked'}> оповещения днём и итог дня в 21:05</label>
+      <label><input type="checkbox" id="ccAlNight" ${(cfg.alerts || {}).nightOff ? '' : 'checked'}> ночная охрана (фото, если в закрытом магазине кто-то есть)</label>
+    </div>
+    <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="ccClose">Закрыть</button><button class="pg-btn pg-save" id="ccSave">Сохранить</button></div></div>`;
   const drawPlan = () => {
     const host = $('ccPlan'); svgPlan(host, { mini: true, forceHall: true });
     const svg = host.querySelector('svg'); if (!svg) return;
@@ -2426,7 +2433,7 @@ async function openCamCfg() {
   $('ccUndo').onclick = () => { if (C.img.length > C.plan.length) C.img.pop(); else { C.img.pop(); C.plan.pop(); } redraw(); };
   $('ccClr').onclick = () => { C.img = []; C.plan = []; redraw(); };
   $('ccClose').onclick = closeModal;
-  const saveStore = async (extra) => capi('?action=config-save', { wh: S.wh, by: USER, store: { staff: Number($('ccStaff').value) || 0, avgVisit: Number($('ccVisit').value) || 7, ...extra } });
+  const saveStore = async (extra) => capi('?action=config-save', { wh: S.wh, by: USER, alerts: { off: !$('ccAlOn').checked, nightOff: !$('ccAlNight').checked }, store: { staff: Number($('ccStaff').value) || 0, avgVisit: Number($('ccVisit').value) || 7, ...extra } });
   $('ccSave').onclick = async () => {
     const n = Math.min(C.img.length, C.plan.length);
     if (n > 0 && n < 4) { toast('Нужно минимум 4 пары точек', true); return; }
@@ -2446,6 +2453,99 @@ async function openCamCfg() {
   redraw(); snap();
 }
 
+// ─────────── 🔥 Тепловая карта (где покупатели проводят больше времени) ───────────
+const HT = { on: false, days: 7, data: null, mesh: null };
+function heatColor(v) { // v 0..1 → синий→зелёный→жёлтый→красный
+  const stops = [[0, [59, 130, 246]], [0.35, [34, 197, 94]], [0.65, [250, 204, 21]], [1, [239, 68, 68]]];
+  for (let i = 1; i < stops.length; i++) if (v <= stops[i][0]) { const [a, ca] = stops[i - 1], [b, cb] = stops[i]; const k = (v - a) / (b - a); return ca.map((x, j) => Math.round(x + (cb[j] - x) * k)); }
+  return stops[stops.length - 1][1];
+}
+// сглаживание соседних ячеек, чтобы карта была «пятнами», а не клетками
+function heatGrid() {
+  const d = HT.data; if (!d || !d.cells.length) return null;
+  const m = new Map(); for (const [i, j, n] of d.cells) m.set(i + ',' + j, n);
+  const sm = new Map(); let mx = 0;
+  const keys = new Set(); for (const [i, j] of d.cells) for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) keys.add((i + a) + ',' + (j + b));
+  for (const k of keys) { const [i, j] = k.split(',').map(Number); let v = 0; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) v += (m.get((i + a) + ',' + (j + b)) || 0) * (a === 0 && b === 0 ? 4 : (a === 0 || b === 0) ? 2 : 1); v /= 16; if (v > 0) { sm.set(k, v); mx = Math.max(mx, v); } }
+  return { sm, mx, cell: d.cell };
+}
+// внимание к секциям: сумма в полосе 0.9 м вокруг шкафа
+function heatFixtures() {
+  const d = HT.data; if (!d || !d.cells.length || !S.layout) return [];
+  const tot = d.cells.reduce((s, c) => s + c[2], 0) || 1;
+  return zoneFx('hall').filter(f => !['mirror', 'cash'].includes(f.type)).map(f => {
+    const a = -f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a); let v = 0;
+    for (const [i, j, n] of d.cells) {
+      const px = (i + 0.5) * d.cell - f.x, py = (j + 0.5) * d.cell - f.y;
+      const lx = px * c - py * s, ly = px * s + py * c;
+      if (Math.abs(lx) <= f.w / 2 + 0.6 && Math.abs(ly) <= f.d / 2 + 0.9) v += n;
+    }
+    return { f, v, pct: Math.round(v / tot * 100) };
+  }).sort((x, y) => y.v - x.v);
+}
+async function heatLoad() {
+  try { HT.data = await capi(`?action=heat&wh=${encodeURIComponent(S.wh)}&days=${HT.days}`); }
+  catch (e) { HT.data = { cells: [], error: e.message }; }
+  heatDraw(); heatUi();
+}
+function heatToggle(on) {
+  HT.on = on; if (on) { HT.data = null; heatUi(); heatLoad(); } else { heatDraw(); heatUi(); }
+  $('pgStage').classList.toggle('heat-on', on);
+}
+function heatUi() {
+  const lb = $('pgHeatB'); if (lb) { lb.classList.toggle('on', HT.on); lb.textContent = '🔥 Тепловая карта' + (HT.on ? ': вкл' : ''); }
+  let box = $('pgHeatBox');
+  if (!HT.on) { if (box) box.remove(); return; }
+  if (!box) { box = document.createElement('div'); box.id = 'pgHeatBox'; box.className = 'pg-heatbox'; $('pgStage').appendChild(box); }
+  const d = HT.data;
+  let body = '';
+  if (!d) body = '<div class="pg-hb-s">⏳ Загружаю…</div>';
+  else if (d.error) body = `<div class="pg-hb-s">⚠ ${esc(d.error)}</div>`;
+  else if (!d.cells.length) body = `<div class="pg-hb-s">Пока нет данных. Карта копится в рабочее время (каждую минуту) по привязанным камерам${d.calibrated && d.calibrated.length ? ': ' + esc(d.calibrated.join(', ')) : ' — привяжите камеры в «⚙ Камеры»'}.</div>`;
+  else {
+    const fx = heatFixtures().filter(x => x.f.type !== 'bench');
+    const top = fx.slice(0, 4), low = fx.filter(x => x.f.type !== 'table').slice(-3).reverse();
+    body = `<div class="pg-hb-scale"><span>мало</span><i></i><span>много</span></div>
+      <div class="pg-hb-s">${d.daysWithData} дн. · ${plural(d.samples, 'замер', 'замера', 'замеров')}${d.calibrated && d.calibrated.length ? ' · камеры: ' + esc(d.calibrated.join(', ')) : ''}</div>
+      <div class="pg-hb-h">Больше всего внимания</div>${top.map(x => `<div class="pg-hb-r"><b>${esc(x.f.name)}</b><span>${x.pct}%</span></div>`).join('')}
+      <div class="pg-hb-h">Почти не подходят</div>${low.map(x => `<div class="pg-hb-r"><b>${esc(x.f.name)}</b><span>${x.pct}%</span></div>`).join('')}`;
+  }
+  box.innerHTML = `<div class="pg-hb-top"><b>🔥 Где стоят покупатели</b><span class="pg-hb-seg">${[[1, 'Сегодня'], [7, '7 дн'], [30, '30 дн']].map(([n, l]) => `<button data-d="${n}" class="${HT.days === n ? 'on' : ''}">${l}</button>`).join('')}</span></div>${body}`;
+  box.querySelectorAll('[data-d]').forEach(b => b.onclick = () => { HT.days = +b.dataset.d; HT.data = null; heatUi(); heatLoad(); });
+}
+function heatDraw() {
+  // 3D: плоскость над полом с текстурой
+  if (HT.mesh) { HT.mesh.parent && HT.mesh.parent.remove(HT.mesh); HT.mesh.geometry.dispose(); HT.mesh.material.map && HT.mesh.material.map.dispose(); HT.mesh.material.dispose(); HT.mesh = null; }
+  const hg = HT.on ? heatGrid() : null;
+  if (hg && G.scene && S.layout) {
+    const b = polyBounds(S.layout.zones.hall.polygon), W = b.x1 - b.x0, H = b.y1 - b.y0, px = 40;
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(W * px); cv.height = Math.ceil(H * px);
+    const cx = cv.getContext('2d');
+    for (const [k, v] of hg.sm) {
+      const [i, j] = k.split(',').map(Number); const t = Math.pow(v / hg.mx, 0.6); const [r, g, bl] = heatColor(t);
+      const x = (i + 0.5) * hg.cell - b.x0, y = (j + 0.5) * hg.cell - b.y0;
+      const gr = cx.createRadialGradient(x * px, y * px, 0, x * px, y * px, hg.cell * px * 1.3);
+      gr.addColorStop(0, `rgba(${r},${g},${bl},${0.25 + 0.5 * t})`); gr.addColorStop(1, `rgba(${r},${g},${bl},0)`);
+      cx.fillStyle = gr; cx.fillRect((x - hg.cell * 1.3) * px, (y - hg.cell * 1.3) * px, hg.cell * 2.6 * px, hg.cell * 2.6 * px);
+    }
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2; m.position.set(b.x0 + W / 2, 0.015, b.y0 + H / 2); m.renderOrder = 2;
+    G.scene.add(m); HT.mesh = m;
+  }
+  // 2D и мини-план
+  const NS = 'http://www.w3.org/2000/svg';
+  for (const sel of ['#pg2d svg', '#pgInset svg']) {
+    const svg = document.querySelector(sel); if (!svg) continue;
+    let g = svg.querySelector('.pg-heat');
+    if (!hg || S.zone !== 'hall') { if (g) g.remove(); continue; }
+    if (!g) { g = document.createElementNS(NS, 'g'); g.setAttribute('class', 'pg-heat'); g.setAttribute('style', 'pointer-events:none'); const pol = svg.querySelector('polygon'); if (pol && pol.nextSibling) svg.insertBefore(g, pol.nextSibling); else svg.appendChild(g); }
+    let h = ''; const bb = polyBounds(S.layout.zones.hall.polygon);
+    for (const [k, v] of hg.sm) { const [i, j] = k.split(',').map(Number); if (i * hg.cell < bb.x0 || j * hg.cell < bb.y0 || (i + 1) * hg.cell > bb.x1 + 1e-6 || (j + 1) * hg.cell > bb.y1 + 1e-6) continue; const t = Math.pow(v / hg.mx, 0.6); const [r, gg, bl] = heatColor(t); h += `<rect x="${(i * hg.cell).toFixed(2)}" y="${(j * hg.cell).toFixed(2)}" width="${hg.cell}" height="${hg.cell}" fill="rgb(${r},${gg},${bl})" fill-opacity="${(0.18 + 0.5 * t).toFixed(2)}"/>`; }
+    g.innerHTML = h;
+  }
+}
+
 // ─────────── шапка ───────────
 let DEEP = null;
 try {
@@ -2457,7 +2557,7 @@ $('pgStore').innerHTML = STORES.map(s => `<option value="${s.wh}" ${s.active ? '
 $('pgStore').value = S.wh;
 $('pgStore').addEventListener('change', (e) => {
   if (S.dirty && !confirm('Есть несохранённые изменения. Перейти без сохранения?')) { e.target.value = S.wh; return; }
-  walkExit(); if (LV.on) liveToggle(false); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
+  walkExit(); if (LV.on) liveToggle(false); if (HT.on) heatToggle(false); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
 });
 document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
 document.querySelectorAll('#pgViewSeg button').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));

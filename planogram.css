@@ -252,7 +252,7 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-stage.walking .pg-live{top:62px}
 .pg-cc .pg-cc-top{flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}
 .pg-cc select,.pg-cc input{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px}
-.pg-cc input{width:64px}
+.pg-cc input[type=number]{width:64px}
 .pg-cc-n{font-size:12.5px;color:#334155}
 .pg-cc-grid{display:grid;grid-template-columns:3fr 2fr;gap:10px;align-items:start}
 .pg-cc-img,.pg-cc-plan{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;min-height:220px;overflow:hidden}
@@ -264,3 +264,18 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-cc-set label{display:flex;align-items:center;gap:6px}
 @media (max-width:760px){.pg-cc-grid{grid-template-columns:1fr}.pg-live{max-width:calc(100% - 24px);top:56px}.pg-live-b,.pg-live-c{font-size:12px;padding:8px 10px}}
 .pg-stage.v2d .pg-live{top:auto;bottom:56px}
+/* ── тепловая карта ── */
+.pg-heat-b.on{background:#ef4444;color:#fff;box-shadow:0 6px 18px rgba(239,68,68,.35)}
+.pg-heatbox{position:absolute;left:12px;bottom:12px;z-index:6;width:270px;max-height:calc(100% - 90px);overflow:auto;background:rgba(255,255,255,.96);border-radius:12px;box-shadow:var(--sh);padding:10px 12px;font-size:12.5px;color:#0f172a}
+.pg-hb-top{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:6px}
+.pg-hb-seg{display:inline-flex;background:#f1f5f9;border-radius:8px;padding:2px}
+.pg-hb-seg button{border:0;background:transparent;font-family:inherit;font-size:11.5px;padding:4px 7px;border-radius:6px;cursor:pointer;color:#475569}
+.pg-hb-seg button.on{background:#fff;color:#0f172a;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.pg-hb-scale{display:flex;align-items:center;gap:6px;font-size:11px;color:#64748b;margin:2px 0 6px}
+.pg-hb-scale i{flex:1;height:8px;border-radius:4px;background:linear-gradient(90deg,#3b82f6,#22c55e,#facc15,#ef4444)}
+.pg-hb-s{color:#64748b;font-size:11.5px;line-height:1.4}
+.pg-hb-h{font-weight:700;font-size:11.5px;color:#475569;margin:8px 0 3px;text-transform:uppercase;letter-spacing:.03em}
+.pg-hb-r{display:flex;justify-content:space-between;gap:8px;padding:3px 0;border-bottom:1px dashed #e2e8f0}
+.pg-hb-r b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pg-stage.heat-on .pg-legend{display:none}
+@media (max-width:760px){.pg-heatbox{width:auto;right:170px;max-height:45%}}

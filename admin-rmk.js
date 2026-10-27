@@ -7,8 +7,17 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.6.2';
+const RMK_VERSION = '1.6.3';
 const RMK_CHANGELOG = [
+  {
+    v: '1.6.3', date: '28.10.2026', title: 'Камеры: люди онлайн на планограмме и вкладка «Посетители»',
+    items: [
+      'Планограмма: кнопка «👥 Люди онлайн» — люди в зале по камерам Hikvision появляются фигурками в 3D и точками на плане (обновление ~раз в 8–10 с). Оранжевые — покупатели, зелёные — сотрудник у кассы. Работает и в режиме прогулки.',
+      'Планограмма → «⚙ Камеры» (только админы): привязка камеры к плану по 4–6 точкам пола, «Запомнить манекены», число сотрудников в смене и средний визит.',
+      'Новая вкладка «Аналитика → Посетители (камеры)»: посетители по часам (оценка), чеки и конверсия, сколько времени сотрудник был в зале и сколько — без покупателей.',
+      'Фото с камер не сохраняются — в базе только цифры (каждые 3 минуты с 9:00 до 21:00). Касса и РМК не нагружаются: распознавание работает в отдельной функции сервера.',
+    ],
+  },
   {
     v: '1.6.2', date: '28.10.2026', title: 'Планограмма: прогулка по залу от первого лица',
     items: [
@@ -1282,6 +1291,7 @@ const VIEW_META = {
   incass:    { title: 'Инкассация', sub: 'Квитанции кассиров при закрытии смены: наличные в пакетах, переводы кошельков, расхождения' },
   shiftreports:{ title: 'Отчёты по продажам за день', sub: 'Отчёт по каждой закрытой смене: чеки, способы оплаты, нал/безнал' },
   transfer:  { title: 'Перемещение товаров', sub: 'Перемещение между складами со сканером и документом 1С' },
+  visitors:  { title: 'Посетители (камеры)', sub: 'Сколько людей в магазине по часам, конверсия в чеки, время сотрудника в зале' },
   restock:   { title: 'Товары для перемещения', sub: 'Товары, которых нет в магазинах, но они есть на Основном складе или в других магазинах' },
   inventory: { title: 'Инвентаризация', sub: 'Пересчёт склада: сессии, акт расхождений и применение изменений' },
   warehouse: { title: 'Остатки и оценка складов', sub: 'Актуальная информация об остатках товаров на складах' },
@@ -1291,7 +1301,7 @@ const VIEW_META = {
   finance:   { title: 'Выручка-Расходы', sub: 'Выручка, расходы, долги поставщикам, зарплаты и чистая прибыль' },
   backups:   { title: 'Бекапы', sub: 'Контроль резервного копирования и восстановление данных' },
 };
-const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'agents', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'restock', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
+const READY_VIEWS = ['overview', 'shift', 'receipts', 'returns', 'discounts', 'cards', 'sms', 'tasks', 'agents', 'docsellers', 'buyers', 'doctors', 'bonuses', 'search', 'history', 'productsales', 'users', 'devices', 'audit', 'settings', 'stats', 'monitoring', 'cashreport', 'shiftreports', 'incass', 'transfer', 'restock', 'visitors', 'inventory', 'warehouse', 'transit', 'finance', 'receiving', 'writeoff', 'backups'];
 
 async function bootApp() {
   // фильтры даты
@@ -1469,6 +1479,7 @@ function renderView(force) {
   else if (v === 'incass') renderIncass(force);
   else if (v === 'transfer') renderTransfer(force);
   else if (v === 'restock') { if (typeof renderRestock === 'function') renderRestock(force); }
+  else if (v === 'visitors') { if (typeof renderVisitors === 'function') renderVisitors(force); }
   else if (v === 'inventory') renderInventory(force);
   else if (v === 'warehouse') renderWarehouse(force);
   else if (v === 'transit') renderTransit(force);

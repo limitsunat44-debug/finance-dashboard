@@ -443,6 +443,7 @@ function init3d() {
     if (S.view !== '3d' || S.zone !== 'hall') { G.lt = 0; return; }
     const now = performance.now(), dt = G.lt ? Math.min(0.1, (now - G.lt) / 1000) : 0; G.lt = now;
     if (G.walk) walkStep(dt); else G.ctl.update();
+    if (LV.figs.length) peopleStep(dt);
     updateWallFade();
     G.renderer.render(G.scene, G.cam);
     G.label.render(G.scene, G.cam);
@@ -2215,6 +2216,7 @@ function renderAll(rebuild3d) {
   hint();
   if (is3d) setTimeout(resize3d, 0);
   const wb = $('pgWalk'); if (wb) wb.style.display = is3d && !G.walk ? '' : 'none';
+  peopleOverlay();
 }
 function select(sel) {
   S.sel = sel;
@@ -2222,6 +2224,227 @@ function select(sel) {
   renderAll(true);
 }
 function setView(v) { if (v !== '3d') walkExit(); S.view = v; if (v === '3d') S.shapeEdit = false; renderAll(true); }
+
+// ─────────── 👥 Люди онлайн (камеры Hikvision → точки на плане) ───────────
+// Сервер раз в ~8 с берёт кадры камер магазина, находит людей и переводит «точку ног» в метры плана.
+// Кадры нигде не хранятся. Фигурки плавно переезжают к новым координатам.
+const CAMS_API = 'https://1c-sync-barcodes.vercel.app/api/cams';
+const CAM_ADMINS = ['Sunnat', 'Iskandar', 'Shahida'];
+const LV = { on: false, data: null, figs: [], timer: 0, busy: false, gen: 0, cfg: null };
+async function capi(q, body) {
+  const res = await fetch(CAMS_API + q, { method: body ? 'POST' : 'GET', headers: body ? { 'Content-Type': 'application/json', 'X-Provision-Secret': SECRET } : { 'X-Provision-Secret': SECRET }, body: body ? JSON.stringify(body) : undefined });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok || d.ok === false) throw new Error(d.error || `HTTP ${res.status}`);
+  return d;
+}
+function liveUi() {
+  const box = $('pgLive'); if (!box) return;
+  const isAdm = CAM_ADMINS.includes(USER);
+  const d = LV.data;
+  let st = '';
+  if (LV.on) {
+    if (!d) st = '<span class="pg-live-st">⏳ Подключаюсь к камерам…</span>';
+    else if (d.error) st = `<span class="pg-live-st err">⚠ ${esc(d.error)}</span>`;
+    else {
+      const ago = Math.max(0, Math.round((Date.now() - d.ts) / 1000));
+      const bad = (d.cams || []).filter(c => !c.ok).length;
+      st = `<span class="pg-live-st"><span><b>В зале: ${d.total}</b>${d.floor2 ? ` · 2 этаж: ${d.floor2}` : ''} · покупателей ≈ ${d.customers}</span><small>${ago < 3 ? 'только что' : ago + ' с назад'}${bad ? ` · ⚠ камер не ответило: ${bad}` : ''}${d.total > (d.people || []).length ? ` · на плане ${(d.people || []).length} — нужна калибровка камер` : ''}</small></span>`;
+    }
+  }
+  if (!$('pgLiveB')) {
+    box.innerHTML = `<button class="pg-live-b" id="pgLiveB" title="Показать людей в зале по камерам"></button><span id="pgLiveSt"></span>${isAdm ? '<button class="pg-live-c" id="pgCamCfg" title="Калибровка камер">⚙ Камеры</button>' : ''}`;
+    $('pgLiveB').onclick = () => liveToggle(!LV.on);
+    if (isAdm) $('pgCamCfg').onclick = openCamCfg;
+  }
+  const lb = $('pgLiveB'); lb.classList.toggle('on', LV.on); lb.textContent = '👥 ' + (LV.on ? 'Люди онлайн: вкл' : 'Люди онлайн');
+  const se = $('pgLiveSt'); if (se.innerHTML !== st) se.innerHTML = st;
+}
+function liveToggle(on) {
+  LV.on = on; LV.gen++; clearTimeout(LV.timer); LV.data = null;
+  if (on) livePoll(LV.gen); else { peopleSet([]); }
+  liveUi(); peopleOverlay();
+}
+async function livePoll(gen) {
+  if (!LV.on || gen !== LV.gen) return;
+  if (document.hidden) { LV.timer = setTimeout(() => livePoll(gen), 3000); return; }
+  const t0 = Date.now();
+  try {
+    const d = await capi('?action=live&wh=' + encodeURIComponent(S.wh));
+    if (gen !== LV.gen) return;
+    LV.data = d; peopleSet(d.people || []);
+  } catch (e) {
+    if (gen !== LV.gen) return;
+    LV.data = { error: /нет камер/.test(e.message) ? 'В этом магазине камеры не подключены' : 'Камеры не ответили: ' + e.message };
+    peopleSet([]);
+  }
+  liveUi(); peopleOverlay();
+  LV.timer = setTimeout(() => livePoll(gen), Math.max(1500, 8000 - (Date.now() - t0)));
+}
+setInterval(() => { if (LV.on && LV.data && !LV.data.error) liveUi(); }, 5000);
+
+// 3D-фигурка человека: тело-капсула + голова; покупатель — оранжевый, сотрудник у кассы — зелёный
+function makeFig(staff) {
+  const g = new THREE.Group();
+  const col = staff ? '#10b981' : '#f97316';
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.2, 0.85, 4, 12), new THREE.MeshStandardMaterial({ color: col, roughness: 0.6, transparent: true, opacity: 0.95 }));
+  body.position.y = 0.2 + 0.425 + 0.08; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.135, 18, 14), new THREE.MeshStandardMaterial({ color: '#f1c7a5', roughness: 0.7, transparent: true, opacity: 0.95 }));
+  head.position.y = 1.56; head.castShadow = true; g.add(head);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.26, 0.34, 28), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.012; g.add(ring);
+  g.userData.mats = [body.material, head.material, ring.material];
+  return g;
+}
+function peopleSet(list) {
+  if (!G.scene) return;
+  if (!G.people) { G.people = new THREE.Group(); G.scene.add(G.people); }
+  const used = new Set();
+  const next = [];
+  for (const p of list) {
+    let best = null, bd = 2.5;
+    for (const f of LV.figs) { if (used.has(f) || f.dead) continue; const d = Math.hypot(f.tx - p.x, f.ty - p.y); if (d < bd) { bd = d; best = f; } }
+    if (best) { used.add(best); best.tx = p.x; best.ty = p.y; if (best.staff !== !!p.staff) { best.staff = !!p.staff; const c = best.staff ? '#10b981' : '#f97316'; best.g.userData.mats[0].color.set(c); best.g.userData.mats[2].color.set(c); } next.push(best); }
+    else { const g = makeFig(!!p.staff); g.position.set(p.x, 0, p.y); G.people.add(g); next.push({ g, x: p.x, y: p.y, tx: p.x, ty: p.y, a: 0, staff: !!p.staff }); }
+  }
+  for (const f of LV.figs) if (!used.has(f) && next.indexOf(f) < 0) { f.dead = true; next.push(f); }
+  LV.figs = next;
+}
+function peopleStep(dt) {
+  if (!G.people || !LV.figs.length) return;
+  const k = 1 - Math.exp(-dt * 1.6);
+  for (const f of LV.figs) {
+    f.x += (f.tx - f.x) * k; f.y += (f.ty - f.y) * k;
+    f.a += ((f.dead ? 0 : 1) - f.a) * Math.min(1, dt * 3);
+    f.g.position.set(f.x, 0, f.y);
+    f.g.userData.mats.forEach((m, i) => { m.opacity = (i === 2 ? 0.55 : 0.95) * f.a; });
+  }
+  const alive = [];
+  for (const f of LV.figs) { if (f.dead && f.a < 0.03) { G.people.remove(f.g); f.g.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); } else alive.push(f); }
+  if (alive.length !== LV.figs.length) LV.figs = alive;
+  if ((G.pfr = (G.pfr || 0) + 1) % 6 === 0) peopleOverlay();
+}
+// точки людей на 2D-плане и мини-плане
+function peopleOverlay() {
+  const NS = 'http://www.w3.org/2000/svg';
+  for (const sel of ['#pg2d svg', '#pgInset svg']) {
+    const svg = document.querySelector(sel); if (!svg) continue;
+    let g = svg.querySelector('.pg-ppl');
+    if (!LV.on || S.zone !== 'hall') { if (g) g.remove(); continue; }
+    if (!g) { g = document.createElementNS(NS, 'g'); g.setAttribute('class', 'pg-ppl'); svg.appendChild(g); }
+    const pts = LV.figs.length ? LV.figs.filter(f => !f.dead).map(f => ({ x: f.x, y: f.y, staff: f.staff })) : ((LV.data && LV.data.people) || []);
+    g.innerHTML = pts.map(p => `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="0.26" fill="${p.staff ? '#10b981' : '#f97316'}" stroke="#fff" stroke-width="0.07"/>`).join('');
+  }
+}
+
+// ── Калибровка: 4+ пары точек «на кадре ↔ на плане» по полу ──
+function homoH(src, dst) {
+  const n = Math.min(src.length, dst.length); if (n < 4) return null;
+  const M = Array.from({ length: 8 }, () => new Array(9).fill(0));
+  for (let i = 0; i < n; i++) {
+    const [u, v] = src[i], [x, y] = dst[i];
+    for (const [r, b] of [[[u, v, 1, 0, 0, 0, -u * x, -v * x], x], [[0, 0, 0, u, v, 1, -u * y, -v * y], y]]) for (let a = 0; a < 8; a++) { for (let c = 0; c < 8; c++) M[a][c] += r[a] * r[c]; M[a][8] += r[a] * b; }
+  }
+  for (let c = 0; c < 8; c++) {
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]]; if (Math.abs(M[c][c]) < 1e-12) return null;
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = M[r][c] / M[c][c]; for (let j = c; j < 9; j++) M[r][j] -= f * M[c][j]; }
+  }
+  const h = M.map((row, i) => row[8] / row[i]); h.push(1); return h;
+}
+const homoApply = (h, u, v) => { const w = h[6] * u + h[7] * v + h[8]; return [(h[0] * u + h[1] * v + h[2]) / w, (h[3] * u + h[4] * v + h[5]) / w]; };
+
+async function openCamCfg() {
+  const m = $('pgModal'); m.hidden = false;
+  m.innerHTML = `<div class="pg-mbox pg-wide"><h3>⚙ Камеры магазина</h3><div class="pg-sub">Загружаю…</div></div>`;
+  let cfg;
+  try { cfg = (await capi('?action=config')).config; } catch (e) { m.innerHTML = `<div class="pg-mbox"><h3>Камеры</h3><div class="pg-empty">Ошибка: ${esc(e.message)}</div><div class="pg-row" style="justify-content:flex-end"><button class="pg-btn" onclick="document.getElementById('pgModal').hidden=true">Закрыть</button></div></div>`; return; }
+  const st = cfg.stores[S.wh];
+  if (!st) { m.innerHTML = `<div class="pg-mbox"><h3>Камеры</h3><div class="pg-empty">В этом магазине камеры не подключены.</div><div class="pg-row" style="justify-content:flex-end"><button class="pg-btn" id="ccX">Закрыть</button></div></div>`; $('ccX').onclick = closeModal; return; }
+  const C = { cam: st.cams[0].id, img: [], plan: [], snap: null, scale: 1 };
+  const camOf = () => st.cams.find(c => c.id === C.cam);
+  const loadPts = () => { const c = camOf(); C.img = c.calib ? c.calib.img.map(p => p.slice()) : []; C.plan = c.calib ? c.calib.plan.map(p => p.slice()) : []; };
+  loadPts();
+  m.innerHTML = `<div class="pg-mbox pg-wide pg-cc">
+    <h3>⚙ Камеры — ${esc(st.name)}</h3>
+    <div class="pg-sub">Привязка камеры к плану: отметьте <b>4–6 точек на полу</b> — сначала на кадре, потом то же место на плане (углы тумб, банкеток, кассы у пола). Чем дальше точки друг от друга — тем точнее. Кадры нигде не сохраняются.</div>
+    <div class="pg-row pg-cc-top"><select id="ccCam">${st.cams.map(c => `<option value="${c.id}">${esc(c.name)}${c.floor === 2 ? ' (2 этаж — только счёт)' : ''}${c.calib ? ' ✓' : ' — не привязана'}</option>`).join('')}</select>
+      <button class="pg-btn" id="ccSnap">📷 Обновить кадр</button><button class="pg-btn" id="ccUndo">↶ Убрать точку</button><button class="pg-btn" id="ccClr">Сбросить</button>
+      <span class="pg-cc-n" id="ccN"></span></div>
+    <div class="pg-cc-grid"><div class="pg-cc-img" id="ccImg"><div class="pg-empty">Нажмите «Обновить кадр» (10–15 с)</div></div><div class="pg-cc-plan" id="ccPlan"></div></div>
+    <div class="pg-row pg-cc-set">
+      <label>Сотрудников в смене <input type="number" id="ccStaff" min="0" max="10" value="${st.staff ?? 1}"></label>
+      <label>Средний визит, мин <input type="number" id="ccVisit" min="1" max="60" value="${st.avgVisit ?? 7}"></label>
+      <button class="pg-btn" id="ccMask" title="Нажимать, когда в магазине НЕТ людей: всё, что камера примет за человека (манекены, плакаты), будет игнорироваться">🧍 Запомнить манекены</button>
+      <button class="pg-btn" id="ccMaskClr">Очистить манекены</button>
+    </div>
+    <div class="pg-row" style="justify-content:flex-end;margin-top:10px"><button class="pg-btn" id="ccClose">Закрыть</button><button class="pg-btn pg-save" id="ccSave">Сохранить привязку</button></div></div>`;
+  const drawPlan = () => {
+    const host = $('ccPlan'); svgPlan(host, { mini: true, forceHall: true });
+    const svg = host.querySelector('svg'); if (!svg) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    let h = '';
+    const H = C.img.length >= 4 && C.plan.length >= 4 ? homoH(C.img.slice(0, C.plan.length), C.plan) : null;
+    if (H && C.snap) {
+      // зона, которую видит камера (нижние 3/4 кадра) + люди с кадра
+      const W = C.snap.w, Hh = C.snap.h, poly = [];
+      for (const [u, v] of [[0, Hh], [W * 0.25, Hh * 0.3], [W * 0.75, Hh * 0.3], [W, Hh]]) { const [x, y] = homoApply(H, u, v); poly.push(x.toFixed(2) + ',' + y.toFixed(2)); }
+      h += `<polygon points="${poly.join(' ')}" fill="rgba(37,99,235,.08)" stroke="#2563eb" stroke-width="0.04" stroke-dasharray="0.15 0.1"/>`;
+      for (const p of C.snap.people || []) { const [x, y] = homoApply(H, (p.b[0] + p.b[2]) / 2, p.b[3]); h += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.25" fill="#f97316" stroke="#fff" stroke-width="0.06"/>`; }
+    }
+    C.plan.forEach((p, i) => { h += `<g><circle cx="${p[0]}" cy="${p[1]}" r="0.2" fill="#dc2626" stroke="#fff" stroke-width="0.05"/><text x="${p[0]}" y="${p[1] + 0.09}" font-size="0.26" text-anchor="middle" fill="#fff" font-weight="700">${i + 1}</text></g>`; });
+    const g = document.createElementNS(NS, 'g'); g.innerHTML = h; svg.appendChild(g);
+    svg.style.cursor = 'crosshair';
+    svg.onclick = (e) => {
+      if (C.plan.length >= C.img.length) { toast('Сначала отметьте точку на кадре', true); return; }
+      const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; const q = pt.matrixTransform(svg.getScreenCTM().inverse());
+      C.plan.push([+q.x.toFixed(2), +q.y.toFixed(2)]); redraw();
+    };
+  };
+  const drawImg = () => {
+    const host = $('ccImg'); if (!C.snap) return;
+    const W = C.snap.w, Hh = C.snap.h;
+    host.innerHTML = `<div class="pg-cc-wrap"><img src="${C.snap.img}" alt="кадр камеры"><svg viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none">${(C.snap.people || []).map(p => `<rect x="${p.b[0]}" y="${p.b[1]}" width="${p.b[2] - p.b[0]}" height="${p.b[3] - p.b[1]}" fill="none" stroke="#f97316" stroke-width="4"/><circle cx="${(p.b[0] + p.b[2]) / 2}" cy="${p.b[3]}" r="9" fill="#f97316"/>`).join('')}${(camOf().mask || []).map(b => `<rect x="${b[0]}" y="${b[1]}" width="${b[2] - b[0]}" height="${b[3] - b[1]}" fill="rgba(100,116,139,.25)" stroke="#64748b" stroke-width="3" stroke-dasharray="10 8"/>`).join('')}${C.img.map((p, i) => `<circle cx="${p[0]}" cy="${p[1]}" r="16" fill="#dc2626" stroke="#fff" stroke-width="4"/><text x="${p[0]}" y="${p[1] + 8}" font-size="22" text-anchor="middle" fill="#fff" font-weight="700">${i + 1}</text>`).join('')}</svg></div>`;
+    const svg = host.querySelector('svg');
+    svg.onclick = (e) => {
+      if (C.img.length > C.plan.length) { toast('Теперь отметьте эту же точку на плане', true); return; }
+      const r = svg.getBoundingClientRect();
+      C.img.push([Math.round((e.clientX - r.left) / r.width * W), Math.round((e.clientY - r.top) / r.height * Hh)]); redraw();
+    };
+  };
+  const redraw = () => {
+    drawImg(); drawPlan();
+    const n = Math.min(C.img.length, C.plan.length);
+    $('ccN').innerHTML = C.img.length > C.plan.length ? `Точка ${C.img.length}: <b>теперь на плане →</b>` : `Пар точек: <b>${n}</b>${n < 4 ? ' (нужно ≥4)' : ' ✓'} · следующая — <b>на кадре</b>`;
+  };
+  const snap = async () => {
+    $('ccImg').innerHTML = '<div class="pg-empty">⏳ Получаю кадр с камеры (10–15 с)…</div>';
+    try { C.snap = await capi('?action=snap&cam=' + encodeURIComponent(C.cam)); } catch (e) { $('ccImg').innerHTML = `<div class="pg-empty">Камера не ответила: ${esc(e.message)}. Попробуйте ещё раз.</div>`; return; }
+    redraw();
+  };
+  $('ccCam').onchange = (e) => { C.cam = e.target.value; C.snap = null; loadPts(); $('ccImg').innerHTML = ''; redraw(); snap(); };
+  $('ccSnap').onclick = snap;
+  $('ccUndo').onclick = () => { if (C.img.length > C.plan.length) C.img.pop(); else { C.img.pop(); C.plan.pop(); } redraw(); };
+  $('ccClr').onclick = () => { C.img = []; C.plan = []; redraw(); };
+  $('ccClose').onclick = closeModal;
+  const saveStore = async (extra) => capi('?action=config-save', { wh: S.wh, by: USER, store: { staff: Number($('ccStaff').value) || 0, avgVisit: Number($('ccVisit').value) || 7, ...extra } });
+  $('ccSave').onclick = async () => {
+    const n = Math.min(C.img.length, C.plan.length);
+    if (n > 0 && n < 4) { toast('Нужно минимум 4 пары точек', true); return; }
+    const calib = n >= 4 ? { img: C.img.slice(0, n), plan: C.plan.slice(0, n) } : undefined;
+    try {
+      const r = await saveStore(calib ? { cams: [{ id: C.cam, calib }] } : {});
+      Object.assign(st, r.config.stores[S.wh]);
+      toast('Сохранено'); if (LV.on) { LV.gen++; livePoll(LV.gen); }
+    } catch (e) { toast('Ошибка: ' + e.message, true); }
+  };
+  $('ccMask').onclick = async () => {
+    if (!confirm('В магазине сейчас НЕТ людей? Всё, что камеры увидят как «человека», будет игнорироваться (манекены, плакаты).')) return;
+    toast('Смотрю камеры… 15–30 с');
+    try { const r = await capi('?action=mask-learn', { wh: S.wh }); const ok = r.report.filter(x => !x.err); toast('Запомнено: ' + ok.map(x => x.added).reduce((a, b) => a + b, 0) + ' (камер ' + ok.length + ')'); cfg = (await capi('?action=config')).config; Object.assign(st, cfg.stores[S.wh]); redraw(); } catch (e) { toast('Ошибка: ' + e.message, true); }
+  };
+  $('ccMaskClr').onclick = async () => { if (!confirm('Очистить список манекенов для всех камер магазина?')) return; try { await capi('?action=mask-clear', { wh: S.wh }); cfg = (await capi('?action=config')).config; Object.assign(st, cfg.stores[S.wh]); redraw(); toast('Очищено'); } catch (e) { toast('Ошибка: ' + e.message, true); } };
+  redraw(); snap();
+}
 
 // ─────────── шапка ───────────
 let DEEP = null;
@@ -2234,7 +2457,7 @@ $('pgStore').innerHTML = STORES.map(s => `<option value="${s.wh}" ${s.active ? '
 $('pgStore').value = S.wh;
 $('pgStore').addEventListener('change', (e) => {
   if (S.dirty && !confirm('Есть несохранённые изменения. Перейти без сохранения?')) { e.target.value = S.wh; return; }
-  walkExit(); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
+  walkExit(); if (LV.on) liveToggle(false); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
 });
 document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
 document.querySelectorAll('#pgViewSeg button').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));
@@ -2248,6 +2471,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 if (USER) {
+  liveUi();
   try { init3d(); } catch (e) { console.error(e); toast('3D недоступно на этом устройстве — открыт 2D план', true); S.view = '2d'; }
   loadAll();
 }

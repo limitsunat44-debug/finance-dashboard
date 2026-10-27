@@ -239,3 +239,28 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-stage.walking .pg-3d canvas{cursor:grab;touch-action:none}
 @media (hover:none),(pointer:coarse){.pg-joy{display:block}.pg-walkhelp{display:none}.pg-walkhelp-m{display:block}}
 @media (max-width:900px){.pg-walk{font-size:12.5px;padding:9px 12px}.pg-walkhelp-m{font-size:11.5px}}
+
+/* ── люди онлайн (камеры) ── */
+.pg-live{position:absolute;right:12px;top:12px;z-index:7;display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:calc(100% - 230px);pointer-events:none}
+.pg-live>*{pointer-events:auto}
+.pg-live-b,.pg-live-c{border:0;background:#fff;color:#0f172a;font-family:inherit;font-weight:600;font-size:13px;line-height:1;padding:10px 13px;border-radius:11px;box-shadow:var(--sh);cursor:pointer;white-space:nowrap}
+.pg-live-b.on{background:#f97316;color:#fff;box-shadow:0 6px 18px rgba(249,115,22,.35)}
+#pgLiveSt:empty{display:none}
+.pg-live-st{background:rgba(15,23,42,.82);color:#fff;border-radius:10px;padding:6px 11px;font-size:12.5px;line-height:1.3;display:flex;flex-direction:column}
+.pg-live-st small{opacity:.78;font-size:11px}
+.pg-live-st.err{background:#b91c1c}
+.pg-stage.walking .pg-live{top:62px}
+.pg-cc .pg-cc-top{flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}
+.pg-cc select,.pg-cc input{font-family:inherit;font-size:13px;padding:7px 9px;border:1px solid #cbd5e1;border-radius:8px}
+.pg-cc input{width:64px}
+.pg-cc-n{font-size:12.5px;color:#334155}
+.pg-cc-grid{display:grid;grid-template-columns:3fr 2fr;gap:10px;align-items:start}
+.pg-cc-img,.pg-cc-plan{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;min-height:220px;overflow:hidden}
+.pg-cc-plan svg{width:100%;height:auto;display:block}
+.pg-cc-wrap{position:relative;line-height:0}
+.pg-cc-wrap img{width:100%;height:auto;display:block}
+.pg-cc-wrap svg{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair}
+.pg-cc-set{flex-wrap:wrap;gap:10px;align-items:center;margin-top:10px;font-size:13px}
+.pg-cc-set label{display:flex;align-items:center;gap:6px}
+@media (max-width:760px){.pg-cc-grid{grid-template-columns:1fr}.pg-live{max-width:calc(100% - 24px);top:56px}.pg-live-b,.pg-live-c{font-size:12px;padding:8px 10px}}
+.pg-stage.v2d .pg-live{top:auto;bottom:56px}

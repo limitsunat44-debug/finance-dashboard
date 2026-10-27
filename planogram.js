@@ -407,7 +407,7 @@ function changed(rebuild3d = true) { setDirty(true); renderAll(rebuild3d); }
 
 // ═══════════════════════ 3D ═══════════════════════
 const G = { renderer: null, label: null, scene: null, cam: null, ctl: null, root: null, walls: [], pick: [], tex: new Map(), drag: null, built: false };
-if (/[?&]debug=1/.test(location.search)) window.__pg = { G, S, renderAll: (...a) => renderAll(...a), pegNorm, select: (x) => select(x) };
+if (/[?&]debug=1/.test(location.search)) window.__pg = { G, S, renderAll: (...a) => renderAll(...a), pegNorm, select: (x) => select(x), walkStep: (dt) => walkStep(dt), get WK() { return WK; } };
 const SHARED_GEO = new Set();
 function init3d() {
   const host = $('pg3d');
@@ -437,10 +437,12 @@ function init3d() {
   const fill = new THREE.DirectionalLight(0xe8f0ff, 0.35); fill.position.set(-10, 8, -6); G.scene.add(fill);
   const ro = new ResizeObserver(resize3d); ro.observe(host);
   bind3dPointer();
+  bindWalk();
   (function loop() {
     requestAnimationFrame(loop);
-    if (S.view !== '3d' || S.zone !== 'hall') return;
-    G.ctl.update();
+    if (S.view !== '3d' || S.zone !== 'hall') { G.lt = 0; return; }
+    const now = performance.now(), dt = G.lt ? Math.min(0.1, (now - G.lt) / 1000) : 0; G.lt = now;
+    if (G.walk) walkStep(dt); else G.ctl.update();
     updateWallFade();
     G.renderer.render(G.scene, G.cam);
     G.label.render(G.scene, G.cam);
@@ -671,6 +673,9 @@ function build3d(resetCam) {
   const floor = new THREE.Mesh(fg, pmat('floorMat', () => new THREE.MeshPhysicalMaterial({ map: floorTex(), roughness: 0.22, clearcoat: 0.7, clearcoatRoughness: 0.12, metalness: 0 })));
   floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; floor.userData.floor = true;
   G.root.add(floor); G.floor = floor;
+  // потолок — виден только в режиме прогулки (изнутри не должно быть «неба»)
+  const ceil = new THREE.Mesh(new THREE.ShapeGeometry(shape), pmat('ceilMat', () => new THREE.MeshBasicMaterial({ color: '#e4e3df', side: THREE.DoubleSide })));
+  ceil.rotation.x = -Math.PI / 2; ceil.position.y = H; ceil.visible = !!G.walk; G.root.add(ceil); G.ceil = ceil;
   // стены: нижний пояс всегда, верх прячется, если стена между камерой и залом
   const wallM = mat('#f3f1ed', { roughness: 0.92 });
   const outM = mat('#dfe3ea', { roughness: 0.9 });
@@ -768,7 +773,8 @@ function build3d(resetCam) {
   // свет
   G.sun.position.set(cx + span * 0.35, span * 1.3, cy + span * 0.55); G.sun.target.position.set(cx, 0, cy);
   const sc = G.sun.shadow.camera; sc.left = -span * 0.8; sc.right = span * 0.8; sc.top = span * 0.8; sc.bottom = -span * 0.8; sc.far = span * 4; sc.updateProjectionMatrix();
-  if (resetCam || !G.built) {
+  if (G.walk) { /* камера в режиме прогулки остаётся на месте */ }
+  else if (resetCam || !G.built) {
     const host = $('pg3d'); const asp = host.clientWidth && host.clientHeight ? host.clientWidth / host.clientHeight : 1.5;
     const k = asp < 1 ? 1.75 : asp < 1.3 ? 1.25 : 0.97;
     G.cam.position.set(cx - span * 0.42 * k, span * 1.05 * k, b.y1 + span * 0.62 * k);
@@ -1257,7 +1263,7 @@ function bind3dPointer() {
   const setNdc = (e) => { const r = el.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, G.cam); };
   el.addEventListener('pointerdown', (e) => {
     down = { x: e.clientX, y: e.clientY };
-    if (!S.edit) return;
+    if (!S.edit || G.walk) return;
     if (e.button && e.button !== 0) return;
     setNdc(e);
     const hit = ray.intersectObjects(G.pick, false)[0];
@@ -1290,12 +1296,195 @@ function bind3dPointer() {
     if (moved) return;
     setNdc(e);
     const hit = ray.intersectObjects(G.pick, false)[0];
-    if (!hit) { select(null); return; }
+    if (!hit) { if (G.walk && walkToRay(ray)) return; select(null); return; }
     const u = hit.object.userData;
     if (u.qr) select({ k: 'shelf', fid: u.fid, si: u.si });
     else if (u.slot) select({ k: 'slot', fid: u.fid, si: u.si, ki: u.ki });
     else if (u.fid) select({ k: 'fx', fid: u.fid });
   });
+}
+
+// ═══════════════════════ ПРОГУЛКА (камера от первого лица) ═══════════════════════
+// Камера на высоте глаз, ходьба WASD/стрелками или джойстиком, взгляд — тянуть мышью/пальцем,
+// клик по полу — подойти к точке. Шкафы и стены не пускают сквозь себя.
+const EYE = 1.6, BODY_R = 0.24;
+const WK = { keys: new Set(), joy: { x: 0, y: 0 } };
+function walkObstacles() {
+  return zoneFx('hall').filter(f => f.type !== 'plant').map(f => { const a = f.rot * Math.PI / 180; return { x: f.x, y: f.y, hw: f.w / 2, hd: f.d / 2, c: Math.cos(a), s: Math.sin(a) }; });
+}
+function walkBlocked(x, y) {
+  const pts = S.layout.zones.hall.polygon;
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    const dx = xj - xi, dy = yj - yi, L = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - xi) * dx + (y - yi) * dy) / L));
+    if (Math.hypot(x - (xi + t * dx), y - (yi + t * dy)) < BODY_R) return true;
+  }
+  if (!inside) return true;
+  for (const o of G.walk.obs) {
+    const dx = x - o.x, dy = y - o.y;
+    const lx = dx * o.c + dy * o.s, ly = -dx * o.s + dy * o.c;
+    const qx = Math.max(Math.abs(lx) - o.hw, 0), qy = Math.max(Math.abs(ly) - o.hd, 0);
+    if (Math.hypot(qx, qy) < BODY_R) return true;
+  }
+  return false;
+}
+function walkMove(dx, dy) {
+  const w = G.walk; const stuck = walkBlocked(w.x, w.y);
+  const ok = (x, y) => stuck || !walkBlocked(x, y);
+  if (ok(w.x + dx, w.y + dy)) { w.x += dx; w.y += dy; return true; }
+  if (Math.abs(dx) > 1e-4 && ok(w.x + dx, w.y)) { w.x += dx; return true; }
+  if (Math.abs(dy) > 1e-4 && ok(w.x, w.y + dy)) { w.y += dy; return true; }
+  return false;
+}
+function walkCam() {
+  const w = G.walk;
+  G.cam.position.set(w.x, EYE + Math.sin(w.bob) * 0.012, w.y);
+  G.cam.rotation.set(w.pitch, w.yaw, 0, 'YXZ');
+}
+function walkStep(dt) {
+  const w = G.walk; if (!w) return;
+  const k = WK.keys;
+  let f = (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0) - (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - WK.joy.y;
+  let r = (k.has('KeyD') ? 1 : 0) - (k.has('KeyA') ? 1 : 0) + WK.joy.x;
+  if (k.has('ArrowLeft')) w.yaw += 1.8 * dt;
+  if (k.has('ArrowRight')) w.yaw -= 1.8 * dt;
+  if (k.has('KeyQ')) w.yaw += 1.8 * dt;
+  if (k.has('KeyE')) w.yaw -= 1.8 * dt;
+  const sp = (k.has('ShiftLeft') || k.has('ShiftRight') ? 2.6 : 1.4) * dt;
+  const sy = Math.sin(w.yaw), cy = Math.cos(w.yaw);
+  let mx = 0, my = 0;
+  const m = Math.hypot(f, r);
+  if (m > 0.05) {
+    w.goal = null;
+    if (m > 1) { f /= m; r /= m; }
+    mx = (-sy * f + cy * r) * sp; my = (-cy * f - sy * r) * sp;
+  } else if (w.goal) {
+    const gx = w.goal.x - w.x, gy = w.goal.y - w.y, d = Math.hypot(gx, gy);
+    if (d < 0.08) w.goal = null;
+    else {
+      const st = Math.min(d, 1.6 * dt); mx = gx / d * st; my = gy / d * st;
+      let da = Math.atan2(-gx, -gy) - w.yaw; da = Math.atan2(Math.sin(da), Math.cos(da));
+      w.yaw += da * Math.min(1, dt * 4);
+    }
+  }
+  if (mx || my) { if (walkMove(mx, my)) w.bob += dt * 9; else w.goal = null; }
+  walkCam();
+  if ((G.fr || 0) % 4 === 0) walkMiniMap();
+}
+function walkToRay(ray) {
+  if (!G.floor) return false;
+  const h = ray.intersectObject(G.floor, false)[0];
+  if (!h) return false;
+  G.walk.goal = { x: h.point.x, y: h.point.z };
+  return true;
+}
+function walkMiniMap() {
+  const svg = document.querySelector('#pgInset svg'); if (!svg || !G.walk) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  let g = svg.querySelector('#pgMe');
+  if (!g) {
+    g = document.createElementNS(NS, 'g'); g.id = 'pgMe';
+    g.innerHTML = '<path d="M0,0 L-0.55,-1.1 A1.25,1.25 0 0 1 0.55,-1.1 Z" fill="rgba(37,99,235,.28)"/><circle r="0.2" fill="#2563eb" stroke="#fff" stroke-width="0.07"/>';
+    svg.appendChild(g);
+  }
+  const w = G.walk; const deg = -w.yaw * 180 / Math.PI;
+  g.setAttribute('transform', `translate(${w.x.toFixed(2)},${w.y.toFixed(2)}) rotate(${deg.toFixed(1)})`);
+}
+function walkStart() {
+  if (G.walk || !G.cam || !S.layout || S.view !== '3d' || S.zone !== 'hall') return;
+  const z = S.layout.zones.hall, pts = z.polygon;
+  const cx = pts.reduce((a, p) => a + p[0], 0) / pts.length, cy = pts.reduce((a, p) => a + p[1], 0) / pts.length;
+  let x = cx, y = cy, yaw = Math.atan2(-1, 0);
+  if (z.door && pts[z.door.edge]) {
+    const p = pts[z.door.edge], q = pts[(z.door.edge + 1) % pts.length];
+    const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy) || 1;
+    let nx = -dy / L, ny = dx / L;
+    const px = p[0] + dx * z.door.t, py = p[1] + dy * z.door.t;
+    if ((cx - px) * nx + (cy - py) * ny < 0) { nx = -nx; ny = -ny; }
+    yaw = Math.atan2(-nx, -ny);
+    // точка у двери, откуда впереди свободный проход хотя бы 1,5 м (не утыкаться в остров)
+    const ux = dx / L, uy = dy / L, half = Math.max(0, z.door.w / 2 - 0.3);
+    const obs = walkObstacles(); G.walk = { obs };
+    let best = null;
+    for (let o = 0; o <= half + 1.2 && !best; o += 0.15) for (const sg of o ? [1, -1] : [1]) {
+      const sx = px + nx * 0.7 + ux * o * sg, sy = py + ny * 0.7 + uy * o * sg;
+      let free = !walkBlocked(sx, sy);
+      for (let t = 0.2; free && t <= 1.5; t += 0.2) free = !walkBlocked(sx + nx * t, sy + ny * t);
+      if (free) { best = [sx, sy]; break; }
+    }
+    G.walk = null;
+    [x, y] = best || [px + nx * 0.7, py + ny * 0.7];
+  }
+  G.walk = { x, y, yaw, pitch: -0.08, bob: 0, goal: null, obs: walkObstacles(),
+    save: { pos: G.cam.position.clone(), tgt: G.ctl.target.clone(), fov: G.cam.fov } };
+  // если у двери тесно — ищем ближайшую свободную точку по спирали
+  if (walkBlocked(x, y)) {
+    outer: for (let r = 0.2; r < 4; r += 0.2) for (let a = 0; a < 6.28; a += 0.4) { const tx = x + Math.cos(a) * r, ty = y + Math.sin(a) * r; if (!walkBlocked(tx, ty)) { G.walk.x = tx; G.walk.y = ty; break outer; } }
+  }
+  G.ctl.enabled = false;
+  const host = $('pg3d'); G.cam.fov = host.clientWidth < host.clientHeight ? 74 : 66; G.cam.near = 0.05; G.cam.updateProjectionMatrix();
+  if (G.ceil) G.ceil.visible = true;
+  $('pgStage').classList.add('walking');
+  $('pgWalkUi').hidden = false;
+  walkCam(); renderAll(false);
+}
+function walkExit() {
+  const w = G.walk; if (!w) return;
+  G.walk = null; WK.keys.clear(); WK.joy.x = WK.joy.y = 0;
+  G.cam.fov = w.save.fov; G.cam.near = 0.1; G.cam.updateProjectionMatrix();
+  G.cam.position.copy(w.save.pos); G.ctl.target.copy(w.save.tgt); G.ctl.enabled = true; G.ctl.update();
+  if (G.ceil) G.ceil.visible = false;
+  $('pgStage').classList.remove('walking');
+  $('pgWalkUi').hidden = true;
+  const me = document.querySelector('#pgMe'); if (me) me.remove();
+  renderAll(false);
+}
+function bindWalk() {
+  const wb = $('pgWalk'); if (!wb) return;
+  wb.addEventListener('click', walkStart);
+  $('pgWalkExit').addEventListener('click', walkExit);
+  const el = G.renderer.domElement;
+  let look = null;
+  el.addEventListener('pointerdown', (e) => { if (!G.walk) return; look = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
+  el.addEventListener('pointermove', (e) => {
+    if (!G.walk || !look || look.id !== e.pointerId) return;
+    const k = e.pointerType === 'touch' ? 0.006 : 0.0042;
+    G.walk.yaw += (e.clientX - look.x) * k; G.walk.pitch += (e.clientY - look.y) * k;
+    G.walk.pitch = Math.max(-1.15, Math.min(1.0, G.walk.pitch));
+    look.x = e.clientX; look.y = e.clientY;
+  });
+  const endLook = (e) => { if (look && look.id === e.pointerId) look = null; };
+  el.addEventListener('pointerup', endLook); el.addEventListener('pointercancel', endLook);
+  el.addEventListener('wheel', (e) => {
+    if (!G.walk) return; e.preventDefault();
+    const st = Math.max(-0.5, Math.min(0.5, -e.deltaY * 0.003));
+    walkMove(-Math.sin(G.walk.yaw) * st, -Math.cos(G.walk.yaw) * st);
+  }, { passive: false });
+  const CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
+  document.addEventListener('keydown', (e) => {
+    if (!G.walk || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || e.ctrlKey || e.metaKey) return;
+    if (e.code === 'Escape') { if ($('pgModal').hidden) walkExit(); return; }
+    if (CODES.has(e.code)) { WK.keys.add(e.code); e.preventDefault(); }
+  });
+  document.addEventListener('keyup', (e) => WK.keys.delete(e.code));
+  window.addEventListener('blur', () => WK.keys.clear());
+  // джойстик (телефон/планшет)
+  const pad = $('pgJoy'), knob = $('pgJoyK');
+  let jid = null;
+  const setJ = (e) => {
+    const r = pad.getBoundingClientRect(), R = r.width / 2;
+    let dx = e.clientX - (r.left + R), dy = e.clientY - (r.top + R); const d = Math.hypot(dx, dy);
+    if (d > R) { dx = dx / d * R; dy = dy / d * R; }
+    knob.style.transform = `translate(${dx}px,${dy}px)`;
+    WK.joy.x = dx / R; WK.joy.y = dy / R;
+  };
+  pad.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); jid = e.pointerId; try { pad.setPointerCapture(e.pointerId); } catch (_) {} setJ(e); });
+  pad.addEventListener('pointermove', (e) => { if (e.pointerId === jid) setJ(e); });
+  const jEnd = (e) => { if (e.pointerId !== jid) return; jid = null; WK.joy.x = WK.joy.y = 0; knob.style.transform = ''; };
+  pad.addEventListener('pointerup', jEnd); pad.addEventListener('pointercancel', jEnd);
 }
 
 // ═══════════════════════ 2D ═══════════════════════
@@ -2005,6 +2194,7 @@ function hint() {
   const el = $('pgHint');
   let t = '';
   if (S.shapeEdit) t = 'Форма помещения: тяните синие углы, «+» на стене — добавить угол';
+  else if (S.view === '3d' && S.zone === 'hall' && G.walk) t = '';
   else if (S.view === '3d' && S.zone === 'hall') t = S.edit ? 'Тяните шкаф мышью/пальцем, чтобы переместить · камера — по пустому месту' : 'Чтобы двигать шкафы — включите «Редактирование»';
   else t = 'Тяните шкаф, чтобы переместить · синий кружок — поворот';
   if (t === hint.last) return; hint.last = t;
@@ -2024,13 +2214,14 @@ function renderAll(rebuild3d) {
   renderKpis();
   hint();
   if (is3d) setTimeout(resize3d, 0);
+  const wb = $('pgWalk'); if (wb) wb.style.display = is3d && !G.walk ? '' : 'none';
 }
 function select(sel) {
   S.sel = sel;
   if (sel && sel.k === 'fx' && S.view === '3d') {/* камера остаётся */}
   renderAll(true);
 }
-function setView(v) { S.view = v; if (v === '3d') S.shapeEdit = false; renderAll(true); }
+function setView(v) { if (v !== '3d') walkExit(); S.view = v; if (v === '3d') S.shapeEdit = false; renderAll(true); }
 
 // ─────────── шапка ───────────
 let DEEP = null;
@@ -2043,9 +2234,9 @@ $('pgStore').innerHTML = STORES.map(s => `<option value="${s.wh}" ${s.active ? '
 $('pgStore').value = S.wh;
 $('pgStore').addEventListener('change', (e) => {
   if (S.dirty && !confirm('Есть несохранённые изменения. Перейти без сохранения?')) { e.target.value = S.wh; return; }
-  S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
+  walkExit(); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
 });
-document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
+document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
 document.querySelectorAll('#pgViewSeg button').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));
 $('pgEdit').addEventListener('change', (e) => { S.edit = e.target.checked; if (!S.edit) S.shapeEdit = false; renderAll(true); });
 $('pgSave').addEventListener('click', save);

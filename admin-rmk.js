@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.6.5';
+const RMK_VERSION = '1.6.6';
 const RMK_CHANGELOG = [
+  {
+    v: '1.6.6', date: '30.10.2026', title: 'Бонусы сотрудникам: оклад, выплаты в расходы, карточка сотрудника',
+    items: [
+      'Новый экран «Бонусы сотрудникам»: карточки (продажи, возвраты, чистые продажи, бонусы, оклады, выплачено, всего к выплате), фильтры по периоду, магазину, статусу и поиск.',
+      'В таблице можно править прямо в ячейке: % бонуса (действует на новые чеки), оклад в месяц и «Выплачено».',
+      'Кнопка «Выплатить» — сумма записывается в «Финансы → Расходы», категория «Зарплаты», магазин сотрудника. Удаление выплаты удаляет и расход. Вкладка «Выплаты» — история.',
+      'Клик по сотруднику — карточка: продажи по дням, возвраты, что продаёт чаще (детская/взрослая обувь, стельки, массажёры и т.д.), топ товаров, чеки и выполненные задачи из РМК кассира.',
+      'Экспорт таблицы в CSV.',
+    ],
+  },
   {
     v: '1.6.5', date: '29.10.2026', title: 'Доступ umed к планограмме и камерам',
     items: [
@@ -3150,221 +3160,7 @@ function whOptions(list, sel) {
     (list || []).map(w => `<option value="${esc(w.id)}" ${sel===w.id?'selected':''}>${esc(w.name)}</option>`).join('');
 }
 
-// ══════════════════════════════════════════════════════════
-//  РАЗДЕЛ: БОНУСЫ СОТРУДНИКОВ (бонус кассира от продаж)
-// ══════════════════════════════════════════════════════════
-function bonMonthStart() { return dushToday().slice(0, 8) + '01'; }
-const bonState = {
-  from: bonMonthStart(),
-  to: dushToday(),
-  shop: '',
-  seller: '',
-  status: '',
-  _all: null,
-  _rates: {},
-};
-
-async function renderBonuses(force) {
-  const box = $('bonBody');
-  box.innerHTML = `<div class="loading">⏳ Считаю бонусы кассиров…</div>`;
-  try {
-    const qs = `?action=bonus-admin-list&from=${encodeURIComponent(bonState.from)}&to=${encodeURIComponent(bonState.to)}`
-      + (bonState.shop ? `&shop=${encodeURIComponent(bonState.shop)}` : '')
-      + (bonState.seller ? `&sellerRef=${encodeURIComponent(bonState.seller)}` : '')
-      + (bonState.status ? `&status=${encodeURIComponent(bonState.status)}` : '');
-    const [d, rl] = await Promise.all([
-      posApi(qs, { method: 'GET' }),
-      posApi('?action=bonus-rates-list', { method: 'GET' }),
-    ]);
-    bonState._all = d;
-    bonState._rates = {};
-    if (rl && rl.ok && Array.isArray(rl.rates)) {
-      for (const r of rl.rates) bonState._rates[r.seller_ref_1c] = Number(r.rate_pct) || 0;
-    }
-    bonusesRenderBody();
-    bumpSync();
-  } catch (e) {
-    box.innerHTML = errBar('Не удалось загрузить бонусы: ' + (e.message || e));
-  }
-}
-
-function bonusesRenderBody() {
-  const box = $('bonBody');
-  const d = bonState._all || { sellers: [], total: {} };
-  const sellers = d.sellers || [];
-  const t = d.total || {};
-  const tOutstanding = sellers.reduce((s, x) => s + (x.outstanding || 0), 0);
-
-  const shopList = state.kassas || [];
-  const shopOpts = `<option value="" ${bonState.shop===''?'selected':''}>Все магазины</option>`
-    + shopList.map(s => `<option value="${esc(s.ref)}" ${bonState.shop===s.ref?'selected':''}>${esc(s.name)}</option>`).join('');
-  const sellerOpts = `<option value="" ${bonState.seller===''?'selected':''}>Все кассиры</option>`
-    + sellers.map(x => `<option value="${esc(x.sellerRef)}" ${bonState.seller===x.sellerRef?'selected':''}>${esc(x.sellerName||x.sellerRef)}</option>`).join('');
-  const statusOpts = ['', 'accrued', 'paid'].map(v => {
-    const lbl = v === '' ? 'Все статусы' : (v === 'accrued' ? 'Начислено' : 'Выплачено');
-    return `<option value="${v}" ${bonState.status===v?'selected':''}>${lbl}</option>`;
-  }).join('');
-
-  box.innerHTML = `
-    <div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
-      ${kpi('💵','Продажи (база)', money(t.sales||0),'g','')}
-      ${kpi('🎁','Начислено бонуса', money((t.accrued||0)+(t.paid||0)),'blue','')}
-      ${kpi('✓','Выплачено', money(t.paid||0),'gray','')}
-      ${kpi('⏳','К выплате (остаток)', money(tOutstanding),'amber','')}
-    </div>
-
-    <div class="card card-pad">
-      <div class="filters filters-row doc-filters">
-        <div class="doc-fld">
-          <label>Период</label>
-          <div class="doc-daterange">
-            <input type="date" class="finput" id="bonFrom" value="${esc(bonState.from)}">
-            <span class="doc-dash">—</span>
-            <input type="date" class="finput" id="bonTo" value="${esc(bonState.to)}">
-          </div>
-        </div>
-        <div class="doc-fld" style="min-width:170px">
-          <label>Магазин</label>
-          <select class="fselect" id="bonShop">${shopOpts}</select>
-        </div>
-        <div class="doc-fld" style="min-width:170px">
-          <label>Кассир</label>
-          <select class="fselect" id="bonSeller">${sellerOpts}</select>
-        </div>
-        <div class="doc-fld" style="min-width:150px">
-          <label>Статус</label>
-          <select class="fselect" id="bonStatus">${statusOpts}</select>
-        </div>
-        <div class="doc-fld doc-fld-btns">
-          <label>&nbsp;</label>
-          <div style="display:flex;gap:8px">
-            <button class="btn" id="bonReset">↻ Сбросить</button>
-            <button class="btn btn-primary" id="bonApply">▽ Применить</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="tbl-wrap">
-        <table class="tbl doc-tbl">
-          <thead><tr>
-            <th style="width:34px">#</th>
-            <th>Кассир</th>
-            <th class="r">Продажи</th>
-            <th class="c">Чеков</th>
-            <th class="r">Возвраты</th>
-            <th class="r">База</th>
-            <th class="c">%</th>
-            <th class="r">Начислено</th>
-            <th class="r">Выплачено</th>
-            <th class="r">Остаток</th>
-            <th class="c">Действия</th>
-          </tr></thead>
-          <tbody>${sellers.length ? sellers.map((x, i) => bonusRowHtml(x, i + 1)).join('')
-            : `<tr><td class="tbl-empty" colspan="11">Нет начислений за период</td></tr>`}</tbody>
-          <tfoot><tr class="doc-total">
-            <td></td>
-            <td class="strong">Итого</td>
-            <td class="r strong tnum">${fmtNum(t.sales||0)}</td>
-            <td class="c strong tnum">${fmtInt(t.receipts||0)}</td>
-            <td class="r strong tnum">${fmtNum(Math.abs(t.returns||0))}</td>
-            <td class="r strong tnum">${fmtNum(t.base||0)}</td>
-            <td></td>
-            <td class="r strong tnum">${fmtNum((t.accrued||0)+(t.paid||0))}</td>
-            <td class="r strong tnum">${fmtNum(t.paid||0)}</td>
-            <td class="r strong tnum">${fmtNum(tOutstanding)}</td>
-            <td></td>
-          </tr></tfoot>
-        </table>
-      </div>
-      <div class="muted" style="margin-top:10px;font-size:12px">
-        База — товары после скидок (без услуг). При изменении % старые начисления не пересчитываются (замороженный %).
-      </div>
-    </div>
-  `;
-  bonusesBindEvents();
-}
-
-function bonusRowHtml(x, num) {
-  const curRate = (bonState._rates[x.sellerRef] != null) ? bonState._rates[x.sellerRef] : (x.ratePct || 0);
-  const hasOutstanding = (x.outstanding || 0) > 0.005;
-  const payBtn = hasOutstanding
-    ? `<button class="btn btn-sm btn-primary bon-pay" data-ref="${esc(x.sellerRef)}">Выплатить</button>`
-    : (x.paid > 0.005 ? `<button class="btn btn-sm bon-unpay" data-ref="${esc(x.sellerRef)}" title="Снять отметку выплаты">✓ Выплачено</button>` : `<span class="muted">—</span>`);
-  return `<tr class="doc-row" data-ref="${esc(x.sellerRef)}">
-    <td class="c muted">${num}</td>
-    <td><div class="strong">${esc(x.sellerName||'Без имени')}</div>
-      <div class="muted" style="font-size:12px">${esc(x.shopName||'')}</div></td>
-    <td class="r strong tnum">${fmtNum(x.sales||0)}</td>
-    <td class="c tnum">${fmtInt(x.receipts||0)}</td>
-    <td class="r tnum" style="color:#b4472f">${x.returns ? '−'+fmtNum(Math.abs(x.returns)) : '—'}</td>
-    <td class="r tnum">${fmtNum(x.base||0)}</td>
-    <td class="c">
-      <div class="bon-rate">
-        <input class="finput bon-rate-inp" type="number" step="0.1" min="0" max="100"
-          data-ref="${esc(x.sellerRef)}" data-name="${esc(x.sellerName||'')}" value="${curRate}" style="width:66px;text-align:right">
-        <button class="btn btn-sm btn-ghost bon-rate-save" data-ref="${esc(x.sellerRef)}" title="Сохранить %">✓</button>
-      </div>
-    </td>
-    <td class="r tnum">${fmtNum((x.accrued||0)+(x.paid||0))}</td>
-    <td class="r tnum">${fmtNum(x.paid||0)}</td>
-    <td class="r strong tnum" style="color:${hasOutstanding?'#0a7d33':'#6b7f80'}">${fmtNum(x.outstanding||0)}</td>
-    <td class="c">${payBtn}</td>
-  </tr>`;
-}
-
-function bonusesBindEvents() {
-  const box = $('bonBody');
-  const byId = (id) => box.querySelector('#' + id);
-  const apply = () => {
-    bonState.from = (byId('bonFrom') || {}).value || bonState.from;
-    bonState.to = (byId('bonTo') || {}).value || bonState.to;
-    bonState.shop = (byId('bonShop') || {}).value || '';
-    bonState.seller = (byId('bonSeller') || {}).value || '';
-    bonState.status = (byId('bonStatus') || {}).value || '';
-    renderBonuses(true);
-  };
-  const applyBtn = byId('bonApply'); if (applyBtn) applyBtn.addEventListener('click', apply);
-  const resetBtn = byId('bonReset'); if (resetBtn) resetBtn.addEventListener('click', () => {
-    bonState.from = bonMonthStart(); bonState.to = dushToday();
-    bonState.shop = ''; bonState.seller = ''; bonState.status = '';
-    renderBonuses(true);
-  });
-  ['bonShop', 'bonSeller', 'bonStatus'].forEach(id => { const el = byId(id); if (el) el.addEventListener('change', apply); });
-
-  box.querySelectorAll('.bon-rate-save').forEach(btn => btn.addEventListener('click', async () => {
-    const ref = btn.dataset.ref;
-    const inp = box.querySelector('.bon-rate-inp[data-ref="' + cssEsc(ref) + '"]');
-    if (!inp) return;
-    const val = Number(inp.value);
-    if (!Number.isFinite(val) || val < 0 || val > 100) { docToast('Некорректный % (0..100)'); return; }
-    btn.disabled = true;
-    try {
-      const r = await posApi('?action=bonus-rate-set', {
-        method: 'POST',
-        body: JSON.stringify({ sellerRef: ref, sellerName: inp.dataset.name || null, ratePct: val, by: state.user || 'admin' }),
-      });
-      if (r && r.ok) { docToast('Ставка сохранена: ' + val + '%'); bonState._rates[ref] = val; }
-      else docToast('Ошибка: ' + ((r && r.error) || 'не сохранено'));
-    } catch (e) { docToast('Ошибка сети'); }
-    btn.disabled = false;
-  }));
-
-  const markPaid = async (ref, paid) => {
-    if (!ref) return;
-    const verb = paid ? 'отметить ВЫПЛАЧЕНО' : 'СНЯТЬ отметку выплаты';
-    if (!confirm('Кассир — ' + verb + ' за период ' + docFmtDate(bonState.from) + '–' + docFmtDate(bonState.to) + '?')) return;
-    try {
-      const r = await posApi('?action=bonus-mark-paid', {
-        method: 'POST',
-        body: JSON.stringify({ sellerRef: ref, from: bonState.from, to: bonState.to, paid, by: state.user || 'admin' }),
-      });
-      if (r && r.ok) { docToast(paid ? ('Отмечено выплачено (' + r.updated + ' чек.)') : ('Отметка снята (' + r.updated + ' чек.)')); renderBonuses(true); }
-      else docToast('Ошибка: ' + ((r && r.error) || 'не выполнено'));
-    } catch (e) { docToast('Ошибка сети'); }
-  };
-  box.querySelectorAll('.bon-pay').forEach(b => b.addEventListener('click', () => markPaid(b.dataset.ref, true)));
-  box.querySelectorAll('.bon-unpay').forEach(b => b.addEventListener('click', () => markPaid(b.dataset.ref, false)));
-}
+// РАЗДЕЛ «БОНУСЫ СОТРУДНИКАМ» — вынесен в admin-staffpay.js (v1.6.6): renderBonuses(), оклад, выплаты → расходы, карточка сотрудника.
 
 function cssEsc(s) {
   if (window.CSS && CSS.escape) return CSS.escape(s);

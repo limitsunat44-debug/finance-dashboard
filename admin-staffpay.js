@@ -243,7 +243,7 @@ async function spayOpenProfile(ref) {
   SPAY.profTab = 'overview';
   const m = spayModal(`<div class="spay-mh"><div class="spay-who big"><span class="spay-ava" style="background:${spayColor(x.sellerName)}">${esc(spayInit(x.sellerName))}</span><span><b>${esc(x.sellerName || 'Сотрудник')}</b><small>${esc(spayShop(x.shopName))} · ${docFmtDate(SPAY.from)} — ${docFmtDate(SPAY.to)}</small></span></div><button class="spay-x" data-close>✕</button></div><div id="spProf"><div class="loading">⏳ Загружаю продажи, возвраты и задачи…</div></div>`, 'lg');
   try {
-    const p = await posApi(`?action=staff-profile&sellerRef=${encodeURIComponent(ref)}&from=${SPAY.from}&to=${SPAY.to}`, { method: 'GET' });
+    const p = await posApi(`?action=staff-profile&sellerRef=${encodeURIComponent(ref)}&sellerName=${encodeURIComponent(x.sellerName || '')}&from=${SPAY.from}&to=${SPAY.to}`, { method: 'GET' });
     SPAY.prof = { p, x, m };
     spayProfRender();
   } catch (e) { const b = m.ov.querySelector('#spProf'); if (b) b.innerHTML = errBar('Не удалось загрузить: ' + (e.message || e)); }

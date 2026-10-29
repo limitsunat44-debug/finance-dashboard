@@ -7,8 +7,14 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.6.4';
+const RMK_VERSION = '1.6.5';
 const RMK_CHANGELOG = [
+  {
+    v: '1.6.5', date: '29.10.2026', title: 'Доступ umed к планограмме и камерам',
+    items: [
+      'Аккаунт umed: в меню появились «Планограмма магазина» и «Посетители (камеры)»; в планограмме доступна кнопка «⚙ Камеры» (калибровка, маски, оповещения). Остальные права umed не изменились.',
+    ],
+  },
   {
     v: '1.6.4', date: '28.10.2026', title: 'Камеры: тепловая карта, оповещения в Telegram, «ушли без покупки»',
     items: [
@@ -1065,7 +1071,7 @@ const ADMIN_ACCOUNTS = {
   // Ограниченный доступ: Перемещение товаров + Поступление товара + Поиск/История товара
   // (вкладка receiving включает: новый документ, документы поступления, поставщики — создание/редактирование)
   // search — проверка остатка/цены/статуса по штрихкоду; history — жизненный цикл экземпляра.
-  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'restock', 'receiving', 'search', 'history', 'transit'] },
+  'umed':     { password: 'umed2026',  displayName: 'Umed',     allowedTabs: ['transfer', 'restock', 'receiving', 'search', 'history', 'transit', 'planogram', 'visitors'] },
 };
 // true, если у аккаунта есть хоть какой-то доступ в админку
 function accHasAccess(acc) {
@@ -1363,9 +1369,9 @@ function applyTabAccess() {
   const items = document.querySelectorAll('.sb-item');
   let firstAllowed = null;
   items.forEach(btn => {
-    const v = btn.dataset.view;
+    const v = btn.dataset.view || btn.dataset.tab; // data-tab — ссылки (напр. планограмма), не вкладки
     if (accCanView({ allowedTabs: state.allowedTabs }, v)) {
-      if (!firstAllowed) firstAllowed = v;
+      if (!firstAllowed && btn.dataset.view) firstAllowed = v;
       btn.classList.remove('active');
     } else {
       btn.style.display = 'none'; // скрыть недоступную вкладку

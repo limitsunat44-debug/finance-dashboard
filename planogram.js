@@ -2230,7 +2230,7 @@ function setView(v) { if (v !== '3d') walkExit(); S.view = v; if (v === '3d') S.
 // Сервер раз в ~8 с берёт кадры камер магазина, находит людей и переводит «точку ног» в метры плана.
 // Кадры нигде не хранятся. Фигурки плавно переезжают к новым координатам.
 const CAMS_API = 'https://1c-sync-barcodes.vercel.app/api/cams';
-const CAM_ADMINS = ['Sunnat', 'Iskandar', 'Shahida'];
+const CAM_ADMINS = ['Sunnat', 'Iskandar', 'Shahida', 'umed']; // umed — доступ к планограмме и настройкам камер (v1.6.5)
 const LV = { on: false, data: null, figs: [], timer: 0, busy: false, gen: 0, cfg: null };
 async function capi(q, body) {
   const res = await fetch(CAMS_API + q, { method: body ? 'POST' : 'GET', headers: body ? { 'Content-Type': 'application/json', 'X-Provision-Secret': SECRET } : { 'X-Provision-Secret': SECRET }, body: body ? JSON.stringify(body) : undefined });

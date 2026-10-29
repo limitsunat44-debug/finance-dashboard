@@ -97,7 +97,9 @@ function spayTableHtml() {
       <td><button class="spay-who" data-open="${r}" title="Открыть карточку сотрудника">
         <span class="spay-ava" style="background:${spayColor(x.sellerName)}">${esc(spayInit(x.sellerName))}</span>
         <span><b>${esc(x.sellerName || 'Без имени')}</b><small>${esc([x.position, spayShop(x.shopName)].filter(Boolean).join(' · ') || '—')}</small></span></button></td>
-      <td class="r tnum strong">${spayN(x.sales)}</td>
+      <td class="r tnum strong">${x.salesEditable
+        ? `<input class="spay-inp wide${x.salesOverridden ? ' ovr' : ''}" type="number" min="0" step="1" data-k="sales" data-ref="${r}" value="${x.sales}" title="Выручка вручную (только у Искандара). Пусто — вернуть по чекам."><div class="spay-hint">${x.salesOverridden ? `по чекам ${spayN(x.salesOrig)} · <a href="#" data-salesreset="${r}">сбросить</a>` : 'можно изменить'}</div>`
+        : spayN(x.sales)}</td>
       <td class="c tnum">${fmtInt(x.receipts || 0)}</td>
       <td class="r tnum neg">${x.returns ? '−' + spayN(x.returns) : '—'}</td>
       <td class="r tnum">${spayN(net)}</td>
@@ -163,6 +165,13 @@ function spayBindBody() {
   const body = $('spBody'); if (!body) return;
   body.querySelectorAll('[data-open]').forEach(b => b.onclick = () => spayOpenProfile(b.dataset.open));
   body.querySelectorAll('[data-pay]').forEach(b => b.onclick = () => spayPayModal(b.dataset.pay));
+  body.querySelectorAll('[data-salesreset]').forEach(a => a.onclick = async (e) => {
+    e.preventDefault();
+    const x = spayFind(a.dataset.salesreset); if (!x) return;
+    if (!confirm(`Вернуть выручку «${x.sellerName}» по чекам (${spayN(x.salesOrig)} с.)?`)) return;
+    try { await posApi('?action=staff-sales-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, from: SPAY.from, to: SPAY.to, sales: null, by: spayBy() }) }); spayToast('Выручка — по чекам'); await renderBonuses(true); }
+    catch (err) { spayToast('Ошибка: ' + (err.message || err)); }
+  });
   body.querySelectorAll('[data-delpay]').forEach(b => b.onclick = () => spayDeletePayout(b.dataset.delpay));
   body.querySelectorAll('.spay-inp').forEach(inp => {
     inp.dataset.orig = inp.value;
@@ -173,8 +182,9 @@ function spayBindBody() {
 
 async function spaySaveField(inp) {
   const x = spayFind(inp.dataset.ref); if (!x) return;
-  const v = Number(inp.value);
   const k = inp.dataset.k;
+  if (k === 'sales' && inp.value.trim() === '') inp.value = String(x.salesOrig);
+  const v = Number(inp.value);
   if (!Number.isFinite(v) || v < 0 || (k === 'rate' && v > 100)) { spayToast('Некорректное значение'); inp.value = inp.dataset.orig; return; }
   if (k === 'paid') {
     const delta = Math.round((v - (x.paidOut || 0)) * 100) / 100;
@@ -186,10 +196,11 @@ async function spaySaveField(inp) {
   }
   inp.disabled = true; inp.classList.add('saving');
   try {
-    if (k === 'rate') await posApi('?action=bonus-rate-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, ratePct: v, by: spayBy() }) });
+    if (k === 'sales') await posApi('?action=staff-sales-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, from: SPAY.from, to: SPAY.to, sales: Math.abs(v - x.salesOrig) < 0.005 ? null : v, by: spayBy() }) });
+    else if (k === 'rate') await posApi('?action=bonus-rate-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, ratePct: v, by: spayBy() }) });
     else if (k === 'salary') await posApi('?action=staff-salary-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, salary: v, by: spayBy() }) });
     else await posApi('?action=staff-paid-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, from: SPAY.from, to: SPAY.to, paid: v, by: spayBy() }) });
-    spayToast(k === 'rate' ? `% бонуса сохранён: ${v}% (для новых чеков)` : k === 'salary' ? `Оклад сохранён: ${spayN(v)} с.` : 'Выплачено обновлено, расходы исправлены');
+    spayToast(k === 'sales' ? `Выручка за период: ${spayN(v)} с. — бонус пересчитан` : k === 'rate' ? `% бонуса сохранён: ${v}% (для новых чеков)` : k === 'salary' ? `Оклад сохранён: ${spayN(v)} с.` : 'Выплачено обновлено, расходы исправлены');
     await renderBonuses(true);
   } catch (e) { spayToast('Ошибка: ' + (e.message || e)); inp.value = inp.dataset.orig; inp.disabled = false; inp.classList.remove('saving'); }
 }

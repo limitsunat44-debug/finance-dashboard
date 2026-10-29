@@ -77,3 +77,6 @@
 .spay-pbody{max-height:60vh;overflow-y:auto}
 @media (max-width:760px){.spay-2col{grid-template-columns:1fr}.spay-kpi-v{font-size:17px}.spay-modal{padding:14px}}
 .spay-form .finput,.spay-form .fselect{width:100%;box-sizing:border-box}
+.spay-inp.wide{width:110px;font-weight:700}
+.spay-inp.ovr{border-color:#f59e0b;background:#fffbeb}
+.spay-hint a{color:var(--g2)}

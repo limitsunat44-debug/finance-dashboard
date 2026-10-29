@@ -87,7 +87,8 @@ function spayRender() {
 function spayTableHtml() {
   const rows = spayRows();
   const d = SPAY.data || {};
-  const sum = (k) => rows.reduce((s, x) => s + (Number(x[k]) || 0), 0);
+  // у Искандара в строке — выручка сети; в «Итого» берём его личные чеки, чтобы не задвоить
+  const sum = (k) => rows.reduce((s, x) => s + (Number(x.salesEditable && x.own && k in x.own ? x.own[k] : x[k]) || 0), 0);
   const tr = rows.map((x, i) => {
     const st = SPAY_ST[x.status] || SPAY_ST.none;
     const net = (x.sales || 0) - (x.returns || 0);
@@ -98,7 +99,7 @@ function spayTableHtml() {
         <span class="spay-ava" style="background:${spayColor(x.sellerName)}">${esc(spayInit(x.sellerName))}</span>
         <span><b>${esc(x.sellerName || 'Без имени')}</b><small>${esc([x.position, spayShop(x.shopName)].filter(Boolean).join(' · ') || '—')}</small></span></button></td>
       <td class="r tnum strong">${x.salesEditable
-        ? `<input class="spay-inp wide${x.salesOverridden ? ' ovr' : ''}" type="number" min="0" step="1" data-k="sales" data-ref="${r}" value="${x.sales}" title="Выручка вручную (только у Искандара). Пусто — вернуть по чекам."><div class="spay-hint">${x.salesOverridden ? `по чекам ${spayN(x.salesOrig)} · <a href="#" data-salesreset="${r}">сбросить</a>` : 'можно изменить'}</div>`
+        ? `<input class="spay-inp wide${x.salesOverridden ? ' ovr' : ''}" type="number" min="0" step="1" data-k="sales" data-ref="${r}" value="${x.sales}" title="По умолчанию — общая выручка сети с учётом скидки. Можно изменить; пусто — вернуть общую."><div class="spay-hint">${x.salesOverridden ? `сеть ${spayN(x.salesOrig)} · <a href="#" data-salesreset="${r}">сбросить</a>` : 'общая выручка сети'}</div>`
         : spayN(x.sales)}</td>
       <td class="c tnum">${fmtInt(x.receipts || 0)}</td>
       <td class="r tnum neg">${x.returns ? '−' + spayN(x.returns) : '—'}</td>
@@ -168,8 +169,8 @@ function spayBindBody() {
   body.querySelectorAll('[data-salesreset]').forEach(a => a.onclick = async (e) => {
     e.preventDefault();
     const x = spayFind(a.dataset.salesreset); if (!x) return;
-    if (!confirm(`Вернуть выручку «${x.sellerName}» по чекам (${spayN(x.salesOrig)} с.)?`)) return;
-    try { await posApi('?action=staff-sales-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, from: SPAY.from, to: SPAY.to, sales: null, by: spayBy() }) }); spayToast('Выручка — по чекам'); await renderBonuses(true); }
+    if (!confirm(`Вернуть у «${x.sellerName}» общую выручку сети (${spayN(x.salesOrig)} с.)?`)) return;
+    try { await posApi('?action=staff-sales-set', { method: 'POST', body: JSON.stringify({ sellerRef: x.sellerRef, sellerName: x.sellerName, from: SPAY.from, to: SPAY.to, sales: null, by: spayBy() }) }); spayToast('Выручка — общая по сети'); await renderBonuses(true); }
     catch (err) { spayToast('Ошибка: ' + (err.message || err)); }
   });
   body.querySelectorAll('[data-delpay]').forEach(b => b.onclick = () => spayDeletePayout(b.dataset.delpay));

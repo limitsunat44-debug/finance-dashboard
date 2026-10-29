@@ -7,8 +7,18 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.6.6';
+const RMK_VERSION = '1.6.7';
 const RMK_CHANGELOG = [
+  {
+    v: '1.6.7', date: '30.10.2026', title: 'Бонусы сотрудникам: диагностика, доксейлс; зарплаты только здесь',
+    items: [
+      'Диагностики берутся из ОртоCRM (docsales2): завершённые визиты сотрудника × ставка (по умолчанию 5 с.). Сотрудник сопоставляется по имени, привязку можно поменять в карточке → «Настройки».',
+      'Доксейлс — чеки РМК с отмеченным врачом × ставка (по умолчанию 5 с.). Ставки — кнопка «⚙ Ставки».',
+      '«＋ Сотрудник» — добавить сотрудника без продаж (бухгалтер, SMM, уборщица…) с окладом и магазином.',
+      'Карточка сотрудника: возвраты теперь показываются (берутся из бонусного журнала, как в таблице).',
+      'В «Финансах» убрана вкладка «Сотрудники и зарплаты». Зарплаты в прибыли = выплаты из «Бонусы сотрудникам» (категория «Зарплаты»), без двойного учёта.',
+    ],
+  },
   {
     v: '1.6.6', date: '30.10.2026', title: 'Бонусы сотрудникам: оклад, выплаты в расходы, карточка сотрудника',
     items: [
@@ -7883,7 +7893,6 @@ function finPaint() {
       ${subChip('expenses', 'Постоянные/переменные расходы')}
       ${subChip('fixed', 'Расходы по категориям')}
       ${subChip('suppliers', '🏷 Долги поставщикам')}
-      ${subChip('employees', '👥 Сотрудники и зарплаты')}
       ${subChip('compare', 'Сравнение 6 мес')}
       ${subChip('revenue', 'Выручка (ручной ввод)')}
     </div>
@@ -7910,7 +7919,7 @@ function finPaint() {
 function finPaintSub(pre) {
   if (FIN.sub === 'overview') return finPaintOverview();
   if (FIN.sub === 'suppliers') return finPaintSuppliers();
-  if (FIN.sub === 'employees') return finPaintEmployees();
+  if (FIN.sub === 'employees') { FIN.sub = 'overview'; return finPaintOverview(); } // зарплаты — в РМК → «Бонусы сотрудникам»
   if (FIN.sub === 'compare') return finPaintCompare();
   if (FIN.sub === 'revenue') return finPaintRevenue();
   // expenses / fixed → одинаковая раскладка (fixed отфильтрован в finFiltered)
@@ -8483,7 +8492,7 @@ async function finPaintOverview() {
         ${kpi('💰','Выручка', money(s.revenue),'green', 'чистая (локальная касса): продажи − возвраты')}
         ${kpi('📌','Постоянные расходы', money(s.expenses_fixed),'amber', 'аренда, оклады и т.д.')}
         ${kpi('🧾','Переменные расходы', money(s.expenses_variable),'amber', 'закуп, логистика и т.д.')}
-        ${kpi('👥','Зарплаты', money(s.payroll_total),'blue', `оклад ${fmtInt(s.payroll_oklad)} + % ${fmtInt(s.payroll_percent)}`)}
+        ${kpi('👥','Зарплаты', money(s.payroll_total),'blue', 'выплаты из «Бонусы сотрудникам»')}
         ${kpi(s.net_profit>=0?'📈':'📉','Чистая прибыль', money(s.net_profit), profitTone, s.net_profit>=0?'прибыль за период':'убыток за период')}
       </div>`;
 
@@ -8504,7 +8513,7 @@ async function finPaintOverview() {
           ${line('Постоянные расходы', s.expenses_fixed, -1, false)}
           ${line('Переменные расходы', s.expenses_variable, -1, false)}
           ${line('Выплаты поставщикам', s.supplier_payments, -1, false)}
-          ${line('Зарплаты (оклад + %)', s.payroll_total, -1, false)}
+          ${line('Зарплаты (выплаты сотрудникам)', s.payroll_total, -1, false)}
           <div class="fin-fr-sep"></div>
           ${line('ЧИСТАЯ ПРИБЫЛЬ', s.net_profit, s.net_profit>=0?1:-1, true)}
         </div>

@@ -30,6 +30,7 @@ async function renderBonuses(force) {
       const qs = `?action=staff-pay-list&from=${encodeURIComponent(SPAY.from)}&to=${encodeURIComponent(SPAY.to)}`
         + (SPAY.shop ? `&shop=${encodeURIComponent(SPAY.shop)}` : '');
       SPAY.data = await posApi(qs, { method: 'GET' });
+      if (!SPAY.salons) { try { SPAY.salons = (await posApi('?action=fin-salons', { method: 'GET' })).salons || []; } catch (_) { SPAY.salons = []; } }
       if (typeof bumpSync === 'function') bumpSync();
     } catch (e) { box.innerHTML = errBar('Не удалось загрузить бонусы: ' + (e.message || e)); return; }
   }
@@ -57,13 +58,15 @@ function spayRender() {
     <div class="spay-tabs">
       <button class="spay-tab ${SPAY.tab === 'report' ? 'on' : ''}" data-tab="report">Общий отчёт</button>
       <button class="spay-tab ${SPAY.tab === 'payouts' ? 'on' : ''}" data-tab="payouts">Выплаты</button>
-      <div class="spay-tabs-r"><button class="btn btn-ghost btn-sm" id="spayCsv">⇩ Экспорт CSV</button></div>
+      <div class="spay-tabs-r"><button class="btn btn-ghost btn-sm" id="spayRates">⚙ Ставки</button> <button class="btn btn-ghost btn-sm" id="spayAdd">＋ Сотрудник</button> <button class="btn btn-ghost btn-sm" id="spayCsv">⇩ Экспорт CSV</button></div>
     </div>
     <div class="spay-kpis">
       ${card('🧾', 'g', 'Продажи', `${spayN(t.sales)} <small>с.</small>`, `${fmtInt(t.receipts || 0)} чеков`)}
       ${card('↩', 'r', 'Возвраты', `${spayN(t.returns)} <small>с.</small>`, `${fmtInt(t.retReceipts || 0)} чеков`)}
       ${card('🛒', 'b', 'Чистые продажи', `${spayN(net)} <small>с.</small>`, '')}
       ${card('%', 'v', 'Бонусы от продаж', `${spayN(t.bonus)} <small>с.</small>`, net > 0 ? `в среднем ${(t.bonus / net * 100).toFixed(1)}%` : '')}
+      ${card('🩺', 'a', `Диагностика <small>(${spayN(d.rates && d.rates.diag)} с.)</small>`, `${spayN(t.diagBonus)} <small>с.</small>`, d.dsError ? '⚠ ОртоCRM недоступна' : `${fmtInt(t.diagCount || 0)} диагностик`)}
+      ${card('📄', 'b', `Доксейлс <small>(${spayN(d.rates && d.rates.docsale)} с.)</small>`, `${spayN(t.docBonus)} <small>с.</small>`, `${fmtInt(t.docCount || 0)} чеков с врачом`)}
       ${card('💼', 'a', 'Оклады', `${spayN(t.salary)} <small>с.</small>`, d.months > 1 ? `за ${d.months} мес.` : 'за месяц')}
       ${card('✓', 'gr', 'Выплачено', `${spayN(t.paidOut)} <small>с.</small>`, 'попадает в расходы')}
       ${card('≡', 'g', 'Всего к выплате', `${spayN(t.rest)} <small>с.</small>`, `начислено ${spayN(t.total)} с.`, true)}
@@ -94,13 +97,15 @@ function spayTableHtml() {
       <td class="c muted">${i + 1}</td>
       <td><button class="spay-who" data-open="${r}" title="Открыть карточку сотрудника">
         <span class="spay-ava" style="background:${spayColor(x.sellerName)}">${esc(spayInit(x.sellerName))}</span>
-        <span><b>${esc(x.sellerName || 'Без имени')}</b><small>${esc(spayShop(x.shopName) || '—')}</small></span></button></td>
+        <span><b>${esc(x.sellerName || 'Без имени')}</b><small>${esc([x.position, spayShop(x.shopName)].filter(Boolean).join(' · ') || '—')}</small></span></button></td>
       <td class="r tnum strong">${spayN(x.sales)}</td>
       <td class="c tnum">${fmtInt(x.receipts || 0)}</td>
       <td class="r tnum neg">${x.returns ? '−' + spayN(x.returns) : '—'}</td>
       <td class="r tnum">${spayN(net)}</td>
-      <td class="c"><input class="spay-inp pct" type="number" min="0" max="100" step="0.1" data-k="rate" data-ref="${r}" value="${x.ratePct}" title="% бонуса — для новых чеков"><span class="spay-u">%</span></td>
+      <td class="c">${x.manual ? '<span class="muted">—</span>' : `<input class="spay-inp pct" type="number" min="0" max="100" step="0.1" data-k="rate" data-ref="${r}" value="${x.ratePct}" title="% бонуса — для новых чеков"><span class="spay-u">%</span>`}</td>
       <td class="r tnum">${spayN(x.bonus)}</td>
+      <td class="r tnum" title="${x.dsProfileName ? 'ОртоCRM: ' + esc(x.dsProfileName) : 'нет привязки к ОртоCRM'}">${x.diagCount ? `${spayN(x.diagBonus)}<div class="spay-hint">${fmtInt(x.diagCount)} шт</div>` : (x.dsProfileId ? '0' : '<span class="muted">—</span>')}</td>
+      <td class="r tnum">${x.docCount ? `${spayN(x.docBonus)}<div class="spay-hint">${fmtInt(x.docCount)} чек.</div>` : '<span class="muted">—</span>'}</td>
       <td class="r"><input class="spay-inp" type="number" min="0" step="50" data-k="salary" data-ref="${r}" value="${x.salaryMonthly || 0}" title="Оклад в месяц">${d.months > 1 ? `<div class="spay-hint">×${d.months} = ${spayN(x.salary)}</div>` : ''}</td>
       <td class="r tnum strong">${spayN(x.total)}</td>
       <td class="r"><input class="spay-inp" type="number" min="0" step="1" data-k="paid" data-ref="${r}" value="${x.paidOut || 0}" title="Выплачено за период — изменение создаёт/правит расход"></td>
@@ -114,13 +119,13 @@ function spayTableHtml() {
   return `<div class="tbl-wrap spay-wrap"><table class="tbl spay-tbl">
     <thead>
       <tr><th rowspan="2" class="c">#</th><th rowspan="2">Сотрудник</th><th rowspan="2" class="r">Продажи<br><small>с учётом скидки</small></th><th rowspan="2" class="c">Чеки</th><th rowspan="2" class="r">Возвраты</th><th rowspan="2" class="r">Чистые<br>продажи</th>
-        <th colspan="2" class="c grp">Бонус</th><th rowspan="2" class="r">Оклад<br><small>в месяц</small></th><th rowspan="2" class="r">Всего<br>начислено</th><th rowspan="2" class="r">Выплачено</th><th rowspan="2" class="r">Остаток<br>к выплате</th><th rowspan="2" class="c">Статус</th><th rowspan="2" class="c">Действия</th></tr>
-      <tr><th class="c grp">%</th><th class="r grp">От продаж</th></tr>
+        <th colspan="4" class="c grp">Бонусы</th><th rowspan="2" class="r">Оклад<br><small>в месяц</small></th><th rowspan="2" class="r">Всего<br>начислено</th><th rowspan="2" class="r">Выплачено</th><th rowspan="2" class="r">Остаток<br>к выплате</th><th rowspan="2" class="c">Статус</th><th rowspan="2" class="c">Действия</th></tr>
+      <tr><th class="c grp">%</th><th class="r grp">От продаж</th><th class="r grp">Диагностика<br><small>${spayN(d.rates && d.rates.diag)} с./шт</small></th><th class="r grp">Доксейлс<br><small>${spayN(d.rates && d.rates.docsale)} с./чек</small></th></tr>
     </thead>
-    <tbody>${tr || `<tr><td colspan="14" class="tbl-empty">Нет данных за период</td></tr>`}</tbody>
-    <tfoot><tr class="spay-total"><td></td><td>Итого</td><td class="r tnum">${spayN(sum('sales'))}</td><td class="c tnum">${fmtInt(sum('receipts'))}</td><td class="r tnum neg">${spayN(sum('returns'))}</td><td class="r tnum">${spayN(sum('sales') - sum('returns'))}</td><td></td><td class="r tnum">${spayN(sum('bonus'))}</td><td class="r tnum">${spayN(sum('salary'))}</td><td class="r tnum">${spayN(sum('total'))}</td><td class="r tnum">${spayN(sum('paidOut'))}</td><td class="r tnum pos">${spayN(sum('rest'))}</td><td></td><td></td></tr></tfoot>
+    <tbody>${tr || `<tr><td colspan="16" class="tbl-empty">Нет данных за период</td></tr>`}</tbody>
+    <tfoot><tr class="spay-total"><td></td><td>Итого</td><td class="r tnum">${spayN(sum('sales'))}</td><td class="c tnum">${fmtInt(sum('receipts'))}</td><td class="r tnum neg">${spayN(sum('returns'))}</td><td class="r tnum">${spayN(sum('sales') - sum('returns'))}</td><td></td><td class="r tnum">${spayN(sum('bonus'))}</td><td class="r tnum">${spayN(sum('diagBonus'))}</td><td class="r tnum">${spayN(sum('docBonus'))}</td><td class="r tnum">${spayN(sum('salary'))}</td><td class="r tnum">${spayN(sum('total'))}</td><td class="r tnum">${spayN(sum('paidOut'))}</td><td class="r tnum pos">${spayN(sum('rest'))}</td><td></td><td></td></tr></tfoot>
   </table></div>
-  <div class="spay-note">% бонуса — для новых чеков (уже начисленные не пересчитываются). Оклад — сумма в месяц. «Выплачено» можно исправить вручную: разница сама добавится или уберётся из расходов. Каждая выплата попадает в «Финансы → Расходы», категория «Зарплаты».</div>`;
+  ${d.dsError ? `<div class="spay-warn">Диагностики из ОртоCRM не загрузились: ${esc(d.dsError)}</div>` : ''}<div class="spay-note">Диагностика — завершённые визиты в ОртоCRM (docsales2), сотрудник сопоставляется по имени (привязку можно изменить в карточке). Доксейлс — чеки РМК с отмеченным врачом. % бонуса — для новых чеков (уже начисленные не пересчитываются). Оклад — сумма в месяц. «Выплачено» можно исправить вручную: разница сама добавится или уберётся из расходов. Каждая выплата попадает в «Финансы → Расходы», категория «Зарплаты».</div>`;
 }
 
 function spayPayoutsHtml() {
@@ -151,6 +156,8 @@ function spayBind() {
   q('#spReset').onclick = () => { SPAY.to = dushToday(); SPAY.from = SPAY.to.slice(0, 8) + '01'; SPAY.shop = ''; SPAY.status = ''; SPAY.q = ''; renderBonuses(true); };
   box.querySelectorAll('.spay-tab').forEach(b => b.onclick = () => { SPAY.tab = b.dataset.tab; spayRender(); });
   q('#spayCsv').onclick = spayCsv;
+  q('#spayRates').onclick = spayRatesModal;
+  q('#spayAdd').onclick = spayAddModal;
   spayBindBody();
 }
 
@@ -209,6 +216,7 @@ function spayPayModal(ref) {
     <div class="spay-mh"><div><h3>Выплата сотруднику</h3><div class="muted">${esc(x.sellerName)} · ${esc(spayShop(x.shopName))} · ${per}</div></div><button class="spay-x" data-close>✕</button></div>
     <div class="spay-paygrid">
       <div><span>Бонус от продаж</span><b>${spayN(x.bonus)} с.</b></div>
+      <div><span>Диагностика + доксейлс</span><b>${spayN((x.diagBonus || 0) + (x.docBonus || 0))} с.</b></div>
       <div><span>Оклад</span><b>${spayN(x.salary)} с.</b></div>
       <div><span>Уже выплачено</span><b>${spayN(x.paidOut)} с.</b></div>
       <div class="hl"><span>Остаток</span><b>${spayN(x.rest)} с.</b></div>
@@ -252,7 +260,7 @@ async function spayOpenProfile(ref) {
 function spayProfRender() {
   const { p, x, m } = SPAY.prof; const box = m.ov.querySelector('#spProf'); if (!box) return;
   const s = p.summary || {};
-  const tabs = [['overview', 'Обзор'], ['receipts', `Чеки (${s.receipts || 0})`], ['returns', `Возвраты (${s.retReceipts || 0})`], ['tasks', `Задачи (${(p.tasks && p.tasks.done) || 0})`]];
+  const tabs = [['overview', 'Обзор'], ['settings', 'Настройки'], ['receipts', `Чеки (${s.receipts || 0})`], ['returns', `Возвраты (${s.retReceipts || 0})`], ['tasks', `Задачи (${(p.tasks && p.tasks.done) || 0})`]];
   const mini = (l, v, cls) => `<div class="spay-mini ${cls || ''}"><span>${l}</span><b class="tnum">${v}</b></div>`;
   let body = '';
   if (SPAY.profTab === 'overview') {
@@ -267,6 +275,16 @@ function spayProfRender() {
     body = `<table class="tbl spay-mt"><thead><tr><th>Дата</th><th>Чек</th><th>Магазин</th><th class="c">Товаров</th><th class="r">Сумма</th></tr></thead><tbody>${(p.receiptsList || []).map(r => `<tr><td>${spayDT(r.at)}</td><td>${esc(r.number || '—')}</td><td>${esc(spayShop(r.shop))}</td><td class="c">${fmtInt(r.items || 0)}</td><td class="r tnum strong">${spayN(r.total)}</td></tr>`).join('') || '<tr><td colspan="5" class="tbl-empty">Нет чеков</td></tr>'}</tbody></table>${(s.receipts || 0) > 50 ? '<div class="spay-note">Показаны последние 50 чеков.</div>' : ''}`;
   } else if (SPAY.profTab === 'returns') {
     body = `<table class="tbl spay-mt"><thead><tr><th>Дата</th><th>Чек возврата</th><th>Магазин</th><th class="r">Сумма</th></tr></thead><tbody>${(p.returnsList || []).map(r => `<tr><td>${spayDT(r.at)}</td><td>${esc(r.number || '—')}</td><td>${esc(spayShop(r.shop))}</td><td class="r tnum neg">−${spayN(r.total)}</td></tr>`).join('') || '<tr><td colspan="4" class="tbl-empty">Возвратов нет</td></tr>'}</tbody></table>`;
+  } else if (SPAY.profTab === 'settings') {
+    const D = SPAY.data || {};
+    const shopOpts = `<option value="">— не выбран —</option>` + (SPAY.salons || []).map(k => `<option value="${esc(k.warehouse_id)}" data-name="${esc(k.name)}" ${x.shopName === k.name ? 'selected' : ''}>${esc(k.name)}</option>`).join('');
+    const dsOpts = `<option value="" ${!x.dsLink ? 'selected' : ''}>Авто по имени${x.dsProfileName && !x.dsLink ? ' (' + esc(x.dsProfileName) + ')' : ''}</option><option value="none" ${x.dsLink === 'none' ? 'selected' : ''}>Не учитывать диагностики</option>` + (D.dsProfiles || []).map(pp => `<option value="${esc(pp.id)}" ${x.dsLink === pp.id ? 'selected' : ''}>${esc(pp.name)} — ${fmtInt(pp.diag)} за период</option>`).join('');
+    body = `<div class="spay-form">
+      <label class="spay-lbl">Должность</label><input class="finput" id="spfPos" value="${esc(x.position || '')}" placeholder="Продавец-консультант">
+      <label class="spay-lbl">Аккаунт в ОртоCRM (откуда берутся диагностики)</label><select class="fselect" id="spfDs">${dsOpts}</select>
+      ${x.manual ? `<label class="spay-lbl">Магазин (для расхода)</label><select class="fselect" id="spfShop">${shopOpts}</select>` : ''}
+      <label class="spay-lbl" style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="spfHide" ${x.hidden ? 'checked' : ''}> Скрыть из списка (уволен / не работает)</label>
+      <div class="spay-mf"><button class="btn btn-primary" id="spfSave">Сохранить</button></div></div>`;
   } else {
     const T = p.tasks || { list: [] };
     const ST = { open: 'Открыта', review: 'На проверке', done: 'Выполнена', rejected: 'Отклонена', cancelled: 'Отменена', expired: 'Просрочена', resolved: 'Закрыта сама', skipped: 'Нет товара' };
@@ -277,11 +295,21 @@ function spayProfRender() {
   box.innerHTML = `
     <div class="spay-minis">
       ${mini('Продажи', spayN(s.sales) + ' с.', 'g')}${mini('Чеков', fmtInt(s.receipts || 0))}${mini('Возвраты', spayN(s.returns) + ' с.', 'r')}${mini('Чистые', spayN(s.net) + ' с.', 'b')}${mini('Средний чек', spayN(s.avgReceipt) + ' с.')}${mini('Товаров продано', fmtInt(s.items || 0))}
-      ${x.total != null ? mini('Бонус + оклад', spayN(x.total) + ' с.', 'v') + mini('Остаток к выплате', spayN(x.rest) + ' с.', 'a') : ''}
+      ${x.diagCount != null ? mini('Диагностик', fmtInt(x.diagCount) + ' · ' + spayN(x.diagBonus) + ' с.', 'a') + mini('Чеков с врачом', fmtInt(x.docCount) + ' · ' + spayN(x.docBonus) + ' с.', 'b') : ''}
+      ${x.total != null ? mini('Всего начислено', spayN(x.total) + ' с.', 'v') + mini('Остаток к выплате', spayN(x.rest) + ' с.', 'a') : ''}
     </div>
     <div class="spay-tabs sm">${tabs.map(([k, l]) => `<button class="spay-tab ${SPAY.profTab === k ? 'on' : ''}" data-pt="${k}">${l}</button>`).join('')}</div>
     <div class="spay-pbody">${body}</div>`;
   box.querySelectorAll('[data-pt]').forEach(b => b.onclick = () => { SPAY.profTab = b.dataset.pt; spayProfRender(); });
+  const sv = box.querySelector('#spfSave');
+  if (sv) sv.onclick = async () => {
+    const body = { sellerRef: x.sellerRef, position: box.querySelector('#spfPos').value.trim(), dsProfileId: box.querySelector('#spfDs').value, hidden: box.querySelector('#spfHide').checked, by: spayBy() };
+    const sh = box.querySelector('#spfShop');
+    if (sh) { body.whId = sh.value || null; body.shopName = sh.value ? sh.selectedOptions[0].dataset.name : null; }
+    sv.disabled = true;
+    try { await posApi('?action=staff-employee-update', { method: 'POST', body: JSON.stringify(body) }); spayToast('Сохранено'); m.close(); await renderBonuses(true); }
+    catch (e) { spayToast('Ошибка: ' + (e.message || e)); sv.disabled = false; }
+  };
   if (SPAY.profTab === 'overview') spayDrawChart(p.days || []);
 }
 
@@ -301,9 +329,40 @@ function spayDrawChart(days) {
 function spayCsv() {
   const rows = spayRows();
   if (!rows.length) { spayToast('Нет данных для экспорта'); return; }
-  const head = ['Сотрудник', 'Магазин', 'Продажи', 'Чеки', 'Возвраты', 'Чистые продажи', '% бонуса', 'Бонус', 'Оклад', 'Всего начислено', 'Выплачено', 'Остаток', 'Статус'];
-  const data = rows.map(x => [x.sellerName, spayShop(x.shopName), x.sales, x.receipts, x.returns, (x.sales || 0) - (x.returns || 0), x.ratePct, x.bonus, x.salary, x.total, x.paidOut, x.rest, (SPAY_ST[x.status] || SPAY_ST.none)[0]]);
+  const head = ['Сотрудник', 'Магазин', 'Продажи', 'Чеки', 'Возвраты', 'Чистые продажи', '% бонуса', 'Бонус', 'Диагностик', 'Бонус диагн.', 'Чеков с врачом', 'Доксейлс', 'Оклад', 'Всего начислено', 'Выплачено', 'Остаток', 'Статус'];
+  const data = rows.map(x => [x.sellerName, spayShop(x.shopName), x.sales, x.receipts, x.returns, (x.sales || 0) - (x.returns || 0), x.ratePct, x.bonus, x.diagCount, x.diagBonus, x.docCount, x.docBonus, x.salary, x.total, x.paidOut, x.rest, (SPAY_ST[x.status] || SPAY_ST.none)[0]]);
   const csv = '\uFEFF' + [head, ...data].map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(';')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = `бонусы_сотрудникам_${SPAY.from}_${SPAY.to}.csv`; document.body.appendChild(a); a.click(); a.remove();
+}
+
+function spayRatesModal() {
+  const r = (SPAY.data && SPAY.data.rates) || { diag: 5, docsale: 5 };
+  const m = spayModal(`
+    <div class="spay-mh"><div><h3>Ставки бонусов</h3><div class="muted">Действуют на весь выбранный период</div></div><button class="spay-x" data-close>✕</button></div>
+    <label class="spay-lbl">Диагностика — с. за каждую (ОртоCRM)</label><input class="finput" id="srDiag" type="number" min="0" step="0.5" value="${r.diag}">
+    <label class="spay-lbl">Доксейлс — с. за каждый чек с врачом</label><input class="finput" id="srDoc" type="number" min="0" step="0.5" value="${r.docsale}">
+    <div class="spay-note">% от продаж задаётся каждому продавцу в таблице.</div>
+    <div class="spay-mf"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-primary" id="srGo">Сохранить</button></div>`, 'sm');
+  m.ov.querySelector('#srGo').onclick = async () => {
+    try { await posApi('?action=staff-rates-set', { method: 'POST', body: JSON.stringify({ diag: Number(m.ov.querySelector('#srDiag').value), docsale: Number(m.ov.querySelector('#srDoc').value), by: spayBy() }) }); m.close(); spayToast('Ставки сохранены'); await renderBonuses(true); }
+    catch (e) { spayToast('Ошибка: ' + (e.message || e)); }
+  };
+}
+function spayAddModal() {
+  const shopOpts = `<option value="">Офис / сеть (общий расход)</option>` + (SPAY.salons || []).map(k => `<option value="${esc(k.warehouse_id)}" data-name="${esc(k.name)}">${esc(k.name)}</option>`).join('');
+  const m = spayModal(`
+    <div class="spay-mh"><div><h3>Сотрудник без продаж</h3><div class="muted">Бухгалтер, SMM, курьер, уборщица… — только оклад</div></div><button class="spay-x" data-close>✕</button></div>
+    <label class="spay-lbl">Имя</label><input class="finput" id="saName">
+    <label class="spay-lbl">Должность</label><input class="finput" id="saPos">
+    <label class="spay-lbl">Магазин (на него пойдёт расход)</label><select class="fselect" id="saShop">${shopOpts}</select>
+    <label class="spay-lbl">Оклад в месяц, с.</label><input class="finput" id="saSal" type="number" min="0" step="50" value="0">
+    <div class="spay-mf"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-primary" id="saGo">Добавить</button></div>`, 'sm');
+  m.ov.querySelector('#saGo').onclick = async () => {
+    const sh = m.ov.querySelector('#saShop');
+    const body = { name: m.ov.querySelector('#saName').value.trim(), position: m.ov.querySelector('#saPos').value.trim(), whId: sh.value || null, shopName: sh.value ? sh.selectedOptions[0].dataset.name : null, salary: Number(m.ov.querySelector('#saSal').value) || 0, by: spayBy() };
+    if (!body.name) { spayToast('Укажите имя'); return; }
+    try { await posApi('?action=staff-employee-add', { method: 'POST', body: JSON.stringify(body) }); m.close(); spayToast('Сотрудник добавлен'); await renderBonuses(true); }
+    catch (e) { spayToast('Ошибка: ' + (e.message || e)); }
+  };
 }

@@ -5,7 +5,7 @@
 //  Использует хелперы admin-rmk.js: $, esc, state, svcFetch, BARCODE_SVC_URL, BARCODE_SVC_SECRET.
 // ══════════════════════════════════════════════════════════
 const ATK = {
-  tab: 'list', f: { wh: 'all', status: 'active', kind: '', seller: '' },
+  tab: 'list', f: { wh: 'all', status: 'active', kind: '', seller: '', prio: '', q: '', from: '', to: '' }, all: [], menu: null,
   rows: [], shops: [], emps: null, settings: null, ai: { ref: '', stats: null, drafts: [], mix: { low: 1, mid: 2, high: 1 }, focus: '', summary: '', busy: false },
   form: { title: '', desc: '', wh: '', who: '', prio: 'mid', points: '', due: '' },
 };
@@ -42,27 +42,201 @@ async function renderTasks(force) {
   atkDraw();
 }
 async function atkLoad(sync) {
-  const f = ATK.f;
-  const qs = `&wh=${encodeURIComponent(f.wh)}&status=${encodeURIComponent(f.status)}${f.kind ? '&kind=' + f.kind : ''}${f.seller ? '&seller=' + encodeURIComponent(f.seller) : ''}${sync ? '' : '&sync=0'}`;
-  try { const d = await atkApi('admin-list', null, qs); ATK.rows = d.tasks || []; ATK.total = d.total || 0; if (f.wh === 'all') ATK.shops = d.shops || []; }
+  // грузим все задачи всех магазинов один раз; фильтры — на клиенте (нужны и для карточек магазинов)
+  try { const d = await atkApi('admin-list', null, `&wh=all&status=all${sync ? '' : '&sync=0'}`); ATK.all = d.tasks || []; ATK.shops = d.shops || []; }
   catch (e) { atkToast('Ошибка: ' + e.message); }
+  if (!ATK.f.from) { const t = atkToday(); ATK.f.from = t.slice(0, 8) + '01'; ATK.f.to = t; }
 }
+function atkToday() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function atkLocalDay(iso) { if (!iso) return ''; const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+const atkActive = (t) => t.status === 'open' || t.status === 'review';
+const atkOverdue = (t) => atkActive(t) && t.due && t.due < atkToday();
+// задача попадает в период: активные — всегда; закрытые — по дате выполнения/закрытия
+function atkInPeriod(t) {
+  if (atkActive(t)) return true;
+  const d = atkLocalDay(t.doneAt || t.closedAt || t.createdAt);
+  return (!ATK.f.from || d >= ATK.f.from) && (!ATK.f.to || d <= ATK.f.to);
+}
+function atkShopStats(wh) {
+  const L = ATK.all.filter(t => (wh === 'all' || t.wh === wh));
+  const act = L.filter(atkActive), today = atkToday();
+  const doneP = L.filter(t => t.status === 'done' && atkInPeriod(t));
+  return {
+    active: act.length, open: act.filter(t => t.status === 'open').length, review: act.filter(t => t.status === 'review').length,
+    urgent: act.filter(t => t.prio === 'high').length, overdue: L.filter(t => atkOverdue(t) || (t.status === 'expired' && atkInPeriod(t))).length,
+    doneToday: L.filter(t => t.status === 'done' && atkLocalDay(t.doneAt) === today).length,
+    done: doneP.length, points: doneP.reduce((s2, t) => s2 + (Number(t.points) || 0), 0),
+    restock: act.filter(t => t.kind === 'restock').length, ai: act.filter(t => t.kind === 'ai').length,
+    pct: (doneP.length + act.length) ? Math.round(doneP.length / (doneP.length + act.length) * 100) : 0,
+  };
+}
+function atkFiltered() {
+  const f = ATK.f, q = (f.q || '').trim().toLowerCase();
+  return ATK.all.filter(t => {
+    if (f.wh !== 'all' && t.wh !== f.wh) return false;
+    if (f.status === 'active' && !atkActive(t)) return false;
+    if (f.status === 'overdue' && !(atkOverdue(t) || t.status === 'expired')) return false;
+    if (!['active', 'all', 'overdue'].includes(f.status) && t.status !== f.status) return false;
+    if (f.kind && t.kind !== f.kind) return false;
+    if (f.prio && t.prio !== f.prio) return false;
+    if (f.seller && !((t.assignee && t.assignee.ref === f.seller) || (t.doneBy && t.doneBy.ref === f.seller))) return false;
+    if (!atkInPeriod(t)) return false;
+    if (q && !(`${t.title} ${t.desc} ${(t.assignee || {}).name || ''} ${(t.doneBy || {}).name || ''} ${(t.place || {}).fixture || ''}`.toLowerCase().includes(q))) return false;
+    return true;
+  }).sort((a, b) => ((a.status === 'review') ? 0 : 1) - ((b.status === 'review') ? 0 : 1) || (atkActive(b) - atkActive(a)) || ({ high: 0, mid: 1, low: 2 }[a.prio] - { high: 0, mid: 1, low: 2 }[b.prio]) || String(b.doneAt || b.createdAt).localeCompare(String(a.doneAt || a.createdAt)));
+}
+// сотрудники: выполнено / всего (назначено + выполнено) за период
+function atkEmpStats(wh) {
+  const M = {};
+  const add = (ref, name, k) => { if (!ref) return; const e = M[ref] = M[ref] || { ref, name, done: 0, active: 0, points: 0 }; e[k]++; if (name) e.name = name; };
+  ATK.all.filter(t => (wh === 'all' || t.wh === wh) && atkInPeriod(t)).forEach(t => {
+    if (t.status === 'done' && t.doneBy) { add(t.doneBy.ref, t.doneBy.name, 'done'); M[t.doneBy.ref].points += Number(t.points) || 0; }
+    else if (atkActive(t) && t.assignee) add(t.assignee.ref, t.assignee.name, 'active');
+  });
+  const emp = Object.fromEntries((ATK.emps || []).map(e => [e.ref, e]));
+  return Object.values(M).map(e => ({ ...e, shop: (emp[e.ref] || {}).shop || '', total: e.done + e.active, pct: (e.done + e.active) ? Math.round(e.done / (e.done + e.active) * 100) : 0 }))
+    .sort((a, b) => b.done - a.done || b.points - a.points);
+}
+const ATK_KIND_UI = { restock: ['▦', 'Витрина', 'g'], check: ['⌕', 'Проверка', 'b'], manual: ['✎', 'Ручная', 'a'], ai: ['✦', 'ИИ', 'v'] };
+const ATK_COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ef4444', '#14b8a6', '#ec4899', '#6366f1'];
+function atkAva(name) { const n = String(name || '?').trim(); let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `<span class="atk-ava" style="background:${ATK_COLORS[h % ATK_COLORS.length]}1f;color:${ATK_COLORS[h % ATK_COLORS.length]}">${esc(n[0] || '?')}</span>`; }
+function atkShopName(wh) { const s = ATK.shops.find(x => x.wh === wh); return s ? s.name : ''; }
+
 function atkDraw() {
   const root = $('tasksBody'); if (!root) return;
-  const rv = ATK.rows.filter(t => t.status === 'review').length;
-  const tabs = [['list', 'Задачи' + (rv ? ` · ${rv} на проверке` : '')], ['new', 'Новая задача'], ['ai', '✨ ИИ-генератор'], ['rating', 'Рейтинг'], ['settings', 'Настройки']];
+  const rv = ATK.all.filter(t => t.status === 'review').length;
+  const tabs = [['list', 'Все задачи' + (rv ? ` <i class="atk-badge">${rv}</i>` : '')], ['shops', 'По магазинам'], ['people', 'По сотрудникам'], ['rating', 'Рейтинг'], ['settings', 'Настройки']];
+  const showSide = ['list', 'shops', 'people'].includes(ATK.tab);
   let body = '';
-  if (ATK.tab === 'list') body = atkListHtml();
+  if (ATK.tab === 'list' || ATK.tab === 'shops') body = atkListHtml();
+  else if (ATK.tab === 'people') body = atkPeopleHtml();
   else if (ATK.tab === 'new') body = atkNewHtml();
   else if (ATK.tab === 'ai') body = atkAiHtml();
   else if (ATK.tab === 'rating') body = atkRatingHtml();
   else body = atkSettingsHtml();
-  root.innerHTML = `<div class="sms-wrap atk">
-    <div class="sms-tabs">${tabs.map(([k, l]) => `<button class="sms-tab ${ATK.tab === k ? 'on' : ''}" data-atktab="${k}">${l}</button>`).join('')}</div>
-    ${body}</div>`;
-  root.querySelectorAll('[data-atktab]').forEach(b => b.addEventListener('click', () => { ATK.tab = b.dataset.atktab; atkDraw(); }));
+  root.innerHTML = `<div class="sms-wrap atk atk2">
+    <div class="atk-top">
+      <div class="atk-top-l">Задачи по витринам, поручения администратора и ИИ-рекомендации</div>
+      <div class="atk-top-r">
+        <button class="atk-hbtn pri" data-atkgo="new">＋ Новая задача</button>
+        <button class="atk-hbtn" data-atkgo="ai">✦ ИИ-генератор</button>
+        <button class="atk-hbtn" id="atkRefresh" title="Обновить и пересчитать авто-задачи">↻ Обновить</button>
+      </div>
+    </div>
+    ${atkShopCardsHtml()}
+    <div class="sms-tabs atk-tabs">${tabs.map(([k, l]) => `<button class="sms-tab ${ATK.tab === k ? 'on' : ''}" data-atktab="${k}">${l}</button>`).join('')}</div>
+    ${showSide ? `<div class="atk-grid"><div class="atk-main">${body}</div><aside class="atk-side">${atkSideHtml()}</aside></div>` : body}
+  </div>`;
+  root.querySelectorAll('[data-atktab]').forEach(b => b.addEventListener('click', () => { ATK.tab = b.dataset.atktab; if (ATK.tab === 'shops' && ATK.f.wh === 'all' && ATK.shops[0]) ATK.f.wh = ATK.shops[0].wh; atkDraw(); }));
+  root.querySelectorAll('[data-atkgo]').forEach(b => b.addEventListener('click', () => { ATK.tab = b.dataset.atkgo; if (ATK.tab === 'new' && ATK.f.wh !== 'all') ATK.form.wh = ATK.f.wh; atkDraw(); }));
+  root.querySelectorAll('[data-atkshop]').forEach(b => b.addEventListener('click', () => { const w = b.dataset.atkshop; ATK.f.wh = ATK.f.wh === w ? 'all' : w; ATK.f.seller = ''; if (!['list', 'shops', 'people'].includes(ATK.tab)) ATK.tab = 'shops'; if (ATK.f.wh === 'all' && ATK.tab === 'shops') ATK.tab = 'list'; atkDraw(); }));
   atkBind(root);
   if (ATK.tab === 'rating') atkRatingBind(root);
+}
+function atkShopCardsHtml() {
+  if (!ATK.shops.length) return '';
+  return `<div class="atk-shops">${ATK.shops.map(sh => {
+    const st = atkShopStats(sh.wh), on = ATK.f.wh === sh.wh;
+    return `<button class="atk-shop ${on ? 'on' : ''}" data-atkshop="${sh.wh}">
+      <div class="atk-shop-h"><span class="atk-shop-ic">🏬</span><b>${esc(sh.name)}</b>${on ? '<span class="atk-sel">✓ Выбран</span>' : ''}</div>
+      <div class="atk-shop-n"><div><span>Активных задач</span><b>${st.active}</b></div><div><span>Срочных</span><b class="r">${st.urgent}</b></div><div><span>Выполнено сегодня</span><b class="g">${st.doneToday}</b></div></div>
+      <div class="atk-prog"><i style="width:${st.pct}%"></i></div><div class="atk-prog-l"><span>выполнено за период ${st.done}</span><b>${st.pct}%</b></div>
+    </button>`;
+  }).join('')}</div>`;
+}
+function atkFiltersHtml() {
+  const f = ATK.f;
+  const sel = (id, cur, opts, lbl) => `<label class="atk-fsel"><span>${lbl}</span><select id="${id}">${opts.map(([k, l]) => `<option value="${k}"${cur === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>`;
+  const emps = (ATK.emps || []).filter(e => f.wh === 'all' || e.wh === f.wh);
+  return `<div class="atk-fbar">
+    <label class="atk-fdate">📅 <input type="date" id="atkFFrom" value="${esc(f.from)}"><span>—</span><input type="date" id="atkFTo" value="${esc(f.to)}"></label>
+    ${ATK.tab === 'list' ? sel('atkFWh', f.wh, [['all', 'Все'], ...ATK.shops.map(s => [s.wh, s.name])], 'Магазин:') : ''}
+    ${sel('atkFSt', f.status, [['active', 'Активные'], ['open', 'Открытые'], ['review', 'На проверке'], ['done', 'Выполненные'], ['overdue', 'Просроченные'], ['cancelled', 'Отменённые'], ['all', 'Все']], 'Статус:')}
+    ${sel('atkFKind', f.kind, [['', 'Все'], ...Object.entries(ATK_KIND_UI).map(([k, v]) => [k, v[1]])], 'Вид:')}
+    ${sel('atkFSel', f.seller, [['', 'Все'], ...emps.map(e => [e.ref, e.name])], 'Сотрудник:')}
+    ${sel('atkFPr', f.prio, [['', 'Все'], ['high', 'Высокий'], ['mid', 'Средний'], ['low', 'Низкий']], 'Приоритет:')}
+    <label class="atk-fsearch">⌕ <input id="atkFQ" placeholder="Поиск по задачам…" value="${esc(f.q)}"></label>
+  </div>`;
+}
+function atkRowActs(t) {
+  const a = [];
+  if (t.status === 'review') { a.push(['approve', '✓ Принять']); a.push(['reject', '↩ Вернуть на доработку']); }
+  else if (t.status === 'open') a.push(['cancel', '✕ Отменить']);
+  else if (['cancelled', 'expired', 'rejected'].includes(t.status)) a.push(['reopen', '↻ Открыть снова']);
+  if (t.kind !== 'restock' || t.status !== 'open') a.push(['delete', '🗑 Удалить']);
+  return a;
+}
+function atkListHtml() {
+  const rows = atkFiltered();
+  const today = atkToday();
+  const tr = rows.map(t => {
+    const p = t.place || {}, K = ATK_KIND_UI[t.kind] || ['•', t.kind, 'a'];
+    const loc = p.fixture ? `${esc(p.fixture)}<small>${[p.n ? 'Полка ' + p.n : '', p.k ? 'Место ' + p.k : ''].filter(Boolean).join(' · ') || 'Все полки'}</small>` : `<span class="muted">—</span>`;
+    const person = t.doneBy || t.assignee;
+    const who = person ? `<div class="atk-who">${atkAva(person.name)}<div><b>${esc(person.name || '')}</b><small>${t.doneBy ? 'выполнил ' + atkDT(t.doneAt) : 'назначено'}</small></div></div>` : `<div class="atk-who"><span class="atk-ava none">👤</span><div><span class="muted">Не назначен</span><small>любой в магазине</small></div></div>`;
+    const acts = atkRowActs(t);
+    const od = atkOverdue(t);
+    const stLbl = t.status === 'review' ? '◔ На проверке' : t.status === 'done' ? '✓ Выполнена' : od ? '◷ Просрочена' : (ATK_ST[t.status] || t.status);
+    return `<tr class="${t.status === 'review' ? 'rv' : ''}">
+      <td><span class="atk-chip ${K[2]}">${K[0]} ${K[1]}</span></td>
+      <td class="atk-tt"><b>${esc(t.title)}</b>${t.desc ? `<div class="atk-desc">${esc(t.desc.slice(0, 140))}</div>` : ''}${t.comment ? `<div class="atk-cmt">💬 ${esc(t.comment)}</div>` : ''}${t.note ? `<div class="atk-note">${esc(t.note)}</div>` : ''}</td>
+      <td class="atk-loc">${ATK.f.wh === 'all' ? `<b>${esc(t.shop)}</b>` : ''}${loc}</td>
+      <td>${who}</td>
+      <td><span class="atk-pr ${t.prio}">${ATK_PRIO[t.prio]}</span></td>
+      <td><span class="atk-st ${od ? 'expired' : t.status}">${stLbl}</span></td>
+      <td><span class="atk-pts">+${t.points} б.</span></td>
+      <td class="atk-due ${od ? 'od' : ''}">${t.due ? '📅 ' + atkDay(t.due) + '.' + t.due.slice(0, 4) : '<span class="muted">—</span>'}</td>
+      <td class="atk-act">${t.status === 'review' ? `<button class="atk-ok" title="Принять" data-atkact="approve" data-id="${t.id}" data-wh="${t.wh}">✓</button>` : ''}${acts.length ? `<button class="atk-dots" data-atkmenu="${t.id}">⋯</button>${ATK.menu === t.id ? `<div class="atk-menu">${acts.map(([k, l]) => `<button class="${k === 'delete' || k === 'reject' ? 'red' : ''}" data-atkact="${k}" data-id="${t.id}" data-wh="${t.wh}">${l}</button>`).join('')}</div>` : ''}` : ''}</td>
+    </tr>`;
+  }).join('');
+  let head = '';
+  if (ATK.f.wh !== 'all') {
+    const st = atkShopStats(ATK.f.wh), emps = (ATK.emps || []).filter(e => e.wh === ATK.f.wh).length;
+    const k = (ic, cls, l, v) => `<div class="atk-hk"><span class="atk-hk-ic ${cls}">${ic}</span><div><span>${l}</span><b class="${cls}">${v}</b></div></div>`;
+    head = `<div class="atk-shophead"><div class="atk-sh-t"><span class="atk-sh-ic">🏬</span><div><h3>Магазин «${esc(atkShopName(ATK.f.wh))}»</h3><small>${emps} сотрудников · ${ATK.shops.find(s => s.wh === ATK.f.wh && s.planogram) ? 'есть планограмма' : 'без планограммы'}</small></div></div>
+      <div class="atk-hks">${k('▤', '', 'Открытых', st.open)}${k('◔', 'a', 'На проверке', st.review)}${k('✓', 'g', 'Выполнено', st.done)}${k('◷', 'r', 'Просрочено', st.overdue)}${k('★', 'y', 'Баллов', '+' + st.points + ' б.')}</div></div>`;
+  }
+  return `<div class="atk-card">
+    ${atkFiltersHtml()}
+    ${head}
+    ${rows.length ? `<div class="atk-tblw"><table class="atk-t"><thead><tr><th>Вид</th><th>Задача</th><th>Локация</th><th>Сотрудник</th><th>Приоритет</th><th>Статус</th><th>Баллы</th><th>Срок</th><th>Действия</th></tr></thead><tbody>${tr}</tbody></table></div>` : '<div class="atk-empty">Задач по фильтрам нет</div>'}
+    <div class="atk-foot">Найдено: ${rows.length}. Активные задачи показываются всегда, выполненные и закрытые — за выбранный период. Авто-задачи «Витрина» создаются сами, когда с места на планограмме уходит пара.</div>
+  </div>`;
+}
+function atkPeopleHtml() {
+  const list = atkEmpStats(ATK.f.wh);
+  const emps = (ATK.emps || []).filter(e => e.receipts60 > 0 && (ATK.f.wh === 'all' || e.wh === ATK.f.wh));
+  emps.forEach(e => { if (!list.find(x => x.ref === e.ref)) list.push({ ref: e.ref, name: e.name, shop: e.shop, done: 0, active: 0, points: 0, total: 0, pct: 0 }); });
+  return `<div class="atk-card">${atkFiltersHtml()}
+    <div class="atk-people">${list.map(e => `<div class="atk-person">
+      <div class="atk-who">${atkAva(e.name)}<div><b>${esc(e.name)}</b><small>${esc(e.shop || '')}</small></div></div>
+      <div class="atk-pn"><div><span>Выполнено</span><b class="g">${e.done}</b></div><div><span>В работе</span><b>${e.active}</b></div><div><span>Баллы</span><b>+${e.points}</b></div></div>
+      <div class="atk-prog"><i style="width:${e.pct}%"></i></div><div class="atk-prog-l"><span>${e.done} из ${e.total}</span><b>${e.pct}%</b></div>
+      <div class="atk-pa"><button class="sms-btn" data-atkemp="${e.ref}">Задачи сотрудника</button><button class="sms-btn" data-atkaiemp="${e.ref}">✦ ИИ-задачи</button></div>
+    </div>`).join('') || '<div class="atk-empty">Нет сотрудников</div>'}</div></div>`;
+}
+function atkSideHtml() {
+  const wh = ATK.f.wh, st = atkShopStats(wh), nm = wh === 'all' ? 'Все магазины' : `Магазин «${esc(atkShopName(wh))}»`;
+  const row = (ic, l, v, cls, go) => `<button class="atk-srow" ${go ? `data-atkquick="${go}"` : ''}><span>${ic}</span><em>${l}</em><b class="${cls || ''}">${v}</b></button>`;
+  const top = atkEmpStats(wh).filter(e => e.total > 0).slice(0, 5);
+  const weak = (ATK.emps || []).filter(e => e.receipts60 > 0 && (wh === 'all' || e.wh === wh)).map(e => ({ ...e, a: atkEmpStats(wh).find(x => x.ref === e.ref) })).sort((a, b) => ((a.a || {}).done || 0) - ((b.a || {}).done || 0))[0];
+  return `<div class="atk-scard"><h4>🏬 Сводка: ${nm}</h4>
+      ${row('▤', 'Активные задачи', st.active, '', 'active')}
+      ${row('⚠', 'Срочные (высокий приоритет)', st.urgent, 'r', 'urgent')}
+      ${row('◔', 'На проверке', st.review, 'a', 'review')}
+      ${row('▦', 'Пустые места на витрине', st.restock, '', 'restock')}
+      ${row('◷', 'Просрочено', st.overdue, 'r', 'overdue')}
+      ${row('✦', 'ИИ-задачи в работе', st.ai, 'v', 'ai')}
+    </div>
+    <div class="atk-scard"><h4>🏆 Топ сотрудники по задачам</h4>
+      ${top.map(e => `<div class="atk-top-e">${atkAva(e.name)}<div class="atk-top-b"><div><b>${esc(e.name)}</b><span>${e.pct}%</span></div><small>Выполнено: ${e.done} из ${e.total}</small><div class="atk-prog sm"><i style="width:${e.pct}%"></i></div></div></div>`).join('') || '<div class="atk-empty sm">За период задач нет</div>'}
+    </div>
+    <div class="atk-scard ai"><h4>✦ ИИ рекомендует</h4>
+      ${weak ? `<button class="atk-rec" data-atkaiemp="${weak.ref}"><span>👤</span><em>Сгенерировать задачи сотруднику <b>${esc(weak.name)}</b></em><i>›</i></button>` : ''}
+      ${st.review ? `<button class="atk-rec" data-atkquick="review"><span>◔</span><em>Проверить выполненные задачи: <b>${st.review}</b></em><i>›</i></button>` : ''}
+      ${st.restock ? `<button class="atk-rec" data-atkquick="restock"><span>▦</span><em>Пустых мест на витрине: <b>${st.restock}</b> — показать</em><i>›</i></button>` : ''}
+      <button class="atk-rec" data-atkgo2="new"><span>＋</span><em>Поставить ручную задачу</em><i>›</i></button>
+    </div>`;
 }
 function atkShopOpts(sel, withAll) {
   const shops = ATK.shops.length ? ATK.shops : [];
@@ -72,41 +246,6 @@ function atkShopOpts(sel, withAll) {
 function atkEmpOpts(sel, wh, allLabel) {
   const list = (ATK.emps || []).filter(e => !wh || wh === 'all' || e.wh === wh);
   return `<option value="">${allLabel || 'Все сотрудники'}</option>` + list.map(e => `<option value="${e.ref}"${sel === e.ref ? ' selected' : ''}>${esc(e.name)} — ${esc(e.shop)}</option>`).join('');
-}
-
-// ── список ──
-function atkListHtml() {
-  const f = ATK.f;
-  const rows = ATK.rows;
-  const tr = rows.map(t => {
-    const p = t.place || {};
-    const place = p.fixture ? `${esc(p.fixture)}${p.n ? ' · П' + p.n : ''}${p.k ? ' · М' + p.k : ''}` : '';
-    const who = t.doneBy ? `<b>${esc(t.doneBy.name || '')}</b><br><small>${atkDT(t.doneAt)}</small>` : (t.assignee ? `→ ${esc(t.assignee.name)}` : '<small>все</small>');
-    let acts = '';
-    if (t.status === 'review') acts = `<button class="sms-btn pri" data-atkact="approve" data-id="${t.id}" data-wh="${t.wh}">✓ Принять</button><button class="sms-btn red" data-atkact="reject" data-id="${t.id}" data-wh="${t.wh}">Вернуть</button>`;
-    else if (t.status === 'open') acts = `<button class="sms-btn" data-atkact="cancel" data-id="${t.id}" data-wh="${t.wh}">Отменить</button>`;
-    else if (['cancelled', 'expired', 'rejected'].includes(t.status)) acts = `<button class="sms-btn" data-atkact="reopen" data-id="${t.id}" data-wh="${t.wh}">Открыть</button>`;
-    if (t.kind !== 'restock' || t.status !== 'open') acts += `<button class="sms-btn red" title="Удалить" data-atkact="delete" data-id="${t.id}" data-wh="${t.wh}">🗑</button>`;
-    return `<tr>
-      <td><span class="atk-kind">${ATK_KIND[t.kind] || t.kind}</span></td>
-      <td><b>${esc(t.title)}</b>${t.desc ? `<div class="atk-desc">${esc(t.desc.slice(0, 160))}</div>` : ''}${t.comment ? `<div class="atk-cmt">💬 ${esc(t.comment)}</div>` : ''}${t.note ? `<div class="atk-note">${esc(t.note)}</div>` : ''}</td>
-      <td>${esc(t.shop)}${place ? `<br><small>${place}</small>` : ''}</td>
-      <td><span class="atk-pr ${t.prio}">${ATK_PRIO[t.prio]}</span><br><small>+${t.points} б.</small></td>
-      <td><span class="atk-st ${t.status}">${ATK_ST[t.status] || t.status}</span>${t.due ? `<br><small>до ${atkDay(t.due)}</small>` : ''}</td>
-      <td>${who}</td>
-      <td class="atk-acts">${acts}</td></tr>`;
-  }).join('');
-  return `<div class="sms-card">
-    <div class="atk-filters">
-      <select class="sms-sel" id="atkFWh">${atkShopOpts(f.wh, true)}</select>
-      <select class="sms-sel" id="atkFSt">${[['active', 'Активные'], ['review', 'На проверке'], ['open', 'Открытые'], ['done', 'Выполненные'], ['all', 'Все']].map(([k, l]) => `<option value="${k}"${f.status === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
-      <select class="sms-sel" id="atkFKind"><option value="">Все виды</option>${Object.entries(ATK_KIND).map(([k, l]) => `<option value="${k}"${f.kind === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
-      <select class="sms-sel" id="atkFSel">${atkEmpOpts(f.seller, f.wh)}</select>
-      <button class="sms-btn" id="atkRefresh">↻ Обновить</button>
-    </div>
-    <div class="sms-sub" style="margin:10px 0">Найдено: ${ATK.total || 0}. Авто-задачи «Пополнить» создаются сами, когда с места на планограмме уходит пара.</div>
-    ${rows.length ? `<div class="atk-tblw"><table class="sms-tbl atk-tbl"><thead><tr><th>Вид</th><th>Задача</th><th>Магазин / место</th><th>Сложность</th><th>Статус</th><th>Сотрудник</th><th></th></tr></thead><tbody>${tr}</tbody></table></div>` : '<div class="atk-empty">Задач нет</div>'}
-  </div>`;
 }
 // ── новая задача ──
 function atkNewHtml() {
@@ -231,20 +370,34 @@ function atkSettingsHtml() {
 
 function atkBind(root) {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
-  // список
-  const reload = async () => { await atkLoad(false); atkDraw(); };
-  on('atkFWh', 'change', e => { ATK.f.wh = e.target.value; ATK.f.seller = ''; reload(); });
-  on('atkFSt', 'change', e => { ATK.f.status = e.target.value; reload(); });
-  on('atkFKind', 'change', e => { ATK.f.kind = e.target.value; reload(); });
-  on('atkFSel', 'change', e => { ATK.f.seller = e.target.value; reload(); });
-  on('atkRefresh', 'click', async () => { await atkLoad(true); atkDraw(); });
+  // список (фильтры на клиенте)
+  const redraw = () => { ATK.menu = null; atkDraw(); };
+  on('atkFWh', 'change', e => { ATK.f.wh = e.target.value; ATK.f.seller = ''; redraw(); });
+  on('atkFSt', 'change', e => { ATK.f.status = e.target.value; redraw(); });
+  on('atkFKind', 'change', e => { ATK.f.kind = e.target.value; redraw(); });
+  on('atkFSel', 'change', e => { ATK.f.seller = e.target.value; redraw(); });
+  on('atkFPr', 'change', e => { ATK.f.prio = e.target.value; redraw(); });
+  on('atkFFrom', 'change', e => { ATK.f.from = e.target.value; redraw(); });
+  on('atkFTo', 'change', e => { ATK.f.to = e.target.value; redraw(); });
+  on('atkFQ', 'input', e => { ATK.f.q = e.target.value; clearTimeout(ATK._qt); ATK._qt = setTimeout(() => { atkDraw(); const q = $('atkFQ'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 300); });
+  on('atkRefresh', 'click', async (e) => { e.target.disabled = true; e.target.textContent = '⏳ Обновляю…'; await atkLoad(true); atkDraw(); });
+  root.querySelectorAll('[data-atkmenu]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); ATK.menu = ATK.menu === b.dataset.atkmenu ? null : b.dataset.atkmenu; atkDraw(); }));
+  if (ATK.menu) setTimeout(() => document.addEventListener('click', function cl(ev) { if (!ev.target.closest('.atk-menu')) { document.removeEventListener('click', cl); if (ATK.menu) { ATK.menu = null; atkDraw(); } } }), 0);
+  root.querySelectorAll('[data-atkemp]').forEach(b => b.addEventListener('click', () => { ATK.f.seller = b.dataset.atkemp; ATK.f.status = 'all'; ATK.tab = 'list'; atkDraw(); }));
+  root.querySelectorAll('[data-atkaiemp]').forEach(b => b.addEventListener('click', () => { ATK.ai.ref = b.dataset.atkaiemp; ATK.ai.stats = null; ATK.ai.drafts = []; ATK.ai.summary = ''; ATK.tab = 'ai'; atkDraw(); }));
+  root.querySelectorAll('[data-atkgo2]').forEach(b => b.addEventListener('click', () => { ATK.tab = b.dataset.atkgo2; if (ATK.f.wh !== 'all') ATK.form.wh = ATK.f.wh; atkDraw(); }));
+  root.querySelectorAll('[data-atkquick]').forEach(b => b.addEventListener('click', () => {
+    const q = b.dataset.atkquick; Object.assign(ATK.f, { status: 'active', kind: '', prio: '', seller: '' });
+    if (q === 'urgent') ATK.f.prio = 'high'; else if (q === 'review') ATK.f.status = 'review'; else if (q === 'overdue') ATK.f.status = 'overdue'; else if (q === 'restock') ATK.f.kind = 'restock'; else if (q === 'ai') ATK.f.kind = 'ai';
+    if (ATK.tab === 'people') ATK.tab = ATK.f.wh === 'all' ? 'list' : 'shops'; atkDraw();
+  }));
   root.querySelectorAll('[data-atkact]').forEach(b => b.addEventListener('click', async () => {
     const act = b.dataset.atkact; const body = { act, id: b.dataset.id, wh: b.dataset.wh, by: atkBy() };
     if (act === 'reject') { const n = prompt('Что доделать? (увидит сотрудник)', 'доделать'); if (n == null) return; body.note = n; }
     if (act === 'delete' && !confirm('Удалить задачу?')) return;
     if (act === 'cancel' && !confirm('Отменить задачу?')) return;
     b.disabled = true;
-    try { await atkApi('admin-act', body); atkToast('Готово'); await atkLoad(false); atkDraw(); } catch (e) { atkToast('Ошибка: ' + e.message); b.disabled = false; }
+    try { await atkApi('admin-act', body); atkToast('Готово'); ATK.menu = null; await atkLoad(false); atkDraw(); } catch (e) { atkToast('Ошибка: ' + e.message); b.disabled = false; }
   }));
   // новая
   const F = ATK.form;

@@ -22,7 +22,7 @@
 .spay-fld label{font-size:12px;color:var(--tx2);font-weight:600}
 .spay-dr{display:flex;align-items:center;gap:6px}
 .spay-wrap{overflow-x:auto}
-.spay-tbl{min-width:1250px;font-size:13px}
+.spay-tbl{min-width:1330px;font-size:13px}
 .spay-tbl th{font-size:12px;white-space:nowrap;vertical-align:middle}
 .spay-tbl th small{font-weight:500;color:var(--tx3)}
 .spay-tbl th.grp{background:#f5f3ff}

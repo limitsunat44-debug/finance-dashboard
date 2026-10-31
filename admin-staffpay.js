@@ -108,6 +108,7 @@ function spayTableHtml() {
       <td class="r tnum">${spayN(x.bonus)}</td>
       <td class="r tnum" title="${x.dsProfileName ? 'ОртоCRM: ' + esc(x.dsProfileName) : 'нет привязки к ОртоCRM'}">${x.diagCount ? `${spayN(x.diagBonus)}<div class="spay-hint">${fmtInt(x.diagCount)} шт</div>` : (x.dsProfileId ? '0' : '<span class="muted">—</span>')}</td>
       <td class="r"><input class="spay-inp" type="number" min="0" step="50" data-k="salary" data-ref="${r}" value="${x.salaryMonthly || 0}" title="Оклад в месяц">${d.months > 1 ? `<div class="spay-hint">×${d.months} = ${spayN(x.salary)}</div>` : ''}</td>
+      <td class="r tnum ${x.extraBonus > 0.005 ? 'pos strong' : 'muted'}" title="Выплачено сверх расчёта — считается дополнительным бонусом">${x.extraBonus > 0.005 ? '+' + spayN(x.extraBonus) : '—'}</td>
       <td class="r tnum strong">${spayN(x.total)}</td>
       <td class="r"><input class="spay-inp" type="number" min="0" step="1" data-k="paid" data-ref="${r}" value="${x.paidOut || 0}" title="Выплачено за период — изменение создаёт/правит расход"></td>
       <td class="r tnum strong ${x.rest > 0.005 ? 'pos' : 'muted'}">${spayN(x.rest)}</td>
@@ -120,13 +121,13 @@ function spayTableHtml() {
   return `<div class="tbl-wrap spay-wrap"><table class="tbl spay-tbl">
     <thead>
       <tr><th rowspan="2" class="c">#</th><th rowspan="2">Сотрудник</th><th rowspan="2" class="r">Продажи<br><small>с учётом скидки</small></th><th rowspan="2" class="c">Чеки</th><th rowspan="2" class="r">Возвраты</th><th rowspan="2" class="r">Чистые<br>продажи</th>
-        <th colspan="3" class="c grp">Бонусы</th><th rowspan="2" class="r">Оклад<br><small>в месяц</small></th><th rowspan="2" class="r">Всего<br>начислено</th><th rowspan="2" class="r">Выплачено</th><th rowspan="2" class="r">Остаток<br>к выплате</th><th rowspan="2" class="c">Статус</th><th rowspan="2" class="c">Действия</th></tr>
-      <tr><th class="c grp">%</th><th class="r grp">От продаж</th><th class="r grp">Диагностика<br><small>${spayN(d.rates && d.rates.diag)} с./шт</small></th></tr>
+        <th colspan="4" class="c grp">Бонусы</th><th rowspan="2" class="r">Оклад<br><small>в месяц</small></th><th rowspan="2" class="r">Всего<br>начислено</th><th rowspan="2" class="r">Выплачено</th><th rowspan="2" class="r">Остаток<br>к выплате</th><th rowspan="2" class="c">Статус</th><th rowspan="2" class="c">Действия</th></tr>
+      <tr><th class="c grp">%</th><th class="r grp">От продаж</th><th class="r grp">Диагностика<br><small>${spayN(d.rates && d.rates.diag)} с./шт</small></th><th class="r grp">Доп. бонус<br><small>сверх расчёта</small></th></tr>
     </thead>
-    <tbody>${tr || `<tr><td colspan="15" class="tbl-empty">Нет данных за период</td></tr>`}</tbody>
-    <tfoot><tr class="spay-total"><td></td><td>Итого</td><td class="r tnum">${spayN(sum('sales'))}</td><td class="c tnum">${fmtInt(sum('receipts'))}</td><td class="r tnum neg">${spayN(sum('returns'))}</td><td class="r tnum">${spayN(sum('sales') - sum('returns'))}</td><td></td><td class="r tnum">${spayN(sum('bonus'))}</td><td class="r tnum">${spayN(sum('diagBonus'))}</td><td class="r tnum">${spayN(sum('salary'))}</td><td class="r tnum">${spayN(sum('total'))}</td><td class="r tnum">${spayN(sum('paidOut'))}</td><td class="r tnum pos">${spayN(sum('rest'))}</td><td></td><td></td></tr></tfoot>
+    <tbody>${tr || `<tr><td colspan="16" class="tbl-empty">Нет данных за период</td></tr>`}</tbody>
+    <tfoot><tr class="spay-total"><td></td><td>Итого</td><td class="r tnum">${spayN(sum('sales'))}</td><td class="c tnum">${fmtInt(sum('receipts'))}</td><td class="r tnum neg">${spayN(sum('returns'))}</td><td class="r tnum">${spayN(sum('sales') - sum('returns'))}</td><td></td><td class="r tnum">${spayN(sum('bonus'))}</td><td class="r tnum">${spayN(sum('diagBonus'))}</td><td class="r tnum pos">${sum('extraBonus') > 0.005 ? '+' + spayN(sum('extraBonus')) : '—'}</td><td class="r tnum">${spayN(sum('salary'))}</td><td class="r tnum">${spayN(sum('total'))}</td><td class="r tnum">${spayN(sum('paidOut'))}</td><td class="r tnum pos">${spayN(sum('rest'))}</td><td></td><td></td></tr></tfoot>
   </table></div>
-  ${d.dsError ? `<div class="spay-warn">Диагностики из ОртоCRM не загрузились: ${esc(d.dsError)}</div>` : ''}<div class="spay-note">Диагностика — завершённые визиты в ОртоCRM (docsales2), сотрудник сопоставляется по имени (привязку можно изменить в карточке). % бонуса — для новых чеков (уже начисленные не пересчитываются). Оклад — сумма в месяц. «Выплачено» можно исправить вручную: разница сама добавится или уберётся из расходов. Каждая выплата попадает в «Финансы → Расходы», категория «Зарплаты».</div>`;
+  ${d.dsError ? `<div class="spay-warn">Диагностики из ОртоCRM не загрузились: ${esc(d.dsError)}</div>` : ''}<div class="spay-note">Диагностика — завершённые визиты в ОртоCRM (docsales2), сотрудник сопоставляется по имени (привязку можно изменить в карточке). % бонуса — для новых чеков (уже начисленные не пересчитываются). Оклад — сумма в месяц. «Выплачено» можно исправить вручную: разница сама добавится или уберётся из расходов. Выплачено больше расчёта — разница показывается как «Доп. бонус», а не минус. Каждая выплата попадает в «Финансы → Расходы», категория «Зарплаты».</div>`;
 }
 
 function spayPayoutsHtml() {
@@ -228,6 +229,7 @@ function spayPayModal(ref) {
       <div><span>Бонус от продаж</span><b>${spayN(x.bonus)} с.</b></div>
       <div><span>Диагностика</span><b>${spayN(x.diagBonus || 0)} с.</b></div>
       <div><span>Оклад</span><b>${spayN(x.salary)} с.</b></div>
+      ${x.extraBonus > 0.005 ? `<div><span>Доп. бонус</span><b>+${spayN(x.extraBonus)} с.</b></div>` : ''}
       <div><span>Уже выплачено</span><b>${spayN(x.paidOut)} с.</b></div>
       <div class="hl"><span>Остаток</span><b>${spayN(x.rest)} с.</b></div>
     </div>
@@ -235,7 +237,7 @@ function spayPayModal(ref) {
     <input class="finput" id="spPayAmt" type="number" min="0" step="1" value="${Math.max(0, x.rest)}">
     <label class="spay-lbl">Комментарий (необязательно)</label>
     <input class="finput" id="spPayNote" placeholder="например: наличными / на карту Алиф">
-    <div class="spay-warn">Сумма попадёт в расходы: «Финансы → Расходы», категория «Зарплаты», магазин сотрудника.</div>
+    <div class="spay-warn">Если выплатить больше остатка, разница запишется как доп. бонус сотруднику. Сумма попадёт в расходы: «Финансы → Расходы», категория «Зарплаты», магазин сотрудника.</div>
     <div class="spay-mf"><button class="btn btn-ghost" data-close>Отмена</button><button class="btn btn-primary" id="spPayGo">Выплатить</button></div>`, 'sm');
   const go = m.ov.querySelector('#spPayGo');
   go.onclick = async () => {
@@ -306,7 +308,7 @@ function spayProfRender() {
     <div class="spay-minis">
       ${mini('Продажи', spayN(s.sales) + ' с.', 'g')}${mini('Чеков', fmtInt(s.receipts || 0))}${mini('Возвраты', spayN(s.returns) + ' с.', 'r')}${mini('Чистые', spayN(s.net) + ' с.', 'b')}${mini('Средний чек', spayN(s.avgReceipt) + ' с.')}${mini('Товаров продано', fmtInt(s.items || 0))}
       ${x.diagCount != null ? mini('Диагностик', fmtInt(x.diagCount) + ' · ' + spayN(x.diagBonus) + ' с.', 'a') : ''}
-      ${x.total != null ? mini('Всего начислено', spayN(x.total) + ' с.', 'v') + mini('Остаток к выплате', spayN(x.rest) + ' с.', 'a') : ''}
+      ${x.total != null ? (x.extraBonus > 0.005 ? mini('Доп. бонус', '+' + spayN(x.extraBonus) + ' с.', 'g') : '') + mini('Всего начислено', spayN(x.total) + ' с.', 'v') + mini('Остаток к выплате', spayN(x.rest) + ' с.', 'a') : ''}
     </div>
     <div class="spay-tabs sm">${tabs.map(([k, l]) => `<button class="spay-tab ${SPAY.profTab === k ? 'on' : ''}" data-pt="${k}">${l}</button>`).join('')}</div>
     <div class="spay-pbody">${body}</div>`;
@@ -339,8 +341,8 @@ function spayDrawChart(days) {
 function spayCsv() {
   const rows = spayRows();
   if (!rows.length) { spayToast('Нет данных для экспорта'); return; }
-  const head = ['Сотрудник', 'Магазин', 'Продажи', 'Чеки', 'Возвраты', 'Чистые продажи', '% бонуса', 'Бонус', 'Диагностик', 'Бонус диагн.', 'Оклад', 'Всего начислено', 'Выплачено', 'Остаток', 'Статус'];
-  const data = rows.map(x => [x.sellerName, spayShop(x.shopName), x.sales, x.receipts, x.returns, (x.sales || 0) - (x.returns || 0), x.ratePct, x.bonus, x.diagCount, x.diagBonus, x.salary, x.total, x.paidOut, x.rest, (SPAY_ST[x.status] || SPAY_ST.none)[0]]);
+  const head = ['Сотрудник', 'Магазин', 'Продажи', 'Чеки', 'Возвраты', 'Чистые продажи', '% бонуса', 'Бонус', 'Диагностик', 'Бонус диагн.', 'Доп. бонус', 'Оклад', 'Всего начислено', 'Выплачено', 'Остаток', 'Статус'];
+  const data = rows.map(x => [x.sellerName, spayShop(x.shopName), x.sales, x.receipts, x.returns, (x.sales || 0) - (x.returns || 0), x.ratePct, x.bonus, x.diagCount, x.diagBonus, x.extraBonus || 0, x.salary, x.total, x.paidOut, x.rest, (SPAY_ST[x.status] || SPAY_ST.none)[0]]);
   const csv = '\uFEFF' + [head, ...data].map(r => r.map(c => `"${String(c == null ? '' : c).replace(/"/g, '""')}"`).join(';')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
   a.download = `бонусы_сотрудникам_${SPAY.from}_${SPAY.to}.csv`; document.body.appendChild(a); a.click(); a.remove();

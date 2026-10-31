@@ -62,6 +62,7 @@ function atkDraw() {
     ${body}</div>`;
   root.querySelectorAll('[data-atktab]').forEach(b => b.addEventListener('click', () => { ATK.tab = b.dataset.atktab; atkDraw(); }));
   atkBind(root);
+  if (ATK.tab === 'rating') atkRatingBind(root);
 }
 function atkShopOpts(sel, withAll) {
   const shops = ATK.shops.length ? ATK.shops : [];
@@ -165,14 +166,48 @@ function atkAiHtml() {
       ${A.drafts.length ? drafts + `<button class="sms-btn pri big" id="atkAiSave">Поставить выбранные задачи</button>` : '<div class="atk-empty">Выберите сотрудника и нажмите «Сгенерировать». Задачи можно поправить перед отправкой.</div>'}
     </div></div>`;
 }
-// ── рейтинг ──
+// ── рейтинг (период выбирается: этот / прошлый месяц / свои даты) ──
+function atkYmd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+function atkMonthRange(shift) {
+  const n = new Date(); const a = new Date(n.getFullYear(), n.getMonth() + shift, 1); const b = new Date(n.getFullYear(), n.getMonth() + shift + 1, 0);
+  return { from: atkYmd(a), to: atkYmd(b) };
+}
+const ATK_MON = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
+async function atkRatingLoad(from, to) {
+  ATK.rt = { from, to, list: null, busy: true }; atkDraw();
+  try { const d = await atkApi('employees', null, `&from=${from}&to=${to}`); if (ATK.rt.from === from && ATK.rt.to === to) ATK.rt.list = d.employees || []; }
+  catch (e) { atkToast('Ошибка: ' + e.message); ATK.rt.list = []; }
+  ATK.rt.busy = false; atkDraw();
+}
+function atkRatingBind(root) {
+  if (!ATK.rt) { const r = atkMonthRange(0); atkRatingLoad(r.from, r.to); return; }
+  root.querySelectorAll('[data-rtm]').forEach(b => b.addEventListener('click', () => { const r = atkMonthRange(Number(b.dataset.rtm)); atkRatingLoad(r.from, r.to); }));
+  const f = root.querySelector('#atkRtFrom'), t = root.querySelector('#atkRtTo');
+  const go = () => { if (f.value && t.value && f.value <= t.value) atkRatingLoad(f.value, t.value); };
+  if (f) f.addEventListener('change', go); if (t) t.addEventListener('change', go);
+}
 function atkRatingHtml() {
-  const list = [...(ATK.emps || [])].filter(e => e.receipts60 > 0).sort((a, b) => (b.monthPoints || 0) - (a.monthPoints || 0) || (b.monthDone || 0) - (a.monthDone || 0));
+  const R = ATK.rt || { list: null, busy: true, from: '', to: '' };
   const k = Number((ATK.settings || {}).somPerPoint) || 0;
-  return `<div class="sms-card"><h3>🏆 Рейтинг за месяц</h3>
-    <table class="sms-tbl"><thead><tr><th>#</th><th>Сотрудник</th><th>Магазин</th><th>Выполнено</th><th>Баллы</th>${k ? '<th>Сумма</th>' : ''}<th>Открыто на нём</th></tr></thead><tbody>
-    ${list.map((e, i) => `<tr><td>${i < 3 && e.monthPoints ? ['🥇', '🥈', '🥉'][i] : i + 1}</td><td><b>${esc(e.name)}</b></td><td>${esc(e.shop)}</td><td>${e.monthDone || 0}</td><td><b>${e.monthPoints || 0}</b></td>${k ? `<td>${((e.monthPoints || 0) * k).toLocaleString('ru-RU')} с.</td>` : ''}<td>${e.openAssigned || 0}</td></tr>`).join('')}
-    </tbody></table></div>`;
+  const cur = atkMonthRange(0), prev = atkMonthRange(-1);
+  const isCur = R.from === cur.from && R.to === cur.to, isPrev = R.from === prev.from && R.to === prev.to;
+  const mName = (r) => ATK_MON[Number(r.from.slice(5, 7)) - 1];
+  const title = isCur ? `за ${mName(cur)} (текущий месяц)` : isPrev ? `за ${mName(prev)}` : (R.from ? `${atkDay(R.from)}.${R.from.slice(0, 4)} — ${atkDay(R.to)}.${R.to.slice(0, 4)}` : '');
+  const list = [...(R.list || [])].filter(e => e.receipts60 > 0 || e.monthPoints > 0).sort((a, b) => (b.monthPoints || 0) - (a.monthPoints || 0) || (b.monthDone || 0) - (a.monthDone || 0));
+  const totP = list.reduce((s2, e) => s2 + (e.monthPoints || 0), 0), totD = list.reduce((s2, e) => s2 + (e.monthDone || 0), 0);
+  const bar = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:4px 0 12px">
+      <button class="sms-tab ${isCur ? 'on' : ''}" data-rtm="0">Этот месяц (${mName(cur)})</button>
+      <button class="sms-tab ${isPrev ? 'on' : ''}" data-rtm="-1">Прошлый месяц (${mName(prev)})</button>
+      <span style="margin-left:8px;color:var(--tx3,#64748b)">или период:</span>
+      <input class="sms-in" type="date" id="atkRtFrom" value="${esc(R.from || '')}" style="width:auto">
+      <span>—</span>
+      <input class="sms-in" type="date" id="atkRtTo" value="${esc(R.to || '')}" style="width:auto">
+    </div>`;
+  const body = R.busy || !R.list ? '<div class="loading">⏳ Загрузка…</div>' : `
+    <table class="sms-tbl"><thead><tr><th>#</th><th>Сотрудник</th><th>Магазин</th><th>Выполнено</th><th>Баллы</th>${k ? '<th>Сумма</th>' : ''}<th>Открыто на нём сейчас</th></tr></thead><tbody>
+    ${list.map((e, i) => `<tr><td>${i < 3 && e.monthPoints ? ['🥇', '🥈', '🥉'][i] : i + 1}</td><td><b>${esc(e.name)}</b></td><td>${esc(e.shop)}</td><td>${e.monthDone || 0}</td><td><b>${e.monthPoints || 0}</b></td>${k ? `<td>${((e.monthPoints || 0) * k).toLocaleString('ru-RU')} с.</td>` : ''}<td>${e.openAssigned || 0}</td></tr>`).join('') || '<tr><td colspan="7" class="atk-empty">Нет данных</td></tr>'}
+    </tbody><tfoot><tr><td></td><td><b>Итого</b></td><td></td><td><b>${totD}</b></td><td><b>${totP}</b></td>${k ? `<td><b>${(totP * k).toLocaleString('ru-RU')} с.</b></td>` : ''}<td></td></tr></tfoot></table>`;
+  return `<div class="sms-card"><h3>🏆 Рейтинг ${esc(title)}</h3>${bar}${body}</div>`;
 }
 // ── настройки ──
 function atkSettingsHtml() {

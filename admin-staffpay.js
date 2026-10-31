@@ -107,8 +107,8 @@ function spayTableHtml() {
       <td class="c">${x.manual ? '<span class="muted">—</span>' : `<input class="spay-inp pct" type="number" min="0" max="100" step="0.1" data-k="rate" data-ref="${r}" value="${x.ratePct}" title="% бонуса — для новых чеков"><span class="spay-u">%</span>`}</td>
       <td class="r tnum">${spayN(x.bonus)}</td>
       <td class="r tnum" title="${x.dsProfileName ? 'ОртоCRM: ' + esc(x.dsProfileName) : 'нет привязки к ОртоCRM'}">${x.diagCount ? `${spayN(x.diagBonus)}<div class="spay-hint">${fmtInt(x.diagCount)} шт</div>` : (x.dsProfileId ? '0' : '<span class="muted">—</span>')}</td>
-      <td class="r"><input class="spay-inp" type="number" min="0" step="50" data-k="salary" data-ref="${r}" value="${x.salaryMonthly || 0}" title="Оклад в месяц">${d.months > 1 ? `<div class="spay-hint">×${d.months} = ${spayN(x.salary)}</div>` : ''}</td>
       <td class="r tnum ${x.extraBonus > 0.005 ? 'pos strong' : 'muted'}" title="Выплачено сверх расчёта — считается дополнительным бонусом">${x.extraBonus > 0.005 ? '+' + spayN(x.extraBonus) : '—'}</td>
+      <td class="r"><input class="spay-inp" type="number" min="0" step="50" data-k="salary" data-ref="${r}" value="${x.salaryMonthly || 0}" title="Оклад в месяц">${d.months > 1 ? `<div class="spay-hint">×${d.months} = ${spayN(x.salary)}</div>` : ''}</td>
       <td class="r tnum strong">${spayN(x.total)}</td>
       <td class="r"><input class="spay-inp" type="number" min="0" step="1" data-k="paid" data-ref="${r}" value="${x.paidOut || 0}" title="Выплачено за период — изменение создаёт/правит расход"></td>
       <td class="r tnum strong ${x.rest > 0.005 ? 'pos' : 'muted'}">${spayN(x.rest)}</td>

@@ -7,11 +7,13 @@
 const ATK = {
   tab: 'list', f: { wh: 'all', status: 'active', kind: '', seller: '', prio: '', q: '', from: '', to: '' }, all: [], menu: null,
   rows: [], shops: [], emps: null, settings: null, ai: { ref: '', stats: null, drafts: [], mix: { low: 1, mid: 2, high: 1 }, focus: '', summary: '', busy: false },
-  form: { title: '', desc: '', wh: '', who: '', prio: 'mid', points: '', due: '' },
+  form: { title: '', desc: '', wh: '', who: '', prio: 'mid', ttype: 'complex', points: '', due: '' },
 };
 const ATK_KIND = { restock: '🧩 Пополнить', check: '👀 Проверка', manual: '✍️ Ручная', ai: '✨ ИИ' };
 const ATK_ST = { open: 'Открыта', review: 'На проверке', done: 'Выполнена', rejected: 'Отклонена', cancelled: 'Отменена', expired: 'Просрочена', resolved: 'Закрыта сама', skipped: 'Нет товара' };
 const ATK_PRIO = { low: 'Низкий', mid: 'Средний', high: 'Высокий' };
+const ATK_TTYPE = { arrival: 'Расстановка нового поступления', storage: 'Проверка адресного хранения', fix: 'Исправление расхождений', complex: 'Сложное поручение администратора', other: 'Прочее (баллы по приоритету)' };
+function atkTypePts(tt, prio) { const S = ATK.settings || {}; const T = S.typePoints || {}; if (tt === 'complex') return `${T.complexMin || 10}–${T.complexMax || 15}`; if (tt === 'other') return (S.points || {})[prio || 'mid'] || 0; return T[tt] != null ? T[tt] : '—'; }
 
 async function atkApi(action, body, qs) {
   const res = await svcFetch(`${BARCODE_SVC_URL}/api/tasks?action=${action}${qs || ''}`, {
@@ -105,7 +107,7 @@ function atkShopName(wh) { const s = ATK.shops.find(x => x.wh === wh); return s 
 function atkDraw() {
   const root = $('tasksBody'); if (!root) return;
   const rv = ATK.all.filter(t => t.status === 'review').length;
-  const tabs = [['list', 'Все задачи' + (rv ? ` <i class="atk-badge">${rv}</i>` : '')], ['shops', 'По магазинам'], ['people', 'По сотрудникам'], ['rating', 'Рейтинг'], ['settings', 'Настройки']];
+  const tabs = [['list', 'Все задачи' + (rv ? ` <i class="atk-badge">${rv}</i>` : '')], ['shops', 'По магазинам'], ['people', 'По сотрудникам'], ['rating', 'Рейтинг'], ['rewards', '🎁 Награды'], ['settings', 'Настройки']];
   const showSide = ['list', 'shops', 'people'].includes(ATK.tab);
   let body = '';
   if (ATK.tab === 'list' || ATK.tab === 'shops') body = atkListHtml();
@@ -113,6 +115,7 @@ function atkDraw() {
   else if (ATK.tab === 'new') body = atkNewHtml();
   else if (ATK.tab === 'ai') body = atkAiHtml();
   else if (ATK.tab === 'rating') body = atkRatingHtml();
+  else if (ATK.tab === 'rewards') body = typeof atkRwHtml === 'function' ? atkRwHtml() : '';
   else body = atkSettingsHtml();
   root.innerHTML = `<div class="sms-wrap atk atk2">
     <div class="atk-top">
@@ -132,6 +135,7 @@ function atkDraw() {
   root.querySelectorAll('[data-atkshop]').forEach(b => b.addEventListener('click', () => { const w = b.dataset.atkshop; ATK.f.wh = ATK.f.wh === w ? 'all' : w; ATK.f.seller = ''; if (!['list', 'shops', 'people'].includes(ATK.tab)) ATK.tab = 'shops'; if (ATK.f.wh === 'all' && ATK.tab === 'shops') ATK.tab = 'list'; atkDraw(); }));
   atkBind(root);
   if (ATK.tab === 'rating') atkRatingBind(root);
+  if (ATK.tab === 'rewards' && typeof atkRwBind === 'function') atkRwBind(root);
 }
 function atkShopCardsHtml() {
   if (!ATK.shops.length) return '';
@@ -184,7 +188,7 @@ function atkListHtml() {
       <td>${who}</td>
       <td><span class="atk-pr ${t.prio}">${ATK_PRIO[t.prio]}</span></td>
       <td><span class="atk-st ${od ? 'expired' : t.status}">${stLbl}</span></td>
-      <td><span class="atk-pts">+${t.points} б.</span></td>
+      <td>${t.status === 'done' && t.awarded != null && t.awarded !== t.points ? `<span class="atk-pts ${t.awarded ? '' : 'z'}">+${t.awarded} б.</span>` : `<span class="atk-pts">+${t.points} б.</span>`}${t.repeat ? '<div class="atk-pz">повтор — без баллов</div>' : ''}${t.awardRevoked ? '<div class="atk-pz">баллы отменены</div>' : ''}${t.ttypeLabel && t.ttype !== 'other' ? `<div class="atk-pz n">${esc(t.ttypeLabel)}</div>` : ''}</td>
       <td class="atk-due ${od ? 'od' : ''}">${t.due ? '📅 ' + atkDay(t.due) + '.' + t.due.slice(0, 4) : '<span class="muted">—</span>'}</td>
       <td class="atk-act">${t.status === 'review' ? `<button class="atk-ok" title="Принять" data-atkact="approve" data-id="${t.id}" data-wh="${t.wh}">✓</button>` : ''}${acts.length ? `<button class="atk-dots" data-atkmenu="${t.id}">⋯</button>${ATK.menu === t.id ? `<div class="atk-menu">${acts.map(([k, l]) => `<button class="${k === 'delete' || k === 'reject' ? 'red' : ''}" data-atkact="${k}" data-id="${t.id}" data-wh="${t.wh}">${l}</button>`).join('')}</div>` : ''}` : ''}</td>
     </tr>`;
@@ -257,8 +261,9 @@ function atkNewHtml() {
       <div class="full"><label>Описание (что сделать и как проверить)</label><textarea class="sms-ta" id="atkNDesc" maxlength="1000">${esc(F.desc)}</textarea></div>
       <div><label>Магазин</label><select class="sms-sel" id="atkNWh">${atkShopOpts(F.wh, false)}</select></div>
       <div><label>Сотрудник</label><select class="sms-sel" id="atkNWho">${atkEmpOpts(F.who, F.wh, 'Все сотрудники магазина')}</select></div>
-      <div><label>Сложность</label><select class="sms-sel" id="atkNPrio">${['low', 'mid', 'high'].map(p => `<option value="${p}"${F.prio === p ? ' selected' : ''}>${ATK_PRIO[p]} (${S.points[p] || 0} б.)</option>`).join('')}</select></div>
-      <div><label>Баллы (пусто — по сложности)</label><input class="sms-in" id="atkNPts" type="number" min="0" value="${esc(F.points)}"></div>
+      <div><label>Тип задачи (определяет баллы)</label><select class="sms-sel" id="atkNType">${Object.entries(ATK_TTYPE).map(([k, l]) => `<option value="${k}"${F.ttype === k ? ' selected' : ''}>${l} — ${atkTypePts(k, F.prio)} б.</option>`).join('')}</select></div>
+      <div><label>Приоритет</label><select class="sms-sel" id="atkNPrio">${['low', 'mid', 'high'].map(p => `<option value="${p}"${F.prio === p ? ' selected' : ''}>${ATK_PRIO[p]}</option>`).join('')}</select></div>
+      <div><label>Баллы (${F.ttype === 'complex' ? 'от ' + atkTypePts('complex').replace('–', ' до ') : 'пусто — по типу'})</label><input class="sms-in" id="atkNPts" type="number" min="0" value="${esc(F.points)}" placeholder="${esc(String(atkTypePts(F.ttype, F.prio)))}"></div>
       <div><label>Срок</label><input class="sms-in" id="atkNDue" type="date" value="${esc(F.due)}"></div>
     </div>
     <p class="sms-sub" style="margin-top:12px">${S.needApproval ? 'Сотрудник отметит выполнение с комментарием — баллы начислятся после вашего подтверждения во вкладке «Задачи».' : 'Баллы начисляются сразу после выполнения.'}</p>
@@ -353,16 +358,19 @@ function atkSettingsHtml() {
   const S = ATK.settings || { points: {} };
   return `<div class="sms-card atk-form"><h3>⚙️ Настройки задач</h3>
     <div class="sms-f">
-      <div><label>Баллы: простая</label><input class="sms-in" type="number" min="0" id="atkSL" value="${S.points.low}"></div>
-      <div><label>Баллы: средняя</label><input class="sms-in" type="number" min="0" id="atkSM" value="${S.points.mid}"></div>
-      <div><label>Баллы: сложная</label><input class="sms-in" type="number" min="0" id="atkSH" value="${S.points.high}"></div>
-      <div><label>Баллы за проверку витрины</label><input class="sms-in" type="number" min="0" id="atkSC" value="${S.checkPoints}"></div>
+      <div class="full"><label style="font-weight:800;color:var(--tx)">Баллы за тип задачи</label></div>
+      ${[['restock', 'Пополнение витрины'], ['check', 'Проверка витрины по планограмме'], ['arrival', 'Расстановка нового поступления'], ['storage', 'Проверка адресного хранения'], ['fix', 'Исправление расхождений'], ['complexMin', 'Сложное поручение: от'], ['complexMax', 'Сложное поручение: до']].map(([k, l]) => `<div><label>${l}</label><input class="sms-in" type="number" min="0" id="atkST_${k}" value="${(S.typePoints || {})[k] != null ? S.typePoints[k] : ''}"></div>`).join('')}
+      <div><label>«Прочее»: низкий приоритет</label><input class="sms-in" type="number" min="0" id="atkSL" value="${S.points.low}"></div>
+      <div><label>«Прочее»: средний</label><input class="sms-in" type="number" min="0" id="atkSM" value="${S.points.mid}"></div>
+      <div><label>«Прочее»: высокий</label><input class="sms-in" type="number" min="0" id="atkSH" value="${S.points.high}"></div>
+      <div><label>Премия «Лучший сотрудник месяца», с.</label><input class="sms-in" type="number" min="0" id="atkSBest" value="${S.bestPrize != null ? S.bestPrize : 300}"></div>
+      <div><label>Повтор той же пары на месте без баллов, дней</label><input class="sms-in" type="number" min="0" id="atkSRep" value="${S.repeatDays != null ? S.repeatDays : 7}"></div>
       <div><label>1 балл = ? сомони (0 — только баллы)</label><input class="sms-in" type="number" min="0" step="0.1" id="atkSSom" value="${S.somPerPoint}"></div>
       <div><label>Проверок витрин в день</label><input class="sms-in" type="number" min="0" max="5" id="atkSDC" value="${S.dailyCheckCount}"></div>
       <div><label>«Отложить» на, мин</label><input class="sms-in" type="number" min="5" id="atkSSn" value="${S.snoozeMin}"></div>
       <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSRe" ${S.restock ? 'checked' : ''}> Авто-задачи «Пополнить витрину» после продажи (по планограмме)</label></div>
       <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSDaily" ${S.dailyCheck ? 'checked' : ''}> Ежедневная задача «Проверить витрину» (после 9:00, секции по кругу)</label></div>
-      <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSAp" ${S.needApproval ? 'checked' : ''}> Ручные и ИИ-задачи — баллы после подтверждения администратором</label></div>
+      <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSAp" ${S.needApproval ? 'checked' : ''}> Ручные, ИИ-задачи и проверки витрин — баллы после подтверждения администратором</label></div>
     </div>
     <p class="sms-sub" style="margin-top:10px">Задачи «Пополнить» подтверждаются сканом пары и начисляются сразу. Планограмма нужна для авто-задач и «Узнать место товара».</p>
     <button class="sms-btn pri big" id="atkSSave">Сохранить</button></div>`;
@@ -401,15 +409,17 @@ function atkBind(root) {
   }));
   // новая
   const F = ATK.form;
-  const keep = () => { const g = (id) => ($(id) || {}).value; F.title = g('atkNTitle') || ''; F.desc = g('atkNDesc') || ''; F.who = g('atkNWho') || ''; F.prio = g('atkNPrio') || 'mid'; F.points = g('atkNPts') || ''; F.due = g('atkNDue') || ''; };
+  const keep = () => { const g = (id) => ($(id) || {}).value; F.title = g('atkNTitle') || ''; F.desc = g('atkNDesc') || ''; F.who = g('atkNWho') || ''; F.prio = g('atkNPrio') || 'mid'; F.ttype = g('atkNType') || 'complex'; F.points = g('atkNPts') || ''; F.due = g('atkNDue') || ''; };
   on('atkNWh', 'change', e => { keep(); F.wh = e.target.value; F.who = ''; atkDraw(); });
+  on('atkNType', 'change', () => { keep(); atkDraw(); });
+  on('atkNPrio', 'change', () => { keep(); atkDraw(); });
   on('atkNCreate', 'click', async (e) => {
     keep(); if (!F.title.trim()) { atkToast('Укажите название'); return; }
     const emp = (ATK.emps || []).find(x => x.ref === F.who);
     e.target.disabled = true;
     try {
-      await atkApi('admin-create', { by: atkBy(), wh: F.wh, title: F.title, desc: F.desc, prio: F.prio, points: F.points, due: F.due, assignee: emp ? { ref: emp.ref, name: emp.name } : null });
-      atkToast('Задача поставлена'); ATK.form = { title: '', desc: '', wh: F.wh, who: '', prio: 'mid', points: '', due: '' };
+      await atkApi('admin-create', { by: atkBy(), wh: F.wh, title: F.title, desc: F.desc, prio: F.prio, ttype: F.ttype, points: F.points, due: F.due, assignee: emp ? { ref: emp.ref, name: emp.name } : null });
+      atkToast('Задача поставлена'); ATK.form = { title: '', desc: '', wh: F.wh, who: '', prio: 'mid', ttype: 'complex', points: '', due: '' };
       ATK.tab = 'list'; await atkLoad(false); atkDraw();
     } catch (err) { atkToast('Ошибка: ' + err.message); e.target.disabled = false; }
   });
@@ -441,8 +451,8 @@ function atkBind(root) {
     const n = (id) => ($(id) || {}).value; const c = (id) => !!($(id) || {}).checked;
     e.target.disabled = true;
     try {
-      const d = await atkApi('settings-save', { settings: { points: { low: n('atkSL'), mid: n('atkSM'), high: n('atkSH') }, checkPoints: n('atkSC'), somPerPoint: n('atkSSom'), dailyCheckCount: n('atkSDC'), snoozeMin: n('atkSSn'), restock: c('atkSRe'), dailyCheck: c('atkSDaily'), needApproval: c('atkSAp') } });
-      ATK.settings = d.settings; atkToast('Настройки сохранены'); atkDraw();
+      const d = await atkApi('settings-save', { settings: { points: { low: n('atkSL'), mid: n('atkSM'), high: n('atkSH') }, typePoints: Object.fromEntries(['restock', 'check', 'arrival', 'storage', 'fix', 'complexMin', 'complexMax'].map(k => [k, n('atkST_' + k)])), bestPrize: n('atkSBest'), repeatDays: n('atkSRep'), somPerPoint: n('atkSSom'), dailyCheckCount: n('atkSDC'), snoozeMin: n('atkSSn'), restock: c('atkSRe'), dailyCheck: c('atkSDaily'), needApproval: c('atkSAp') } });
+      ATK.settings = d.settings; if (typeof RW !== 'undefined') RW.d = null; atkToast('Настройки сохранены'); atkDraw();
     } catch (err) { atkToast('Ошибка: ' + err.message); e.target.disabled = false; }
   });
 }

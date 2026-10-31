@@ -59,7 +59,7 @@
       <section class="tk-scr" id="tkList">
         <header class="tk-head"><button class="tk-ib" data-tk="close" aria-label="Назад">${ICON.back}</button><h1>Задачи</h1><button class="tk-ib tk-help" data-tk="help" aria-label="Справка">?</button></header>
         <div class="tk-tabs" id="tkTabs">
-          <button data-tab="mine" class="on">Мои задачи <i id="tkTabMineN"></i></button><button data-tab="all">Все</button><button data-tab="history">История</button>
+          <button data-tab="mine" class="on">Мои задачи <i id="tkTabMineN"></i></button><button data-tab="all">Все</button><button data-tab="history">История</button><button data-tab="rewards">🎁 Награды</button>
         </div>
         <div class="tk-chips" id="tkChips"></div>
         <div class="tk-items" id="tkItems"><div class="tk-empty">Загрузка…</div></div>
@@ -109,7 +109,9 @@
   function renderList() {
     const d = TK.data || {};
     document.querySelectorAll('#tkTabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === TK.tab));
+    $('tkChips').style.display = TK.tab === 'rewards' ? 'none' : '';
     const n = (d.mine || []).filter(t => !t.snoozed).length; $('tkTabMineN').textContent = n ? n : ''; $('tkTabMineN').style.display = n ? '' : 'none';
+    if (TK.tab === 'rewards') { renderRewards(); return; }
     const arr = curArr();
     const cnt = { all: arr.length, showcase: arr.filter(t => t.type === 'showcase').length, stock: arr.filter(t => t.type === 'stock').length, other: arr.filter(t => t.type === 'other').length };
     $('tkChips').innerHTML = [['all', 'Все'], ['showcase', 'Витрины'], ['stock', 'Склад'], ['other', 'Другое']]
@@ -354,9 +356,55 @@
     } catch (e) { box.innerHTML = `<div class="tk-small warn">${esc(e.message)}</div><button class="tk-btn pri wide" data-tk="again">Сканировать ещё</button>`; stopCam(); }
   }
 
+  // ── награды (магазин баллов) ───────────────────────────
+  const fmtD = (iso) => { try { return new Date(iso).toLocaleString('ru-RU', { timeZone: 'Asia/Tashkent', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) { return ''; } };
+  const CL_ST = { pending: ['На рассмотрении', 'p'], approved: ['Выдано', 'ok'], rejected: ['Отклонено', 'no'], cancelled: ['Отменено', 'off'] };
+  const H_TYPE = { earn: 'За задачу', revoke: 'Отмена начисления', adjust: 'Корректировка', spend: 'Обмен на награду', refund: 'Возврат баллов', best: 'Лучший сотрудник' };
+  async function renderRewards(fresh) {
+    const box = $('tkItems');
+    if (!TK.rw || fresh) { box.innerHTML = '<div class="tk-empty">Загрузка…</div>'; try { TK.rw = await api('my-rewards'); } catch (e) { box.innerHTML = `<div class="tk-empty">Не удалось загрузить: ${esc(e.message)}</div>`; return; } }
+    if (TK.tab !== 'rewards') return;
+    const d = TK.rw, m = d.month || {};
+    const next = (d.rewards || []).find(r => r.cost > d.available);
+    box.innerHTML = `
+      <div class="tkr-bal">
+        <div><span>Мой баланс</span><b>${d.balance}</b><i>баллов${d.pending ? ` · ${d.pending} в заявках` : ''}</i></div>
+        <div><span>За этот месяц</span><b>${m.points || 0}</b><i>${m.rank ? `${m.rank}-е место из ${m.of}` : 'пока без места в рейтинге'}</i></div>
+      </div>
+      ${next ? `<div class="tkr-next"><div class="tkr-nl"><span>До «${esc(next.title)}»</span><b>${d.available} / ${next.cost}</b></div><div class="tkr-bar"><i style="width:${next.pct}%"></i></div></div>` : ''}
+      <div class="tkr-best">🏆 <div><b>Лучший сотрудник месяца — премия ${d.bestPrize} с.</b><small>${m.leader ? `Сейчас лидирует: ${esc(m.leader.name)} (${m.leader.points} б.)` : 'Выполняйте задачи — рейтинг месяца не уменьшается при обмене баллов'}</small>${(d.bestWins || []).length ? `<small class="g">Вы побеждали: ${d.bestWins.map(w => esc(w.month)).join(', ')}</small>` : ''}</div></div>
+      <div class="tkr-h">Каталог наград</div>
+      ${(d.rewards || []).map(r => `<div class="tkr-rw${r.can ? '' : ' off'}">
+        <span class="tkr-ic">${esc(r.icon || '🎁')}</span>
+        <div class="tkr-rb"><b>${esc(r.title)}</b><small>${esc(r.desc || '')}${r.terms ? ' · ' + esc(r.terms) : ''}</small>
+          ${r.can ? '' : `<div class="tkr-bar sm"><i style="width:${r.pct}%"></i></div>`}</div>
+        <div class="tkr-rr"><em>${r.cost} б.</em>${r.pending ? '<span class="tkr-st p">Заявка подана</span>' : r.can ? `<button class="tkr-go" data-rwclaim="${esc(r.id)}">Обменять</button>` : `<span class="tkr-need">ещё ${r.cost - Math.max(0, d.available)}</span>`}</div>
+      </div>`).join('')}
+      <div class="tkr-h">Мои заявки</div>
+      ${(d.claims || []).length ? d.claims.map(c => { const st = CL_ST[c.status] || [c.status, 'off']; return `<div class="tkr-cl"><div><b>${esc(c.icon || '🎁')} ${esc(c.title)}</b><small>${fmtD(c.at)} · ${c.cost} б.${c.note ? ' · ' + esc(c.note) : ''}</small></div><div class="tkr-rr"><span class="tkr-st ${st[1]}">${st[0]}</span>${c.status === 'pending' ? `<button class="tkr-x" data-rwcancel="${esc(c.id)}">Отменить</button>` : ''}</div></div>`; }).join('') : '<div class="tk-empty sm">Заявок пока нет</div>'}
+      <div class="tkr-h">История баллов</div>
+      ${(d.history || []).length ? d.history.map(e => `<div class="tkr-hi${e.revoked ? ' rv' : ''}"><div><b>${esc(H_TYPE[e.type] || e.type)}</b><small>${esc(e.title || e.note || '')} · ${fmtD(e.at)}${e.revoked ? ' · отменено' : ''}</small></div><em class="${e.pts < 0 ? 'm' : 'p'}">${e.pts > 0 ? '+' : ''}${e.pts}</em></div>`).join('') : '<div class="tk-empty sm">Начислений пока нет</div>'}
+      <div class="tkr-note">Баллы начисляются после выполнения и подтверждения задачи. Повторная расстановка той же пары на то же место баллов не даёт.</div>`;
+  }
+  async function rwClaim(id) {
+    const r = ((TK.rw || {}).rewards || []).find(x => x.id === id); if (!r || TK.busy) return;
+    if (!confirm(`Обменять ${r.cost} баллов на «${r.title}»?\nЗаявку подтвердит администратор.`)) return;
+    TK.busy = true;
+    try { await api('my-claim', null, { rewardId: id }); toast('Заявка отправлена администратору'); await renderRewards(true); }
+    catch (e) { toast(e.message, true); } finally { TK.busy = false; }
+  }
+  async function rwCancel(id) {
+    if (TK.busy || !confirm('Отменить заявку? Баллы останутся на балансе.')) return;
+    TK.busy = true;
+    try { await api('my-claim-cancel', null, { id }); toast('Заявка отменена'); await renderRewards(true); }
+    catch (e) { toast(e.message, true); } finally { TK.busy = false; }
+  }
+
   // ── клики ───────────────────────────────────────────────
   function onClick(e) {
-    const tabB = e.target.closest('[data-tab]'); if (tabB) { TK.tab = tabB.dataset.tab; TK.chip = 'all'; renderList(); return; }
+    const tabB = e.target.closest('[data-tab]'); if (tabB) { TK.tab = tabB.dataset.tab; TK.chip = 'all'; if (TK.tab === 'rewards') TK.rw = null; renderList(); return; }
+    const rc = e.target.closest('[data-rwclaim]'); if (rc) { rwClaim(rc.dataset.rwclaim); return; }
+    const rx = e.target.closest('[data-rwcancel]'); if (rx) { rwCancel(rx.dataset.rwcancel); return; }
     const chipB = e.target.closest('[data-chip]'); if (chipB) { TK.chip = chipB.dataset.chip; renderList(); return; }
     const op = e.target.closest('[data-open]'); if (op) { openTask(op.dataset.open); return; }
     const b = e.target.closest('[data-tk]'); if (!b) return;
@@ -430,7 +478,7 @@
           <div class="tk-earn-card"><span class="tk-earn-cap">Выполнено сегодня</span>
             <div class="tk-ring"><svg viewBox="0 0 80 80"><circle cx="40" cy="40" r="${R}" class="bg"/><circle cx="40" cy="40" r="${R}" class="fg" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct / 100)}"/></svg><b>${td.done || 0}/${td.total || 0}</b><i>${pct}%</i></div>
             <span class="tk-earn-sub">Сегодня: +${td.points || 0} баллов</span></div>
-          <div class="tk-earn-card gift"><span class="tk-earn-cap">Бонус за задачи</span><span class="tk-gift">${ICON.gift}</span><b class="tk-earn-big">${d.month && d.month.points || 0}</b><span class="tk-earn-sub">баллов за месяц ${som}</span>${d.review ? `<span class="tk-earn-sub rv">${d.review} на проверке</span>` : ''}</div>
+          <div class="tk-earn-card gift"><span class="tk-earn-cap">Бонус за задачи</span><span class="tk-gift">${ICON.gift}</span><b class="tk-earn-big">${d.month && d.month.points || 0}</b><span class="tk-earn-sub">баллов за месяц ${som}</span>${d.balance != null ? `<span class="tk-earn-sub">Баланс для наград: ${d.balance}</span>` : ''}${d.review ? `<span class="tk-earn-sub rv">${d.review} на проверке</span>` : ''}</div>
         </div>
         <div class="tk-earn-title">Мои задачи сегодня</div>
         <button class="tk-earn-row" data-earn="1"><span class="tk-earn-chk ok">✓</span><span>Выполнено</span><b>${td.done || 0}</b>${ICON.chev}</button>

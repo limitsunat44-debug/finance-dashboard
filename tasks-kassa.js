@@ -58,6 +58,9 @@
     root.innerHTML = `
       <section class="tk-scr" id="tkList">
         <header class="tk-head"><button class="tk-ib" data-tk="close" aria-label="Назад">${ICON.back}</button><h1>Задачи</h1><button class="tk-ib tk-help" data-tk="help" aria-label="Справка">?</button></header>
+        <div class="tk-scbar-w">
+          <button type="button" class="tk-scbar" data-tk="shelfcheck">🗂 <b>Проверка полок</b><small>без сканирования</small>${ICON.chev}</button>
+        </div>
         <div class="tk-tabs" id="tkTabs">
           <button data-tab="mine" class="on">Мои задачи <i id="tkTabMineN"></i></button><button data-tab="all">Все</button><button data-tab="history">История</button><button data-tab="rewards">🎁 Награды</button>
         </div>
@@ -81,6 +84,10 @@
         <header class="tk-head"><span class="tk-ib"></span><h1></h1><button class="tk-ib" data-tk="tolist" aria-label="Закрыть">${ICON.close}</button></header>
         <div class="tk-done-body" id="tkDoneBody"></div>
       </section>
+      <section class="tk-scr" id="tkSc" style="display:none">
+        <header class="tk-head"><button class="tk-ib" data-tk="scback" aria-label="Назад">${ICON.back}</button><h1 id="tkScTitle">Проверка полок</h1><button class="tk-ib" data-tk="screload" aria-label="Обновить">↻</button></header>
+        <div class="tk-dbody" id="tkScBody"></div>
+      </section>
       <div class="tk-toast" id="tkToast"></div>`;
     document.body.appendChild(root);
     root.addEventListener('click', onClick);
@@ -88,7 +95,7 @@
     $('tkCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value.trim(); if (v) onCode(v); } });
   }
   function show(id) {
-    ['tkList', 'tkDetail', 'tkScan', 'tkDone'].forEach(x => { const el = $(x); if (el) el.style.display = x === id ? '' : 'none'; });
+    ['tkList', 'tkDetail', 'tkScan', 'tkDone', 'tkSc'].forEach(x => { const el = $(x); if (el) el.style.display = x === id ? '' : 'none'; });
     if (id !== 'tkScan') stopCam();
   }
   function openRoot() { mount(); $('tkRoot').style.display = ''; document.body.classList.add('tk-on'); }
@@ -326,6 +333,70 @@
     if (TK.mode === 'locate') return doLocate(code);
   }
 
+  // ── проверка полок: схема → секция целиком (без сканирования) ──
+  const SC = { map: null, zone: 'hall', fx: null, data: null, from: 'menu' };
+  const SC_ST = { ok: 'на месте', sold: 'продана', away: 'в другом магазине', gone: 'нет в наличии', missing: 'код не найден' };
+  const scShort = (n) => String(n || '').replace(/^(Секция|Стеллаж|Тумба|Стенд|Подиум)\s*/i, '') || n;
+  function openShelfCheck(from) {
+    const c = ctx(); if (!c.open) { alert('Сначала откройте смену'); return; }
+    openRoot(); SC.from = from === 'tasks' ? 'tasks' : 'menu'; SC.fx = null; show('tkSc'); scLoadMap();
+  }
+  async function scLoadMap() {
+    $('tkScTitle').textContent = 'Проверка полок';
+    const b = $('tkScBody'); if (!SC.map) b.innerHTML = '<div class="tk-empty">Загружаю схему…</div>';
+    try { SC.map = await api('shelf-check'); scDrawMap(); }
+    catch (e) { b.innerHTML = `<div class="tk-empty">Не удалось загрузить: ${esc(e.message)}</div>`; }
+  }
+  function scFx(zone) { return ((SC.map && SC.map.fixtures) || []).filter(f => (f.zone || 'hall') === zone); }
+  function scDrawMap() {
+    const d = SC.map, b = $('tkScBody'); if (!d) return;
+    if (d.noPlan) { b.innerHTML = `<div class="tk-empty">Для магазина «${esc(d.shop || '')}» ещё нет планограммы. Попросите администратора её нарисовать.</div>`; return; }
+    const zs = Object.keys(d.zones || {}).filter(z => scFx(z).some(f => f.shelves));
+    if (!zs.includes(SC.zone)) SC.zone = zs[0] || 'hall';
+    const z = (d.zones || {})[SC.zone] || {}, fx = scFx(SC.zone);
+    const poly = z.polygon || [[0, 0], [10, 0], [10, 6], [0, 6]];
+    const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
+    const x0 = Math.min(...xs) - .3, y0 = Math.min(...ys) - .3, w = Math.max(...xs) - x0 + .3, h = Math.max(...ys) - y0 + .3;
+    const svg = `<svg class="tk-map tk-scmap" viewBox="${x0} ${y0} ${w} ${h}" preserveAspectRatio="xMidYMid meet"><polygon points="${poly.map(p => p.join(',')).join(' ')}" class="zone"/>
+      ${fx.map(f => { const rw = f.rot % 180 ? f.d : f.w, rh = f.rot % 180 ? f.w : f.d; const lb = scShort(f.name), fs = Math.max(.16, Math.min(.42, rw / (String(lb).length * .62 + .15))); return `<g ${f.shelves ? `data-scfx="${esc(f.id)}" class="sc-g ${f.st}"` : 'class="sc-g none"'}><g transform="translate(${f.x} ${f.y}) rotate(${f.rot})"><rect x="${-f.w / 2}" y="${-f.d / 2}" width="${f.w}" height="${f.d}" rx=".06"/></g>${f.shelves ? `<text x="${f.x}" y="${f.y + fs * .35}" text-anchor="middle" font-size="${fs}">${esc(scShort(f.name))}</text>` : ''}</g>`; }).join('')}</svg>`;
+    const list = fx.filter(f => f.shelves).sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru', { numeric: true }));
+    b.innerHTML = `<div class="tk-sc-hint">Нажмите на секцию на схеме или в списке — откроются все полки с парами. Сканировать ничего не нужно.</div>
+      ${zs.length > 1 ? `<div class="tk-sc-zones">${zs.map(k => `<button type="button" data-sczone="${k}" class="${k === SC.zone ? 'on' : ''}">${esc((d.zones[k] || {}).name || k)}</button>`).join('')}</div>` : ''}
+      <div class="tk-sc-mapw">${svg}</div>
+      <div class="tk-sc-leg"><span><i class="ok"></i>всё на месте</span><span><i class="warn"></i>есть ушедшие пары</span><span><i class="empty"></i>пусто</span></div>
+      <div class="tk-sc-list">${list.map(f => `<button type="button" class="tk-sc-fx" data-scfx="${esc(f.id)}"><i class="dot ${f.st}"></i><span><b>${esc(f.name)}</b><small>${esc(f.category || '')}${f.category ? ' · ' : ''}${f.shelves} ${f.type === 'pegboard' ? 'рядов' : 'полок'} · ${f.pairs} пар</small></span>${f.gone ? `<em>${f.gone} ушло</em>` : ''}${ICON.chev}</button>`).join('') || '<div class="tk-empty">В этой зоне нет секций с полками</div>'}</div>`;
+  }
+  async function scOpenFx(id) {
+    SC.fx = id; const b = $('tkScBody');
+    const f0 = ((SC.map && SC.map.fixtures) || []).find(f => f.id === id);
+    $('tkScTitle').textContent = f0 ? f0.name : 'Секция';
+    b.innerHTML = '<div class="tk-empty">Загружаю полки…</div>'; b.scrollTop = 0;
+    try { const d = await api('shelf-check', { fx: id }); if (SC.fx !== id) return; if (!d.fixture) throw new Error(d.error || 'Секция не найдена'); SC.data = d; scDrawFx(); }
+    catch (e) { b.innerHTML = `<div class="tk-empty">Не удалось загрузить: ${esc(e.message)}</div>`; }
+  }
+  function scDrawFx() {
+    const f = SC.data.fixture, b = $('tkScBody');
+    const sib = scFx(f.zone).filter(x => x.shelves).sort((a, c) => String(a.name).localeCompare(String(c.name), 'ru', { numeric: true }));
+    const i = sib.findIndex(x => x.id === f.id), prev = sib[i - 1], next = sib[i + 1];
+    const peg = f.type === 'pegboard', word = peg ? 'Ряд' : 'Полка';
+    b.innerHTML = `<div class="tk-sc-nav"><button type="button" ${prev ? `data-scfx="${esc(prev.id)}"` : 'disabled'}>‹ ${prev ? esc(scShort(prev.name)) : ''}</button><div><b>${esc(f.name)}</b><small>${esc(f.category || '')}</small></div><button type="button" ${next ? `data-scfx="${esc(next.id)}"` : 'disabled'}>${next ? esc(scShort(next.name)) : ''} ›</button></div>
+      <div class="tk-sc-sum"><span><b>${f.pairs}</b>пар по плану</span><span class="ok"><b>${f.ok}</b>на месте</span><span class="${f.gone ? 'bad' : ''}"><b>${f.gone}</b>ушло</span></div>
+      ${f.shelvesList.map(sh => `<div class="tk-sc-sh">
+        <div class="tk-sc-shh"><b>${word} ${sh.n}</b><small>${sh.pairs} пар${sh.pairs - sh.ok ? ` · <span class="bad">${sh.pairs - sh.ok} ушло</span>` : ''}${sh.free ? ` · свободно ${sh.free}` : ''}</small><button type="button" data-scedit="${esc(sh.sid)}">Изменить</button></div>
+        ${sh.items.length ? sh.items.map(it => `<div class="tk-sc-it${it.gone && !it.ok ? ' allgone' : ''}">
+          ${it.photo ? `<img src="${esc(it.photo)}" alt="" loading="lazy">` : `<span class="tk-sc-noph">${ICON.box}</span>`}
+          <div class="tk-sc-ib"><b>${it.hook ? `<i class="hk">К${it.hook}</i> ` : ''}${esc(it.name)}</b>
+            <div class="tk-sc-u">${it.units.length ? it.units.map(u => `<span class="${u.st}" title="${esc(SC_ST[u.st] || '')}"><b>${esc(u.size)}</b> · №${esc(u.last4)}${u.st !== 'ok' ? ` <em>${esc(SC_ST[u.st] || '')}</em>` : ''}</span>`).join('') : '<span class="none">пары не привязаны</span>'}</div>
+          </div></div>`).join('') : '<div class="tk-sc-empty">На полке нет товаров по планограмме</div>'}
+      </div>`).join('')}
+      <button type="button" class="tk-sc-back" data-tk="scmap">← К схеме</button>`;
+  }
+  function scEdit(sid) {
+    const wh = SC.data && SC.data.wh;
+    if (typeof posShelfOpen !== 'function' || !wh) { toast('Экран полки недоступен', true); return; }
+    closeRoot(); posShelfOpen({ w: wh, sid });
+  }
+
   // ── узнать место товара ────────────────────────────────
   function openLocate() {
     const c = ctx(); if (!c.open) { alert('Сначала откройте смену'); return; }
@@ -402,6 +473,9 @@
 
   // ── клики ───────────────────────────────────────────────
   function onClick(e) {
+    const scz = e.target.closest('[data-sczone]'); if (scz) { SC.zone = scz.dataset.sczone; scDrawMap(); return; }
+    const scf = e.target.closest('[data-scfx]'); if (scf) { scOpenFx(scf.dataset.scfx); return; }
+    const sce = e.target.closest('[data-scedit]'); if (sce) { scEdit(sce.dataset.scedit); return; }
     const tabB = e.target.closest('[data-tab]'); if (tabB) { TK.tab = tabB.dataset.tab; TK.chip = 'all'; if (TK.tab === 'rewards') TK.rw = null; renderList(); return; }
     const rc = e.target.closest('[data-rwclaim]'); if (rc) { rwClaim(rc.dataset.rwclaim); return; }
     const rx = e.target.closest('[data-rwcancel]'); if (rx) { rwCancel(rx.dataset.rwcancel); return; }
@@ -410,6 +484,10 @@
     const b = e.target.closest('[data-tk]'); if (!b) return;
     const a = b.dataset.tk;
     if (a === 'close') closeRoot();
+    else if (a === 'shelfcheck') openShelfCheck('tasks');
+    else if (a === 'screload') { if (SC.fx) scOpenFx(SC.fx); else { SC.map = null; scLoadMap(); } }
+    else if (a === 'scmap') { SC.fx = null; $('tkScTitle').textContent = 'Проверка полок'; scLoadMap(); }
+    else if (a === 'scback') { if (SC.fx) { SC.fx = null; $('tkScTitle').textContent = 'Проверка полок'; scDrawMap(); } else if (SC.from === 'tasks') { show('tkList'); loadList(); } else closeRoot(); }
     else if (a === 'help') alert('Задачи приходят сами: когда с витрины продали пару, появится «Секция · Полка · Место пусто — поставьте товар». Возьмите пару со склада, поставьте на место и отсканируйте её — задача выполнится, вам начислятся баллы.\n\nАдминистратор тоже может ставить задачи. Баллы и прогресс — в «Мой заработок».');
     else if (a === 'tolist') { TK.mode = null; show('tkList'); loadList(); }
     else if (a === 'do') doTask();
@@ -454,6 +532,7 @@
       const ref = $('pmobMoreHistory');
       menu.insertBefore(mk('tkMoreTasks', '✅', 'Задачи <i class="tk-badge tk-badge-in" style="display:none"></i>', openTasks), ref || null);
       menu.insertBefore(mk('tkMoreLocate', '📷', 'Узнать место товара', openLocate), ref || null);
+      menu.insertBefore(mk('tkMoreShelfCheck', '🗂', 'Проверка полок', openShelfCheck), ref || null);
       menu.insertBefore(mk('tkMoreAsk', '🤖', 'Спросить ИИ (помощник продавца)', openAsk), ref || null);
     }
   }
@@ -537,6 +616,7 @@
   }
   window.tkOpenTasks = openTasks;
   window.tkOpenLocate = openLocate;
+  window.tkOpenShelfCheck = openShelfCheck;
   window.tkEarnings = earnings;
   window.tkPoke = () => { setTimeout(refreshBadge, 6000); setTimeout(refreshBadge, 30000); };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

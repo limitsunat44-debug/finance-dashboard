@@ -250,3 +250,58 @@ body.tk-on { overflow: hidden; }
 .tkr-hi em { font-style: normal; font-weight: 800; font-size: 15px; } .tkr-hi em.p { color: var(--tk-g2); } .tkr-hi em.m { color: #dc2626; }
 .tkr-hi.rv { opacity: .55; } .tkr-hi.rv em { text-decoration: line-through; }
 .tkr-note { font-size: 12px; color: var(--tk-mut); margin: 14px 0 24px; line-height: 1.45; }
+
+/* ── Проверка полок (v1.7.2) ── */
+.tk-scbar-w { padding: 0 16px 8px; }
+.tk-scbar { width: 100%; display: flex; align-items: center; gap: 8px; text-align: left; border: 1px solid #bfe6cd; background: linear-gradient(135deg, #e8f7ee, #fff); border-radius: 14px; padding: 10px 12px; font-size: 18px; color: var(--tk-ink); cursor: pointer; }
+.tk-scbar b { font-size: 14.5px; white-space: nowrap; }
+.tk-scbar small { flex: 1; min-width: 0; font-size: 11.5px; color: var(--tk-mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-scbar svg { flex: 0 0 auto; color: var(--tk-mut); }
+.tk-sc-hint { font-size: 12.5px; color: var(--tk-mut); margin: 2px 0 10px; line-height: 1.4; }
+.tk-sc-zones { display: flex; gap: 6px; margin-bottom: 8px; }
+.tk-sc-zones button { flex: 1; height: 36px; border-radius: 10px; border: 1px solid var(--tk-line); background: #fff; font-weight: 700; font-size: 13px; color: var(--tk-mut); }
+.tk-sc-zones button.on { background: var(--tk-g); border-color: var(--tk-g); color: #fff; }
+.tk-sc-mapw { background: #f8fafb; border: 1px solid var(--tk-line); border-radius: 14px; padding: 6px; }
+.tk-scmap { max-height: 300px; border: 0; background: transparent; }
+.tk-scmap .sc-g rect { stroke-width: .04; }
+.tk-scmap .sc-g.ok rect { fill: #bbf7d0; stroke: #16a34a; }
+.tk-scmap .sc-g.warn rect { fill: #fde68a; stroke: #d97706; }
+.tk-scmap .sc-g.empty rect { fill: #e5e7eb; stroke: #9ca3af; }
+.tk-scmap .sc-g.none rect { fill: #eef2f3; stroke: #d5dddd; }
+.tk-scmap .sc-g[data-scfx] { cursor: pointer; }
+.tk-scmap text { fill: #14201f; font-weight: 800; pointer-events: none; }
+.tk-sc-leg { display: flex; flex-wrap: wrap; gap: 12px; font-size: 11.5px; color: var(--tk-mut); margin: 8px 2px 4px; }
+.tk-sc-leg i, .tk-sc-fx .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+.ok.dot, .tk-sc-leg i.ok { background: #22c55e; } .warn.dot, .tk-sc-leg i.warn { background: #f59e0b; } .empty.dot, .tk-sc-leg i.empty { background: #9ca3af; }
+.tk-sc-list { margin-top: 8px; }
+.tk-sc-fx { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; background: #fff; border: 0; border-bottom: 1px solid var(--tk-line); padding: 11px 2px; color: var(--tk-ink); cursor: pointer; }
+.tk-sc-fx .dot { flex: 0 0 10px; margin: 0; }
+.tk-sc-fx span { flex: 1; min-width: 0; } .tk-sc-fx b { display: block; font-size: 14.5px; } .tk-sc-fx small { display: block; font-size: 12px; color: var(--tk-mut); }
+.tk-sc-fx em { font-style: normal; font-size: 11.5px; font-weight: 700; color: #b45309; background: #fef3c7; border-radius: 99px; padding: 2px 8px; white-space: nowrap; }
+.tk-sc-fx svg { color: var(--tk-mut); flex: 0 0 auto; }
+.tk-sc-nav { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.tk-sc-nav > div { flex: 1; text-align: center; min-width: 0; } .tk-sc-nav b { display: block; font-size: 16px; } .tk-sc-nav small { font-size: 12px; color: var(--tk-mut); }
+.tk-sc-nav button { min-width: 64px; height: 36px; border-radius: 10px; border: 1px solid var(--tk-line); background: #fff; font-weight: 700; font-size: 13px; color: var(--tk-ink); }
+.tk-sc-nav button:disabled { opacity: .35; }
+.tk-sc-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.tk-sc-sum span { background: var(--tk-soft); border-radius: 12px; padding: 8px; text-align: center; font-size: 11.5px; color: var(--tk-mut); }
+.tk-sc-sum b { display: block; font-size: 20px; color: var(--tk-ink); }
+.tk-sc-sum .ok b { color: var(--tk-g2); } .tk-sc-sum .bad b { color: #d97706; }
+.tk-sc-sh { border: 1px solid var(--tk-line); border-radius: 14px; margin-bottom: 10px; overflow: hidden; }
+.tk-sc-shh { display: flex; align-items: center; gap: 8px; background: var(--tk-soft); padding: 8px 10px; }
+.tk-sc-shh b { font-size: 14px; } .tk-sc-shh small { flex: 1; font-size: 12px; color: var(--tk-mut); } .tk-sc-shh .bad { color: #b45309; font-weight: 700; }
+.tk-sc-shh button { border: 1px solid var(--tk-line); background: #fff; border-radius: 8px; font-size: 12px; font-weight: 600; padding: 4px 9px; color: var(--tk-mut); }
+.tk-sc-it { display: flex; gap: 10px; padding: 9px 10px; border-top: 1px solid var(--tk-line); }
+.tk-sc-it img, .tk-sc-noph { width: 58px; height: 58px; flex: 0 0 58px; border-radius: 10px; object-fit: cover; background: var(--tk-soft); display: flex; align-items: center; justify-content: center; color: var(--tk-mut); }
+.tk-sc-it.allgone img { opacity: .45; }
+.tk-sc-ib { flex: 1; min-width: 0; } .tk-sc-ib > b { display: block; font-size: 13.5px; line-height: 1.25; }
+.tk-sc-ib .hk { font-style: normal; font-size: 11px; background: #e0e7ff; color: #3730a3; border-radius: 6px; padding: 0 5px; }
+.tk-sc-u { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.tk-sc-u span { font-size: 13px; border-radius: 8px; padding: 3px 8px; background: var(--tk-gs); color: var(--tk-g2); border: 1px solid #bfe6cd; font-variant-numeric: tabular-nums; }
+.tk-sc-u span b { font-size: 14px; }
+.tk-sc-u span em { font-style: normal; font-size: 11px; font-weight: 700; }
+.tk-sc-u span.sold, .tk-sc-u span.gone, .tk-sc-u span.missing { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+.tk-sc-u span.away { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.tk-sc-u span.none { background: var(--tk-soft); color: var(--tk-mut); border-color: var(--tk-line); }
+.tk-sc-empty { padding: 10px; font-size: 12.5px; color: var(--tk-mut); border-top: 1px solid var(--tk-line); }
+.tk-sc-back { width: 100%; height: 46px; margin: 6px 0 24px; border-radius: 12px; border: 1px solid var(--tk-line); background: #fff; font-weight: 700; font-size: 14px; color: var(--tk-ink); }

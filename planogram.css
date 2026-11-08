@@ -287,3 +287,9 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-cross::before,.pg-cross::after{content:'';position:absolute;background:#fff;box-shadow:0 0 0 1px rgba(15,23,42,.55)}
 .pg-cross::before{left:8px;top:0;width:2px;height:18px}.pg-cross::after{top:8px;left:0;height:2px;width:18px}
 @media (hover:none),(pointer:coarse){#pgWalkLook{display:none}}
+
+/* v1.7.5: построение по стенам */
+.pg-draw{margin-top:10px;padding:10px;border:1px solid #bfdbfe;background:#eff6ff;border-radius:10px}
+.pg-draw .pg-info{margin:0 0 4px}
+.pg-f-title{font-weight:700;font-size:13px;color:#1e3a8a;margin-bottom:6px}
+.pg-draw-s{display:block;color:#64748b;font-size:11.5px;margin-top:4px;line-height:1.35}

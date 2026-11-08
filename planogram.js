@@ -371,6 +371,43 @@ function arcPoints(pts, i, bulge, n) {
   for (let k = 1; k < n; k++) { const t = k / n, a = aA + d0 * (1 - t) + d1 * t; out.push([r2(cx + R * Math.cos(a)), r2(cy + R * Math.sin(a))]); }
   return out;
 }
+// v1.7.5: построение формы по стенам (точка А → точка Б → длина → следующая стена → … → замкнуть)
+const DR = {
+  len: (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]),
+  ang: (a, b) => Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI,
+  // угол прилипает к 0/45/90°…, длина — к 5 см
+  snap(prev, raw, free) {
+    let L = DR.len(prev, raw), a = DR.ang(prev, raw);
+    if (!free) { const k = Math.round(a / 45) * 45; if (Math.abs(a - k) < 8) a = k; }
+    L = Math.round(L * 20) / 20;
+    const r = a * Math.PI / 180;
+    return [r2(prev[0] + L * Math.cos(r)), r2(prev[1] + L * Math.sin(r))];
+  },
+  setLast(len, ang) { // меняем последнюю стену: длина и/или угол
+    const P = S.draw.pts; if (P.length < 2) return;
+    const a = P[P.length - 2], b = P[P.length - 1];
+    const L = len != null ? len : DR.len(a, b), A = (ang != null ? ang : DR.ang(a, b)) * Math.PI / 180;
+    P[P.length - 1] = [r2(a[0] + L * Math.cos(A)), r2(a[1] + L * Math.sin(A))];
+  },
+  addTurn(turn, len) { // следующая стена: поворот относительно предыдущей (на экране + = направо)
+    const P = S.draw.pts; if (P.length < 2) return false;
+    const a = P[P.length - 2], b = P[P.length - 1], A = (DR.ang(a, b) + turn) * Math.PI / 180;
+    P.push([r2(b[0] + len * Math.cos(A)), r2(b[1] + len * Math.sin(A))]); return true;
+  },
+};
+function drawFinish() {
+  const z = S.layout.zones[S.zone]; let P = S.draw.pts.slice();
+  if (P.length > 3 && DR.len(P[0], P[P.length - 1]) < 0.06) P.pop();
+  if (P.length < 3) return toast('Нужно минимум 3 стены', true);
+  let sa = 0; for (let i = 0; i < P.length; i++) { const [x1, y1] = P[i], [x2, y2] = P[(i + 1) % P.length]; sa += x1 * y2 - x2 * y1; }
+  if (sa < 0) P.reverse(); // тот же обход, что у остальных форм
+  if (polyArea(P) < 2) return toast('Слишком маленькая площадь', true);
+  z.polygon = P.map(p => [r2(p[0]), r2(p[1])]);
+  z.door = null; S.draw = null; S.vsel = null; S.doorPick = true;
+  const out = zoneFx(S.zone).filter(f => !ptInPoly(f.x, f.y, z.polygon)).length;
+  changed(true);
+  toast(`Контур замкнут: ${z.polygon.length} стен, ${fmt(r2(polyArea(z.polygon)))} м². Теперь нажмите на стену, где вход` + (out ? ` · ${out} объект(ов) оказались снаружи — передвиньте` : ''));
+}
 function polyBounds(pts) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }; }
 function fxCorners(f) {
   const a = f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
@@ -1534,8 +1571,9 @@ function svgPlan(host, opts) {
   const zone = S.layout.zones[S.zone === 'hall' || opts.forceHall ? (opts.forceHall ? 'hall' : S.zone) : S.zone];
   const zkey = opts.forceHall ? 'hall' : S.zone;
   const pts = zone.polygon;
-  const b = polyBounds(pts);
-  const pad = opts.mini ? 0.4 : 1.2;
+  const drawing = S.draw && !opts.mini;
+  const b = polyBounds(drawing && S.draw.pts.length ? pts.concat(S.draw.pts) : pts);
+  const pad = opts.mini ? 0.4 : drawing ? 3 : 1.2;
   const vb = [b.x0 - pad, b.y0 - pad, (b.x1 - b.x0) + pad * 2, (b.y1 - b.y0) + pad * 2];
   const NS = 'http://www.w3.org/2000/svg';
   const FS = Math.max(vb[2], vb[3]) / 52; // базовый размер шрифта под масштаб помещения
@@ -1622,6 +1660,16 @@ function svgPlan(host, opts) {
     });
     pts.forEach((p, i) => { h += `<circle data-vx="${i}" cx="${p[0]}" cy="${p[1]}" r="0.17" fill="${S.vsel === i ? '#2563eb' : '#fff'}" stroke="#2563eb" stroke-width="0.05" style="cursor:grab"/>`; });
   }
+  if (drawing) {
+    const P = S.draw.pts, sw = FS * 0.22, lf = FS * 0.95;
+    h += `<rect x="${vb[0]}" y="${vb[1]}" width="${vb[2]}" height="${vb[3]}" fill="rgba(255,255,255,.55)"/>`;
+    const lbl = (a, b, col) => { const L = DR.len(a, b); if (L < 0.05) return ''; const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2; const t = fmt(r2(L)) + ' м'; return `<rect x="${mx - lf * t.length * 0.3}" y="${my - lf * 0.7}" width="${lf * t.length * 0.6}" height="${lf * 1.25}" rx="${lf * 0.3}" fill="#fff" stroke="${col}" stroke-width="${sw * 0.4}"/><text x="${mx}" y="${my + lf * 0.12}" font-size="${lf}" text-anchor="middle" dominant-baseline="middle" fill="${col}" font-weight="700">${t}</text>`; };
+    for (let i = 1; i < P.length; i++) h += `<line x1="${P[i - 1][0]}" y1="${P[i - 1][1]}" x2="${P[i][0]}" y2="${P[i][1]}" stroke="#2563eb" stroke-width="${sw * 1.6}" stroke-linecap="round"/>`;
+    if (P.length >= 3) h += `<line x1="${P[P.length - 1][0]}" y1="${P[P.length - 1][1]}" x2="${P[0][0]}" y2="${P[0][1]}" stroke="#16a34a" stroke-width="${sw}" stroke-dasharray="${sw * 3} ${sw * 2}" opacity=".7"/>`;
+    for (let i = 1; i < P.length; i++) h += lbl(P[i - 1], P[i], '#1d4ed8');
+    P.forEach((p, i) => { h += `<circle cx="${p[0]}" cy="${p[1]}" r="${i === 0 ? FS * 0.6 : FS * 0.38}" fill="${i === 0 ? '#16a34a' : i === P.length - 1 ? '#2563eb' : '#fff'}" stroke="${i === 0 ? '#fff' : '#2563eb'}" stroke-width="${sw * 0.8}" pointer-events="none"/>`; if (i < 26) h += `<text x="${p[0] + FS * 0.7}" y="${p[1] - FS * 0.6}" font-size="${lf * 0.85}" fill="#334155" font-weight="700" pointer-events="none">${String.fromCharCode(1040 + (i < 9 ? i : i + 1))}</text>`; });
+    h += `<g id="pgRub" pointer-events="none"><line stroke="#2563eb" stroke-width="${sw}" stroke-dasharray="${sw * 3} ${sw * 2}"/><circle r="${FS * 0.3}" fill="#2563eb" opacity=".6"/><rect fill="#1d4ed8" rx="${lf * 0.3}"/><text font-size="${lf}" fill="#fff" font-weight="700" text-anchor="middle" dominant-baseline="middle"></text></g>`;
+  }
   h += `</svg>`;
   host.innerHTML = h;
   const svg = host.querySelector('svg');
@@ -1638,6 +1686,35 @@ function svgPlan(host, opts) {
 function bind2d(svg, pts) {
   const toPt = (e) => { const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; const m = svg.getScreenCTM().inverse(); const r = p.matrixTransform(m); return [r.x, r.y]; };
   let drag = null;
+  if (S.draw) { // v1.7.5: режим «Построить по стенам»
+    const rub = svg.querySelector('#pgRub');
+    const pick = (e) => {
+      const P = S.draw.pts; let [x, y] = toPt(e);
+      if (!P.length) return [Math.round(x * 20) / 20, Math.round(y * 20) / 20];
+      const fs = Math.max(svg.viewBox.baseVal.width, svg.viewBox.baseVal.height) / 52;
+      if (P.length >= 3 && DR.len(P[0], [x, y]) < fs * 1.1) return P[0].slice();
+      return DR.snap(P[P.length - 1], [x, y], e.altKey);
+    };
+    svg.addEventListener('pointermove', (e) => {
+      const P = S.draw.pts; if (!rub || !P.length) return;
+      const q = pick(e), a = P[P.length - 1], L = DR.len(a, q);
+      const [ln, c, rc, tx] = rub.children; const t = fmt(r2(L)) + ' м';
+      const fs = Math.max(svg.viewBox.baseVal.width, svg.viewBox.baseVal.height) / 52 * 0.95;
+      ln.setAttribute('x1', a[0]); ln.setAttribute('y1', a[1]); ln.setAttribute('x2', q[0]); ln.setAttribute('y2', q[1]);
+      c.setAttribute('cx', q[0]); c.setAttribute('cy', q[1]);
+      const mx = (a[0] + q[0]) / 2, my = (a[1] + q[1]) / 2;
+      rc.setAttribute('x', mx - fs * t.length * 0.3); rc.setAttribute('y', my - fs * 0.7); rc.setAttribute('width', fs * t.length * 0.6); rc.setAttribute('height', fs * 1.25);
+      tx.setAttribute('x', mx); tx.setAttribute('y', my + fs * 0.12); tx.textContent = t;
+    });
+    svg.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      const P = S.draw.pts, q = pick(e);
+      if (P.length >= 3 && q[0] === P[0][0] && q[1] === P[0][1]) return drawFinish();
+      if (P.length && DR.len(P[P.length - 1], q) < 0.1) return;
+      P.push(q); S.draw.focus = P.length >= 2; renderAll(false);
+    });
+    return;
+  }
   svg.addEventListener('pointerdown', (e) => {
     const [x, y] = toPt(e);
     if (S.doorPick) { // v1.7.4: ставим вход на ближайшую стену
@@ -1731,7 +1808,9 @@ function renderZonePanel(P) {
         ${S.shapeEdit && S.vsel != null ? `<button class="pg-btn sm danger" id="zDelV">Удалить точку ${S.vsel + 1}</button>` : ''}
         <button class="pg-btn sm" id="zRect">▭ Прямоугольник</button>
         ${S.zone === 'hall' ? `<button class="pg-btn sm" id="zDShape">D-образный зал</button>` : ''}
+        <button class="pg-btn sm ${S.draw ? 'pri' : ''}" id="zDraw">📐 ${S.draw ? 'Рисую по стенам…' : 'Построить по стенам'}</button>
       </div>
+      ${S.draw ? drawPanelHtml() : ''}
       <div class="pg-grid2" style="margin-top:8px">
         <div class="pg-f"><label>Площадь, м²</label><input id="zArea" type="number" step="0.5" min="2" value="${r2(area)}"></div>
         <div class="pg-f"><label>&nbsp;</label><small style="color:#64748b">Новое число — зал пропорционально растянется/сожмётся. Шкафы не двигаются.</small></div>
@@ -1789,7 +1868,14 @@ function renderZonePanel(P) {
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on('zName', 'change', (e) => { z.name = e.target.value.trim() || z.name; changed(false); });
   on('zH', 'change', (e) => { z.wallH = Math.max(2, Math.min(6, Number(e.target.value) || 3)); changed(true); });
-  on('zShape', 'click', () => { S.shapeEdit = !S.shapeEdit; S.vsel = null; if (S.shapeEdit) setView('2d'); renderAll(false); });
+  on('zShape', 'click', () => { S.shapeEdit = !S.shapeEdit; S.draw = null; S.vsel = null; if (S.shapeEdit) setView('2d'); renderAll(false); });
+  on('zDraw', 'click', () => {
+    if (S.draw) { S.draw = null; renderAll(false); return; }
+    S.draw = { pts: [] }; S.shapeEdit = false; S.doorPick = false; S.vsel = null; S.sel = null;
+    if (S.view !== '2d') setView('2d'); else renderAll(false);
+    toast('Нажмите на плане точку А — начало первой стены');
+  });
+  if (S.draw) bindDrawPanel();
   on('zDelV', 'click', () => {
     if (z.polygon.length <= 3) return toast('Минимум 3 угла', true);
     z.polygon.splice(S.vsel, 1); if (z.door && z.door.edge >= z.polygon.length) z.door.edge = 0; S.vsel = null; changed(true);
@@ -2287,11 +2373,49 @@ function renderKpis() {
     <div class="pg-kpi"><small>Всего пар в магазине</small><b>${fmt(totalHere)}</b></div>`;
   $('kNp').addEventListener('click', () => openNotPlaced(notPlaced));
 }
+function drawPanelHtml() {
+  const P = S.draw.pts, n = P.length;
+  const letter = (i) => String.fromCharCode(1040 + (i < 9 ? i : i + 1));
+  let h = `<div class="pg-draw">`;
+  if (!n) h += `<div class="pg-info">Шаг 1. Нажмите на плане точку <b>А</b> — угол, с которого начнёте обходить помещение.</div>`;
+  else if (n === 1) h += `<div class="pg-info">Шаг 2. Нажмите точку <b>Б</b> — конец первой стены (угол прилипает к 0/45/90°, Alt — без прилипания). Потом впишите точную длину.</div>`;
+  if (n >= 2) {
+    const a = P[n - 2], b = P[n - 1];
+    h += `<div class="pg-f-title">Стена ${n - 1}: ${letter(n - 2)} → ${letter(n - 1)}</div>
+      <div class="pg-grid2"><div class="pg-f"><label>Длина, м</label><input id="wLen" type="number" step="0.01" min="0.1" value="${r2(DR.len(a, b))}"></div>
+      <div class="pg-f"><label>Направление, °</label><input id="wAng" type="number" step="1" value="${Math.round(((DR.ang(a, b) % 360) + 360) % 360)}"></div></div>
+      <small class="pg-draw-s">0° — вправо, 90° — вниз, 180° — влево, 270° — вверх. Enter — применить.</small>
+      <div class="pg-f-title" style="margin-top:10px">Следующая стена</div>
+      <div class="pg-grid2"><div class="pg-f"><label>Длина, м</label><input id="wNext" type="number" step="0.01" min="0.1" placeholder="напр. 3.5"></div><div class="pg-f"><label>&nbsp;</label><small class="pg-draw-s">или просто нажмите следующую точку на плане</small></div></div>
+      <div class="pg-row" style="margin-top:6px"><button class="pg-btn sm" id="wL">↰ Налево 90°</button><button class="pg-btn sm" id="wS">↑ Прямо</button><button class="pg-btn sm" id="wR">↱ Направо 90°</button></div>`;
+  }
+  const close = n >= 3 ? DR.len(P[n - 1], P[0]) : 0;
+  h += `<div class="pg-row" style="margin-top:10px">
+      ${n >= 3 ? `<button class="pg-btn sm pri" id="wClose">✓ Замкнуть контур${close > 0.05 ? ` (+ стена ${fmt(r2(close))} м)` : ''}</button>` : ''}
+      ${n ? `<button class="pg-btn sm" id="wUndo">↶ Убрать точку</button>` : ''}
+      <button class="pg-btn sm danger" id="wCancel">✕ Отмена</button></div>
+    ${n >= 3 ? `<small class="pg-draw-s">Площадь контура: ${fmt(r2(polyArea(P)))} м² · стен: ${n}</small>` : ''}</div>`;
+  return h;
+}
+function bindDrawPanel() {
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  const apply = () => { const L = Number($('wLen').value), A = Number($('wAng').value); if (!(L > 0.05)) return toast('Длина должна быть больше 0', true); DR.setLast(r2(L), isFinite(A) ? A : null); renderAll(false); };
+  on('wLen', 'change', apply); on('wAng', 'change', apply);
+  ['wLen', 'wAng'].forEach(id => on(id, 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); setTimeout(() => { const n = $('wNext'); if (n) n.focus(); }, 0); } }));
+  const turn = (deg) => { const L = Number($('wNext').value); if (!(L > 0.05)) { toast('Впишите длину следующей стены', true); $('wNext').focus(); return; } DR.addTurn(deg, r2(L)); S.draw.focus = true; renderAll(false); };
+  on('wL', 'click', () => turn(-90)); on('wR', 'click', () => turn(90)); on('wS', 'click', () => turn(0));
+  on('wNext', 'keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); toast('Выберите: налево, прямо или направо', false); } });
+  on('wClose', 'click', drawFinish);
+  on('wUndo', 'click', () => { S.draw.pts.pop(); renderAll(false); });
+  on('wCancel', 'click', () => { S.draw = null; renderAll(false); toast('Построение отменено — форма не изменилась'); });
+  if (S.draw.focus) { S.draw.focus = false; const el = $('wLen'); if (el) { el.focus(); el.select(); } }
+}
 function hint() {
   const el = $('pgHint');
   let t = '';
-  if (S.shapeEdit) t = 'Форма помещения: тяните синие углы, «+» на стене — добавить угол';
-  if (S.doorPick) t = 'Нажмите на стену — туда встанет вход';
+  if (S.draw) t = !S.draw.pts.length ? 'Нажмите точку А — начало первой стены' : S.draw.pts.length < 3 ? 'Нажмите следующую точку · справа можно ввести точную длину' : 'Следующая точка · нажмите на зелёную точку А или «Замкнуть контур»';
+  else if (S.shapeEdit) t = 'Форма помещения: тяните синие углы, «+» на стене — добавить угол';
+  else if (S.doorPick) t = 'Нажмите на стену — туда встанет вход';
   else if (S.view === '3d' && S.zone === 'hall' && G.walk) t = '';
   else if (S.view === '3d' && S.zone === 'hall') t = S.edit ? 'Тяните шкаф мышью/пальцем, чтобы переместить · камера — по пустому месту' : 'Чтобы двигать шкафы — включите «Редактирование»';
   else t = 'Тяните шкаф, чтобы переместить · синий кружок — поворот';
@@ -2321,7 +2445,7 @@ function select(sel) {
   if (sel && sel.k === 'fx' && S.view === '3d') {/* камера остаётся */}
   renderAll(true);
 }
-function setView(v) { if (v !== '3d') walkExit(); S.view = v; if (v === '3d') S.shapeEdit = false; renderAll(true); }
+function setView(v) { if (v !== '3d') walkExit(); S.view = v; if (v === '3d') { S.shapeEdit = false; S.draw = null; } renderAll(true); }
 
 // ─────────── 👥 Люди онлайн (камеры Hikvision → точки на плане) ───────────
 // Сервер раз в ~8 с берёт кадры камер магазина, находит людей и переводит «точку ног» в метры плана.
@@ -2656,9 +2780,16 @@ $('pgStore').addEventListener('change', (e) => {
   if (S.dirty && !confirm('Есть несохранённые изменения. Перейти без сохранения?')) { e.target.value = S.wh; return; }
   walkExit(); if (LV.on) liveToggle(false); if (HT.on) heatToggle(false); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
 });
-document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; S.doorPick = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
+document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; S.doorPick = false; S.draw = null; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
 document.querySelectorAll('#pgViewSeg button').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));
-$('pgEdit').addEventListener('change', (e) => { S.edit = e.target.checked; if (!S.edit) { S.shapeEdit = false; S.doorPick = false; } renderAll(true); });
+document.addEventListener('keydown', (e) => {
+  if (!S.draw) return;
+  const inInput = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '');
+  if (e.key === 'Escape') { S.draw = null; renderAll(false); toast('Построение отменено — форма не изменилась'); }
+  else if (!inInput && (e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'))) { e.preventDefault(); S.draw.pts.pop(); renderAll(false); }
+  else if (!inInput && e.key === 'Enter' && S.draw.pts.length >= 3) { e.preventDefault(); drawFinish(); }
+});
+$('pgEdit').addEventListener('change', (e) => { S.edit = e.target.checked; if (!S.edit) { S.shapeEdit = false; S.doorPick = false; S.draw = null; } renderAll(true); });
 $('pgSave').addEventListener('click', save);
 const qrBtn = $('pgQr');
 if (qrBtn) { qrBtn.classList.toggle('on', S.showQr); qrBtn.addEventListener('click', () => { S.showQr = !S.showQr; localStorage.setItem('pg_show_qr', S.showQr ? '1' : '0'); qrBtn.classList.toggle('on', S.showQr); renderAll(true); }); }

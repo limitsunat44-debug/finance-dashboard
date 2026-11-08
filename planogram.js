@@ -20,7 +20,7 @@ const STORES = [
   { wh: '5ca2d3e6-29c1-4d1a-aeee-832fa513e2e2', name: 'Ортосалон «Айни»', active: true },
   { wh: '19db06fa-deb5-47db-acd7-486c5bc679d0', name: 'Ортосалон «Сиёма»', active: true },
   { wh: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Ортосалон «Худжанд»', active: false },
-  { wh: '8f0bf6e3-1ffc-4267-8f4b-1e79179dd2a7', name: 'Ортосалон «Сити-Молл»', active: false },
+  { wh: '8f0bf6e3-1ffc-4267-8f4b-1e79179dd2a7', name: 'Ортосалон «Сити-Молл»', active: true },
 ];
 
 const TYPES = {
@@ -350,6 +350,25 @@ function worstStatus(list) {
   return best;
 }
 function polyArea(pts) { let a = 0; for (let i = 0; i < pts.length; i++) { const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length]; a += x1 * y2 - x2 * y1; } return Math.abs(a / 2); }
+// v1.7.3: точка внутри многоугольника
+function ptInPoly(x, y, pts) { let ins = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) ins = !ins; } return ins; }
+// v1.7.3: точки дуги вместо стены p→q. bulge > 0 — наружу (зал больше), < 0 — внутрь. Возвращает промежуточные точки (без p и q).
+function arcPoints(pts, i, bulge, n) {
+  const p = pts[i], q = pts[(i + 1) % pts.length];
+  const dx = q[0] - p[0], dy = q[1] - p[1], L = Math.hypot(dx, dy);
+  if (L < 0.3 || !bulge) return [];
+  let nx = -dy / L, ny = dx / L; const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+  if (ptInPoly(mx + nx * 0.01, my + ny * 0.01, pts)) { nx = -nx; ny = -ny; } // n — наружу
+  const sgn = Math.sign(bulge), sg = Math.min(Math.abs(bulge), L * 0.5);
+  const R = (L * L / 4 + sg * sg) / (2 * sg);
+  const ax = mx + nx * sg * sgn, ay = my + ny * sg * sgn;           // вершина дуги
+  const cx = ax - nx * sgn * R, cy = ay - ny * sgn * R;             // центр окружности
+  const nrm = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a <= -Math.PI) a += 2 * Math.PI; return a; };
+  const aA = Math.atan2(ay - cy, ax - cx), d0 = nrm(Math.atan2(p[1] - cy, p[0] - cx) - aA), d1 = nrm(Math.atan2(q[1] - cy, q[0] - cx) - aA);
+  const out = [];
+  for (let k = 1; k < n; k++) { const t = k / n, a = aA + d0 * (1 - t) + d1 * t; out.push([r2(cx + R * Math.cos(a)), r2(cy + R * Math.sin(a))]); }
+  return out;
+}
 function polyBounds(pts) { const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) }; }
 function fxCorners(f) {
   const a = f.rot * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
@@ -1521,6 +1540,7 @@ function svgPlan(host, opts) {
   if (!opts.mini) {
     pts.forEach((p, i) => {
       const q = pts[(i + 1) % pts.length]; const len = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      if (pts.length > 8 && len < 0.9) return; // короткие отрезки дуги — без подписи
       const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
       const ang = Math.atan2(q[1] - p[1], q[0] - p[0]) * 180 / Math.PI;
       const a2 = (ang > 90 || ang < -90) ? ang + 180 : ang;
@@ -1679,7 +1699,20 @@ function renderZonePanel(P) {
         <button class="pg-btn sm ${S.shapeEdit ? 'pri' : ''}" id="zShape">✏️ ${S.shapeEdit ? 'Готово: форма' : 'Изменить форму'}</button>
         ${S.shapeEdit && S.vsel != null ? `<button class="pg-btn sm danger" id="zDelV">Удалить точку ${S.vsel + 1}</button>` : ''}
         <button class="pg-btn sm" id="zRect">▭ Прямоугольник</button>
+        ${S.zone === 'hall' ? `<button class="pg-btn sm" id="zDShape">D-образный зал</button>` : ''}
       </div>
+      <div class="pg-grid2" style="margin-top:8px">
+        <div class="pg-f"><label>Площадь, м²</label><input id="zArea" type="number" step="0.5" min="2" value="${r2(area)}"></div>
+        <div class="pg-f"><label>&nbsp;</label><small style="color:#64748b">Новое число — зал пропорционально растянется/сожмётся. Шкафы не двигаются.</small></div>
+      </div>
+      <h4>Дуга на стене</h4>
+      <div class="pg-grid3">
+        <div class="pg-f"><label>Стена №</label><select id="aEdge">${z.polygon.map((p, i) => { const q = z.polygon[(i + 1) % z.polygon.length]; return `<option value="${i}">${i + 1} · ${fmt(r2(Math.hypot(q[0] - p[0], q[1] - p[1])))} м</option>`; }).join('')}</select></div>
+        <div class="pg-f"><label>Выгиб, м (− внутрь)</label><input id="aBulge" type="number" step="0.1" value="1.5"></div>
+        <div class="pg-f"><label>Точек</label><input id="aN" type="number" min="3" max="24" step="1" value="10"></div>
+      </div>
+      <div class="pg-row" style="margin-top:6px"><button class="pg-btn sm" id="zArc">◠ Сделать стену дугой</button></div>
+      <div class="pg-info">Дуга строится из коротких отрезков — каждый угол дуги потом можно подвинуть вручную в «Изменить форму».</div>
       ${S.shapeEdit ? `<div class="pg-info">Тяните синие точки — углы помещения. Зелёный «+» на стене добавляет новый угол (для Г-образной или сложной формы). Размеры стен подписаны на плане.</div>` : ''}
       ${S.shapeEdit && S.vsel != null ? `<div class="pg-grid2" style="margin-top:8px"><div class="pg-f"><label>Точка ${S.vsel + 1}: X, м</label><input id="vX" type="number" step="0.05" value="${z.polygon[S.vsel][0]}"></div><div class="pg-f"><label>Y, м</label><input id="vY" type="number" step="0.05" value="${z.polygon[S.vsel][1]}"></div></div>` : ''}
       <h4>Вход</h4>
@@ -1730,6 +1763,32 @@ function renderZonePanel(P) {
     const w = Number(prompt('Ширина помещения, м:', '12')); const d = Number(prompt('Глубина помещения, м:', '7.5'));
     if (!(w > 1 && d > 1)) return;
     z.polygon = [[0, 0], [w, 0], [w, d], [0, d]]; if (z.door) z.door.edge = Math.min(z.door.edge, 3); changed(true);
+  });
+  on('zArea', 'change', (e) => {
+    const target = Number(e.target.value), cur = polyArea(z.polygon);
+    if (!(target >= 2 && cur > 0)) return toast('Введите площадь больше 2 м²', true);
+    const k = Math.sqrt(target / cur), b0 = polyBounds(z.polygon);
+    z.polygon = z.polygon.map(([x, y]) => [r2(b0.x0 + (x - b0.x0) * k), r2(b0.y0 + (y - b0.y0) * k)]);
+    changed(true); toast('Площадь: ' + fmt(r2(polyArea(z.polygon))) + ' м²');
+  });
+  on('zArc', 'click', () => {
+    const i = Number($('aEdge').value), bulge = Number($('aBulge').value), n = Math.max(3, Math.min(24, Number($('aN').value) || 10));
+    if (!bulge) return toast('Укажите выгиб, например 1.5', true);
+    if (z.door && z.door.edge === i) return toast('На этой стене вход — выберите другую стену или перенесите вход', true);
+    const add = arcPoints(z.polygon, i, bulge, n);
+    if (!add.length) return toast('Стена слишком короткая', true);
+    z.polygon.splice(i + 1, 0, ...add);
+    if (z.door && z.door.edge > i) z.door.edge += add.length;
+    S.vsel = null; changed(true); toast('Стена ' + (i + 1) + ' стала дугой');
+  });
+  on('zDShape', 'click', () => {
+    const w = Number(prompt('Длина прямой части зала, м:', '9')); const d = Number(prompt('Глубина зала (вдоль прямой стены со входом), м:', '6')); const bl = Number(prompt('Выгиб дуги справа, м:', '1.8'));
+    if (!(w > 1 && d > 1)) return;
+    const base = [[0, 0], [w, 0], [w, d], [0, d]];
+    const add = bl ? arcPoints(base, 1, bl, 12) : [];
+    z.polygon = [base[0], base[1], ...add, base[2], base[3]];
+    z.door = { edge: z.polygon.length - 2, t: 0.5, w: (z.door && z.door.w) || 1.8 };
+    S.vsel = null; changed(true); toast('Форма: D-образный зал, вход — на прямой стене');
   });
   on('vX', 'change', (e) => { z.polygon[S.vsel][0] = Number(e.target.value) || 0; changed(true); });
   on('vY', 'change', (e) => { z.polygon[S.vsel][1] = Number(e.target.value) || 0; changed(true); });

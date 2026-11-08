@@ -795,8 +795,11 @@ function build3d(resetCam) {
     let cur = 0.3; const gaps = [];
     occ.forEach(([a1, b1]) => { if (a1 - cur >= 0.9) gaps.push([cur, a1]); cur = Math.max(cur, b1); });
     if (len - 0.3 - cur >= 0.9) gaps.push([cur, len - 0.3]);
+    const PS = z.posters || {};
     gaps.forEach(([g0, g1]) => {
       const s = (g0 + g1) / 2;
+      // v1.7.6: плакаты можно убрать — весь набор (off) или поштучно (hide: стена + место)
+      if (PS.off || (PS.hide || []).some(hd => hd.e === i && Math.abs(hd.s - s) < 0.6)) { posterN++; return; }
       const fr = new THREE.Mesh(new THREE.BoxGeometry(0.74, 1.08, 0.03), mat('#1f2937'));
       fr.position.copy(at(s, -0.02, 1.75)); fr.rotation.y = ang; entry.upper.add(fr);
       const pm = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.04), pmat('posterM' + (posterN % 3), () => new THREE.MeshStandardMaterial({ map: posterTex(posterN), roughness: 0.5 })));
@@ -804,6 +807,7 @@ function build3d(resetCam) {
       // постер смотрит внутрь зала (нормаль -n)
       pm.lookAt(at(s, -1, 1.75));
       fr.lookAt(at(s, -1, 1.75));
+      pm.userData = { poster: { e: i, s: r2(s) } }; fr.userData = pm.userData; G.pick.push(pm, fr);
       posterN++;
     });
     if (door) {
@@ -1315,6 +1319,13 @@ function updateWallFade() {
     else tb.style.display = 'none';
   } else if (tb.style.display !== 'none') tb.style.display = 'none';
 }
+function visChain(o) { for (; o; o = o.parent) if (!o.visible) return false; return true; }
+function posterRemove(ps) {
+  if (!S.edit) return toast('Включите «Редактирование», чтобы убрать плакат', true);
+  if (!confirm('Убрать этот плакат со стены?')) return;
+  const z = S.layout.zones.hall; z.posters = z.posters || {}; z.posters.hide = (z.posters.hide || []).concat([{ e: ps.e, s: ps.s }]);
+  changed(true); toast('Плакат убран · вернуть — в панели зала «Плакаты на стенах»');
+}
 function bind3dPointer() {
   const el = G.renderer.domElement;
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
@@ -1326,7 +1337,7 @@ function bind3dPointer() {
     if (!S.edit || G.walk) return;
     if (e.button && e.button !== 0) return;
     setNdc(e);
-    const hit = ray.intersectObjects(G.pick, false)[0];
+    const hit = ray.intersectObjects(G.pick, false).find(h => visChain(h.object));
     if (hit && hit.object.userData.fid) {
       const fx = fxById(hit.object.userData.fid);
       const p = new THREE.Vector3(); ray.ray.intersectPlane(plane, p);
@@ -1355,9 +1366,10 @@ function bind3dPointer() {
     }
     if (moved) return;
     setNdc(e);
-    const hit = ray.intersectObjects(G.pick, false)[0];
+    const hit = ray.intersectObjects(G.pick, false).find(h => visChain(h.object));
     if (!hit) { if (G.walk && walkToRay(ray)) return; select(null); return; }
     const u = hit.object.userData;
+    if (u.poster) { if (G.walk && !S.edit) { if (walkToRay(ray)) return; } posterRemove(u.poster); return; }
     if (u.qr) select({ k: 'shelf', fid: u.fid, si: u.si });
     else if (u.slot) select({ k: 'slot', fid: u.fid, si: u.si, ki: u.ki });
     else if (u.fid) select({ k: 'fx', fid: u.fid });
@@ -1825,6 +1837,10 @@ function renderZonePanel(P) {
       <div class="pg-info">Дуга строится из коротких отрезков — каждый угол дуги потом можно подвинуть вручную в «Изменить форму».</div>
       ${S.shapeEdit ? `<div class="pg-info">Тяните синие точки — углы помещения. Зелёный «+» на стене добавляет новый угол (для Г-образной или сложной формы). Размеры стен подписаны на плане.</div>` : ''}
       ${S.shapeEdit && S.vsel != null ? `<div class="pg-grid2" style="margin-top:8px"><div class="pg-f"><label>Точка ${S.vsel + 1}: X, м</label><input id="vX" type="number" step="0.05" value="${z.polygon[S.vsel][0]}"></div><div class="pg-f"><label>Y, м</label><input id="vY" type="number" step="0.05" value="${z.polygon[S.vsel][1]}"></div></div>` : ''}
+      ${S.zone === 'hall' ? `<h4>Плакаты на стенах</h4>
+      <div class="pg-row"><label class="pg-chk"><input type="checkbox" id="psOn" ${z.posters && z.posters.off ? '' : 'checked'}> Показывать плакаты</label>
+      ${z.posters && (z.posters.hide || []).length ? `<button class="pg-btn sm" id="psBack">↺ Вернуть убранные (${z.posters.hide.length})</button>` : ''}</div>
+      <div class="pg-info">Чтобы убрать один плакат — нажмите на него в 3D и подтвердите.</div>` : ''}
       <h4>Вход</h4>
       <div class="pg-row" style="margin-bottom:8px">
         <button class="pg-btn sm ${S.doorPick ? 'pri' : ''}" id="dPick">📍 ${S.doorPick ? 'Нажмите на стену на плане…' : (z.door ? 'Перенести вход' : 'Поставить вход')}</button>
@@ -1919,6 +1935,8 @@ function renderZonePanel(P) {
     changed(true);
   };
   ['dEdge', 'dT', 'dW'].forEach(id => on(id, 'change', doorUpd));
+  on('psOn', 'change', (e) => { z.posters = z.posters || {}; z.posters.off = !e.target.checked; changed(true); });
+  on('psBack', 'click', () => { if (z.posters) z.posters.hide = []; changed(true); toast('Плакаты возвращены'); });
   on('dDel', 'click', () => { z.door = null; S.doorPick = false; changed(true); toast('Вход убран — нажмите «Поставить вход», чтобы поставить в другом месте'); });
   on('dPick', 'click', () => { S.doorPick = !S.doorPick; if (S.doorPick && S.view !== '2d') setView('2d'); else renderAll(false); if (S.doorPick) toast('Нажмите на стену на плане — там будет вход'); });
   on('zAllNp', 'click', () => openNotPlaced(notPlaced));

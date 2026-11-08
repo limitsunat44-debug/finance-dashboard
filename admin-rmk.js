@@ -7,8 +7,20 @@
 // ─────────── ВЕРСИЯ РМК ───────────
 // При каждом обновлении: поднять номер + добавить запись в RMK_CHANGELOG (и в CHANGELOG.md).
 // Формат: MAJOR.MINOR.PATCH — MINOR для новых функций, PATCH для фиксов.
-const RMK_VERSION = '1.7.6';
+const RMK_VERSION = '1.7.7';
 const RMK_CHANGELOG = [
+  {
+    v: '1.7.7', date: '09.11.2026', title: 'Поступления: редактирование номенклатуры, поиск по товару, новый вид',
+    items: [
+      'Номенклатуру уже оприходованного товара можно редактировать (✏ в документе, журнале и карточке товара): наименование, артикул, категория и тип товара',
+      'Новое название сразу на кассе, в этикетках при печати, в ОртоШопе и ОртоБоте, а также во всех документах поступления',
+      'Тип товара (раздел ОртоШопа): выбор при создании номенклатуры и при редактировании, «Авто» = по категории и названию',
+      'Журнал поступлений по макету: KPI, фильтры (поставщик, склад, статус, период), поиск по товару — какие документы и когда, сколько штук',
+      'Окно документа поступления по макету: параметры с комментарием, таблица позиций, раскрытие размеров с калькулятором, быстрые действия, итоговая панель с розничной суммой',
+      'Себестоимость и параметры калькулятора автоматически подставляются из прошлого поступления товара (можно изменить)',
+      'Все цены редактируемые прямо в строке; количество по размеру до 999 со степпером −/+; много размеров переносятся по строкам и не налезают',
+    ],
+  },
   {
     v: '1.7.6', date: '09.11.2026', title: 'Планограмма: удаление плакатов на стенах',
     items: [
@@ -9267,7 +9279,7 @@ function recvPersist() {
   try {
     localStorage.setItem(RECV_LS_KEY, JSON.stringify({
       docId: recv.docId, supplierId: recv.supplierId, warehouseId: recv.warehouseId,
-      docNumber: recv.docNumber, docDate: recv.docDate, items: recv.items, postKey: recv.postKey || null,
+      docNumber: recv.docNumber, docDate: recv.docDate, items: recv.items, postKey: recv.postKey || null, note: recv.note || '',
     }));
   } catch (_) {}
 }
@@ -9283,6 +9295,7 @@ function recvRestore() {
     recv.docDate = d.docDate || recv.docDate;
     recv.items = Array.isArray(d.items) ? d.items : [];
     recv.postKey = d.postKey || null;
+    recv.note = d.note || '';
   } catch (_) {}
 }
 
@@ -9333,90 +9346,129 @@ function recvPaint() {
   recvPaintNew();
 }
 
-// ── Вкладка «Новый документ» (бывший recvPaint) ──
+// ── v1.7.7 — Тип товара (категория ОртоШопа/ОртоБота) ──
+const RECV_SHOP_CATS = ['Мужская обувь', 'Женская обувь', 'Обувь для мальчиков', 'Обувь для девочек', 'Стельки', 'Бандажи, ортезы и шины', 'Массажёры', 'Компрессионный трикотаж', 'Подушки', 'Прочее'];
+const RECV_TYPE_CLS = { 'Мужская обувь': 't-m', 'Женская обувь': 't-w', 'Обувь для мальчиков': 't-b', 'Обувь для девочек': 't-g', 'Стельки': 't-s', 'Бандажи, ортезы и шины': 't-o', 'Массажёры': 't-x', 'Компрессионный трикотаж': 't-c', 'Подушки': 't-p', 'Прочее': 't-z' };
+const RECV_TYPE_SHORT = { 'Мужская обувь': 'Мужская', 'Женская обувь': 'Женская', 'Обувь для мальчиков': 'Для мальчиков', 'Обувь для девочек': 'Для девочек', 'Бандажи, ортезы и шины': 'Бандажи/ортезы', 'Компрессионный трикотаж': 'Компрессия' };
+function recvTypeChip(it) {
+  const t = it.shopCategory || '';
+  if (!t) return `<button type="button" class="rv-type rv-type-none recv-nom-edit" data-uid="${it.uid}" title="Задать тип товара">+ тип</button>`;
+  return `<button type="button" class="rv-type ${RECV_TYPE_CLS[t] || 't-z'} recv-nom-edit" data-uid="${it.uid}" title="${esc(t)} — нажмите, чтобы изменить">${esc(RECV_TYPE_SHORT[t] || t)}</button>`;
+}
+// розничная сумма позиции (с учётом цен по размерам)
+function recvItemRetail(it) {
+  const s = it.sizes || {}; let sum = 0;
+  for (const k of Object.keys(s)) { const q = Math.max(0, Math.round(Number(s[k]) || 0)); if (!q) continue; sum += q * (k === '_' ? recvEffPrice(it) : recvSizePrice(it, k)); }
+  return Math.round(sum * 100) / 100;
+}
+function recvRetailTotal() { return Math.round(recv.items.reduce((a, it) => a + recvItemRetail(it), 0) * 100) / 100; }
+// подпись «размеры / кол-во» в строке
+function recvQtyLabel(it) {
+  const q = recvItemQty(it);
+  const grid = (it.sizeGrid || []).filter(sz => Number((it.sizes || {})[sz]) > 0);
+  const unit = (it.sizeGrid || []).length ? 'пар' : 'шт';
+  let rng = '';
+  if (grid.length === 1) rng = grid[0];
+  else if (grid.length > 1) rng = grid[0] + '–' + grid[grid.length - 1];
+  return `${rng ? `<b>${esc(rng)}</b>` : ''}<span>${fmtInt(q)} ${unit}</span>`;
+}
+
+// ── Вкладка «Новый документ» — v1.7.7 по макету ──
 function recvPaintNew() {
   const root = $('recvTabBody');
   if (!root) return;
   const t = recvTotals();
   const isPosted = recv.status === 'posted';
-  const docNoTxt = recv.docNumber ? ` <span class="recv-docno">№ ${esc(recv.docNumber)}</span>` : '';
-  const badge = isPosted
-    ? `<span class="recv-badge recv-badge-ok">Проведён</span>`
-    : `<span class="recv-badge">Черновик</span>`;
-  const title = isPosted ? 'Редактирование документа' : 'Поступление товара';
-  // Кнопки: для проведённого документа — сохранить изменения (без пересоздания ШК) + новый документ
-  const actions = isPosted
-    ? `<button class="btn btn-ghost" id="recvNewDoc">+ Новый документ</button>
-       <button class="btn btn-outline" id="recvPrintLabelsTop">🖨 Напечатать ценники</button>
-       <button class="btn btn-primary" id="recvPost">Сохранить изменения</button>`
-    : `<button class="btn btn-ghost" id="recvCancel">Отменить</button>
-       <button class="btn btn-outline" id="recvSaveDraft">Сохранить черновик</button>
-       <button class="btn btn-primary" id="recvPost">Провести поступление</button>`;
-
+  const badge = isPosted ? `<span class="recv-badge recv-badge-ok">Проведён</span>` : `<span class="recv-badge">Черновик</span>`;
+  const title = isPosted ? 'Документ поступления' : (recv.docId ? 'Документ поступления' : 'Новый документ поступления');
+  const sub = recv.docNumber ? `Документ: ${esc(recv.docNumber)}${isPosted ? '' : ' (черновик)'}` : (recv.docId ? 'Черновик сохранён · номер присвоится при проведении' : 'Номер присвоится при проведении');
+  const icoDoc = `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/></svg>`;
+  const note = recv.note || '';
   root.innerHTML = `
     ${isPosted ? `<div class="recv-note-bar">Документ уже проведён. Штрихкоды не будут созданы повторно. Изменённые цены обновятся в РМК и на кассе.</div>` : ''}
-    <div class="recv-head">
-      <div class="recv-title">${title} ${badge}${docNoTxt}</div>
-      <div class="recv-head-actions">
-        ${actions}
+    <div class="rv-dochead">
+      <div class="rv-dh-ico">${icoDoc}</div>
+      <div class="rv-dh-t"><div class="rv-dh-title">${title} ${badge}</div><div class="rv-dh-sub">${sub}</div></div>
+      <div class="rv-dh-act">
+        ${isPosted ? `<button class="btn btn-ghost" data-ract="newdoc">+ Новый документ</button>` : `<button class="btn btn-outline" data-ract="save">💾 Сохранить черновик</button>`}
+        <button class="btn btn-primary" data-ract="post">✓ ${isPosted ? 'Сохранить изменения' : 'Провести'}</button>
+        ${isPosted ? '' : `<button class="btn btn-outline" data-ract="gen">▐║ Сгенерировать штрихкоды</button>`}
+        <button class="btn btn-outline" data-ract="print">🏷 Печать ценников</button>
       </div>
     </div>
 
-    <!-- Шапка документа -->
-    <div class="recv-form-card">
-      <div class="recv-form-grid">
-        <label class="recv-field">
-          <span class="recv-lbl">Поставщик <b class="req">*</b></span>
-          <div class="recv-inline">
-            <select class="finput" id="recvSupplier">
-              ${recv.suppliers.map(s => `<option value="${s.id}" ${s.id === recv.supplierId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
-            </select>
-            <button class="recv-plus" id="recvAddSupplier" title="Создать поставщика">+</button>
+    <div class="rv-grid">
+      <div class="rv-main">
+        <div class="rv-card">
+          <div class="rv-card-t">⚙ Параметры документа</div>
+          <div class="rv-params">
+            <label class="recv-field rv-p-sup">
+              <span class="recv-lbl">Поставщик <b class="req">*</b></span>
+              <div class="recv-inline">
+                <select class="finput" id="recvSupplier">
+                  ${recv.suppliers.map(s => `<option value="${s.id}" ${s.id === recv.supplierId ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+                </select>
+                <button class="recv-plus" id="recvAddSupplier" title="Создать поставщика">+</button>
+              </div>
+            </label>
+            <label class="recv-field">
+              <span class="recv-lbl">Склад / магазин <b class="req">*</b></span>
+              <select class="finput" id="recvWarehouse">
+                ${recv.warehouses.map(w => `<option value="${w.id}" ${w.id === recv.warehouseId ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}
+              </select>
+            </label>
+            <label class="recv-field">
+              <span class="recv-lbl">Дата документа <b class="req">*</b></span>
+              <input class="finput" id="recvDocDate" type="date" value="${esc(recv.docDate)}">
+            </label>
+            <label class="recv-field">
+              <span class="recv-lbl">Номер документа</span>
+              <input class="finput" id="recvDocNum" value="${esc(recv.docNumber)}" placeholder="авто: ПОСТ-ГГГГ-NNNN">
+            </label>
+            <label class="recv-field rv-p-note">
+              <span class="recv-lbl">Комментарий <small class="rv-cnt" id="recvNoteCnt">${note.length} / 500</small></span>
+              <input class="finput" id="recvNote" maxlength="500" value="${esc(note)}" placeholder="Например: поставка ортопедической обуви, коллекция «Осень–Зима»">
+            </label>
           </div>
-        </label>
-        <label class="recv-field">
-          <span class="recv-lbl">Склад <b class="req">*</b></span>
-          <select class="finput" id="recvWarehouse">
-            ${recv.warehouses.map(w => `<option value="${w.id}" ${w.id === recv.warehouseId ? 'selected' : ''}>${esc(w.name)}</option>`).join('')}
-          </select>
-        </label>
-        <label class="recv-field">
-          <span class="recv-lbl">Номер документа</span>
-          <input class="finput" id="recvDocNum" value="${esc(recv.docNumber)}" placeholder="ПТ-000124">
-        </label>
-        <label class="recv-field">
-          <span class="recv-lbl">Дата поступления <b class="req">*</b></span>
-          <input class="finput" id="recvDocDate" type="date" value="${esc(recv.docDate)}">
-        </label>
-      </div>
-    </div>
+        </div>
 
-    <!-- Тело: позиции + калькулятор -->
-    <div class="recv-body-grid">
-      <div class="recv-items-col">
-        <div class="recv-items-card">
-          <div class="recv-sec-title">Товары в документе</div>
-          <div class="recv-search-row">
-            <div class="recv-search-wrap">
-              <input class="finput" id="recvSearch" placeholder="🔍 Поиск товара по названию или артикулу" autocomplete="off">
-              <div class="recv-search-drop" id="recvSearchDrop" style="display:none"></div>
+        <div class="rv-card">
+          <div class="rv-comp-head">
+            <div class="rv-card-t">📦 Состав поступления <span class="rv-muted">(${fmtInt(recv.items.length)} ${plural3(recv.items.length, 'позиция', 'позиции', 'позиций')})</span></div>
+            <div class="rv-comp-tools">
+              <div class="recv-search-wrap">
+                <input class="finput" id="recvSearch" placeholder="🔍 Добавить товар: название или артикул" autocomplete="off">
+                <div class="recv-search-drop" id="recvSearchDrop" style="display:none"></div>
+              </div>
+              <button class="btn btn-outline" id="recvCreateNom">+ Создать номенклатуру</button>
             </div>
-            <button class="btn btn-outline" id="recvCreateNom">+ Создать номенклатуру</button>
           </div>
           <div id="recvItemsList">${recvItemsHTML()}</div>
-          <button class="recv-add-btn" id="recvAddRow">+ Добавить товар</button>
-        </div>
-
-        <!-- Итоги -->
-        <div class="recv-totals">
-          <div class="recv-tot-card"><div class="recv-tot-lbl">Всего позиций</div><div class="recv-tot-val" id="recvTotPos">${fmtInt(t.positions)}</div></div>
-          <div class="recv-tot-card"><div class="recv-tot-lbl">Общее количество</div><div class="recv-tot-val" id="recvTotQty">${fmtInt(t.qty)} пар</div></div>
-          <div class="recv-tot-card"><div class="recv-tot-lbl">Общая себестоимость</div><div class="recv-tot-val" id="recvTotCost">${fmtNum(t.cost)} ${CUR}</div></div>
         </div>
       </div>
 
-      <!-- Калькулятор цены -->
-      <div class="recv-calc-col" id="recvCalcCol">${recvCalcHTML()}</div>
+      <div class="rv-side">
+        <div class="rv-card rv-quick">
+          <div class="rv-card-t">⚡ Быстрые действия</div>
+          <button class="rv-qa" id="recvAddRow"><span>＋</span>Добавить товар<i>›</i></button>
+          <button class="rv-qa" data-ract="nom"><span>📝</span>Создать номенклатуру<i>›</i></button>
+          <button class="rv-qa" id="recvApplyAllQ"><span>🧮</span>Калькулятор → всем позициям<i>›</i></button>
+          ${isPosted ? '' : `<button class="rv-qa" data-ract="gen"><span>▐║</span>Сгенерировать EAN-13<i>›</i></button>`}
+          <button class="rv-qa" data-ract="print"><span>🖨</span>Печать этикеток<i>›</i></button>
+        </div>
+        <div class="recv-calc-col" id="recvCalcCol">${recvCalcHTML()}</div>
+      </div>
+    </div>
+
+    <div class="rv-totbar">
+      <div class="rv-tb-i"><span class="rv-tb-ic">📦</span><div><small>Всего позиций</small><b id="recvTotPos">${fmtInt(t.positions)}</b></div></div>
+      <div class="rv-tb-i"><span class="rv-tb-ic">👟</span><div><small>Всего пар / шт</small><b id="recvTotQty">${fmtInt(t.qty)}</b></div></div>
+      <div class="rv-tb-i"><span class="rv-tb-ic">💰</span><div><small>Общая себестоимость</small><b id="recvTotCost">${fmtNum(t.cost)} ${CUR}</b></div></div>
+      <div class="rv-tb-i rv-tb-ret"><span class="rv-tb-ic">🏷</span><div><small>Общая сумма розничная</small><b id="recvTotRet">${fmtNum(recvRetailTotal())} ${CUR}</b></div></div>
+      <div class="rv-tb-act">
+        ${isPosted ? `<button class="btn btn-ghost" data-ract="newdoc">Закрыть</button>` : `<button class="btn btn-ghost" id="recvCancel">Отмена</button><button class="btn btn-outline" id="recvSaveDraft">Сохранить</button>`}
+        <button class="btn btn-primary" id="recvPost">✓ ${isPosted ? 'Сохранить изменения' : 'Провести поступление'}</button>
+      </div>
     </div>
     <div id="recvModal"></div>
   `;
@@ -9425,75 +9477,193 @@ function recvPaintNew() {
   recvBindSearch();
   recvBindItems();
   recvBindCalc();
+  recvFitDetails();
 }
+// раскрытый блок размеров всегда по ширине видимой части таблицы (не уезжает при горизонтальной прокрутке)
+function recvFitDetails() {
+  const w = document.querySelector('.rv-tblw'); if (!w) return;
+  w.style.setProperty('--rvw', w.clientWidth + 'px');
+  w.classList.toggle('rv-narrow', w.clientWidth < 820);
+}
+window.addEventListener('resize', () => { try { recvFitDetails(); } catch (_) {} });
+function plural3(n, a, b, c) { n = Math.abs(n) % 100; const n1 = n % 10; if (n > 10 && n < 20) return c; if (n1 > 1 && n1 < 5) return b; if (n1 === 1) return a; return c; }
 
-// ── Позиции документа ──
+// ── Позиции документа: таблица по макету ──
 function recvItemsHTML() {
-  if (!recv.items.length) return `<div class="recv-empty">Пока нет позиций. Найдите товар выше или нажмите «Добавить товар».</div>`;
-  return `<div class="recv-items-table">
-    <div class="recv-it-head">
-      <div>Номенклатура</div><div>Размеры и количество</div><div>Себестоимость</div><div class="c">Действия</div>
-    </div>
-    ${recv.items.map(recvRowHTML).join('')}
-  </div>`;
+  if (!recv.items.length) return `<div class="recv-empty">Пока нет позиций. Найдите товар в поиске выше или создайте номенклатуру.</div>`;
+  return `<div class="rv-tblw"><table class="rv-tbl">
+    <thead><tr>
+      <th class="rv-c-n">№</th><th class="rv-c-ph">Фото</th><th class="rv-c-nm">Наименование<small>Артикул</small></th><th>Тип товара</th>
+      <th class="c">Размеры /<small>кол-во</small></th><th class="r">Себестоимость<small>за пару</small></th><th class="r">Транспорт<small>за пару</small></th>
+      <th class="r">Постоянные<small>%</small></th><th class="r">Переменные<small>%</small></th><th class="r">Врачам<small>%</small></th><th class="r">Продавцам<small>%</small></th><th class="r">Прибыль<small>%</small></th>
+      <th class="r">Продажная цена<small>за пару</small></th><th class="r">Сумма<small>розн.</small></th><th></th>
+    </tr></thead>
+    <tbody>${recv.items.map((it, i) => recvRowHTML(it, i)).join('')}</tbody>
+  </table></div>`;
 }
 
-function recvRowHTML(it) {
+function recvRowHTML(it, idx) {
+  const open = it.open !== false; // по умолчанию раскрыта
+  const active = it.uid === recv.activeCalcUid ? ' rv-row-active' : '';
+  const effP = recvEffPrice(it);
+  const ovP = it.sale_price_override != null && it.sale_price_override !== '' && Number(it.sale_price_override) > 0;
+  const num = (fld, val, step, w) => `<input class="rv-ninp recv-row-inp" data-uid="${it.uid}" data-fld="${fld}" type="number" min="0" step="${step || 'any'}" inputmode="decimal" value="${val ? esc(String(val)) : ''}" placeholder="0"${w ? ` style="width:${w}px"` : ''}>`;
+  const ph = it.photo ? `<img src="${esc(it.photo)}" alt="" loading="lazy">` : '📦';
+  const autoCost = it.cost_auto ? `<div class="rv-auto" title="Себестоимость подставлена из прошлого поступления — можно изменить">из ${esc(it.cost_auto)}</div>` : '';
+  const row = `
+    <tr class="rv-row${active}${open ? ' rv-open' : ''}" data-uid="${it.uid}">
+      <td class="rv-c-n"><button type="button" class="rv-caret recv-toggle" data-uid="${it.uid}" title="Размеры и калькулятор">${open ? '▾' : '▸'}</button>${idx + 1}</td>
+      <td class="rv-c-ph"><div class="rv-ph">${ph}</div></td>
+      <td class="rv-c-nm">
+        <div class="rv-nm"><span class="recv-nom-name">${esc(it.product_name)}</span><button type="button" class="rv-edit recv-nom-edit" data-uid="${it.uid}" title="Редактировать номенклатуру: имя, артикул, категория, тип">✏</button></div>
+        <div class="recv-nom-sku">${it.sku ? 'Арт. ' + esc(it.sku) : 'без артикула'}${it.category ? ' · ' + esc(it.category) : ''}</div>
+      </td>
+      <td>${recvTypeChip(it)}</td>
+      <td class="c"><button type="button" class="rv-qty recv-toggle" data-uid="${it.uid}">${recvQtyLabel(it)}</button></td>
+      <td class="r"><input class="rv-ninp rv-cost recv-cost-inp" data-uid="${it.uid}" type="number" min="0" step="any" inputmode="decimal" value="${it.cost_price ? esc(String(it.cost_price)) : ''}" placeholder="0">${autoCost}</td>
+      <td class="r">${num('transport_cost', it.transport_cost)}</td>
+      <td class="r">${num('fixed_cost_pct', it.fixed_cost_pct, null, 50)}</td>
+      <td class="r">${num('variable_cost_pct', it.variable_cost_pct, null, 50)}</td>
+      <td class="r">${num('doctor_pct', it.doctor_pct, null, 50)}</td>
+      <td class="r">${num('seller_pct', it.seller_pct, null, 50)}</td>
+      <td class="r">${num('profit_pct', it.profit_pct, null, 50)}</td>
+      <td class="r"><input class="rv-ninp rv-price recv-row-price${ovP ? ' rv-price-ov' : ''}" data-uid="${it.uid}" type="number" min="0" step="0.01" inputmode="decimal" value="${esc(String(effP))}" title="Продажная цена за пару — можно изменить вручную (пусто = расчёт калькулятора)"></td>
+      <td class="r rv-sum" data-sum="${it.uid}">${fmtNum(recvItemRetail(it))}</td>
+      <td class="rv-c-act"><button class="recv-icon-btn recv-calc-open" data-uid="${it.uid}" title="Открыть в калькуляторе">🧮</button><button class="recv-icon-btn recv-del" data-uid="${it.uid}" title="Удалить позицию">🗑</button></td>
+    </tr>`;
+  if (!open) return row;
+  return row + `<tr class="rv-det" data-uid="${it.uid}"><td colspan="15"><div class="rv-det-in">${recvSizesBlockHTML(it)}${recvRowCalcHTML(it)}</div></td></tr>`;
+}
+
+// блок «Размеры и количество» (раскрытая строка). Размеры переносятся по строкам — не налезают.
+function recvSizesBlockHTML(it) {
   const grid = it.sizeGrid || [];
   const effP = recvEffPrice(it);
-  const sizeCell = (sz) => {
-    const ov = it.pricesBySize && it.pricesBySize[sz] != null && it.pricesBySize[sz] !== '' && Number(it.pricesBySize[sz]) > 0;
-    const pv = ov ? esc(String(it.pricesBySize[sz])) : '';
-    return `
-        <div class="recv-size-cell">
-          <div class="recv-size-lbl">${esc(sz)}<button type="button" class="recv-size-del" data-uid="${it.uid}" data-size="${esc(sz)}" title="Убрать размер">×</button></div>
-          <input class="recv-size-inp" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" inputmode="numeric"
-                 value="${it.sizes && it.sizes[sz] ? esc(String(it.sizes[sz])) : ''}" placeholder="–">
-          <input class="recv-size-price ${ov ? 'recv-size-price-set' : ''}" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" step="0.01" inputmode="decimal"
-                 value="${pv}" placeholder="${fmtNum(effP)}" title="Цена для размера ${esc(sz)} (пусто = общая ${fmtNum(effP)} ${CUR})">
-        </div>`;
-  };
-  // v1.2.49 — кнопка/панель добавления размера существующему товару (из справочника или вручную)
   const addSizeUI = `
       <div class="recv-addsize">
         <button type="button" class="recv-addsize-btn" data-uid="${it.uid}">＋ размер</button>
         <div class="recv-addsize-panel" data-uid="${it.uid}" style="display:none"></div>
       </div>`;
-  // Товар без размеров (у номенклатуры нет размерной сетки) — одно поле количества.
+  const stepper = (sz, val) => `
+      <div class="rv-step">
+        <button type="button" class="rv-st-btn recv-step" data-uid="${it.uid}" data-size="${esc(sz)}" data-d="-1">−</button>
+        <input class="recv-size-inp" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" max="999" inputmode="numeric" value="${val ? esc(String(val)) : ''}" placeholder="0">
+        <button type="button" class="rv-st-btn recv-step" data-uid="${it.uid}" data-size="${esc(sz)}" data-d="1">+</button>
+      </div>`;
   const noSizesProduct = !(Array.isArray(it.productSizes) && it.productSizes.length);
-  let sizesHTML;
+  let body;
   if (grid.length) {
-    sizesHTML = `<div class="recv-sizes">${grid.map(sizeCell).join('')}</div>
-       ${addSizeUI}
-       <div class="recv-sizes-hint">Цена под размером — отдельная (пусто = общая ${fmtNum(effP)} ${CUR}). Размер можно убрать кнопкой ×, добавить — «＋ размер». Диапазоны и «применить всем» — в калькуляторе (🧮).</div>`;
+    body = `<div class="rv-sizes">${grid.map(sz => {
+      const ov = it.pricesBySize && it.pricesBySize[sz] != null && it.pricesBySize[sz] !== '' && Number(it.pricesBySize[sz]) > 0;
+      return `<div class="rv-sz">
+          <div class="rv-sz-h"><b>${esc(sz)}</b><button type="button" class="recv-size-del" data-uid="${it.uid}" data-size="${esc(sz)}" title="Убрать размер">×</button></div>
+          ${stepper(sz, it.sizes && it.sizes[sz])}
+          <input class="recv-size-price ${ov ? 'recv-size-price-set' : ''}" data-uid="${it.uid}" data-size="${esc(sz)}" type="number" min="0" step="0.01" inputmode="decimal" value="${ov ? esc(String(it.pricesBySize[sz])) : ''}" placeholder="${fmtNum(effP)}" title="Цена для размера ${esc(sz)} (пусто = общая ${fmtNum(effP)} ${CUR})">
+        </div>`;
+    }).join('')}
+      <div class="rv-sz rv-sz-tot"><small>Итого</small><b class="rv-sz-totv" data-tot="${it.uid}">${fmtInt(recvItemQty(it))}</b><small>пар</small></div>
+    </div>${addSizeUI}
+    <div class="recv-sizes-hint">Под количеством — цена размера (пусто = общая ${fmtNum(effP)} ${CUR}). × — убрать размер.</div>`;
   } else if (noSizesProduct) {
-    sizesHTML = `<div class="recv-nosize"><label class="recv-lbl">Количество (шт.)</label>
-        <input class="recv-size-inp recv-qty-solo" data-uid="${it.uid}" data-size="_" type="number" min="0" inputmode="numeric"
-               value="${it.sizes && it.sizes['_'] ? esc(String(it.sizes['_'])) : ''}" placeholder="0"></div>
-       ${addSizeUI}`;
+    body = `<div class="rv-sizes"><div class="rv-sz rv-sz-solo"><div class="rv-sz-h"><b>Количество, шт</b></div>${stepper('_', it.sizes && it.sizes['_'])}</div></div>${addSizeUI}`;
   } else {
-    // У товара есть размеры, но ни один ещё не добавлен — просим добавить вручную.
-    sizesHTML = `<div class="recv-sizes-empty">Размеры не добавлены. Нажмите «＋ размер» и выберите нужные.</div>
-       ${addSizeUI}`;
+    body = `<div class="recv-sizes-empty">Размеры не добавлены. Нажмите «＋ размер» и выберите нужные.</div>${addSizeUI}`;
   }
-  const active = it.uid === recv.activeCalcUid ? 'recv-row-active' : '';
-  return `
-    <div class="recv-row ${active}" data-uid="${it.uid}">
-      <div class="recv-nom">
-        <div class="recv-nom-ph">📦</div>
-        <div><div class="recv-nom-name">${esc(it.product_name)}</div>${it.sku ? `<div class="recv-nom-sku">Артикул: ${esc(it.sku)}</div>` : ''}</div>
+  return `<div class="rv-det-sizes"><div class="rv-det-t">Размеры и количество</div>${body}</div>`;
+}
+
+// мини-калькулятор позиции (формула и разбивка) в раскрытой строке
+function recvRowCalcHTML(it) {
+  const cost = Number(it.cost_price) || 0, tr = Number(it.transport_cost) || 0, base = cost + tr;
+  const a = (p) => Math.round(base * (Number(p) || 0)) / 100;
+  const sale = recvSalePrice(it), eff = recvEffPrice(it);
+  const ln = (l, v, plus) => `<div class="rv-fl"><span>${l}</span><b>${plus ? '+ ' : ''}${fmtNum(v)} ${CUR}</b></div>`;
+  return `<div class="rv-det-calc">
+    <div class="rv-det-t">🧮 Калькулятор цены для позиции</div>
+    <div class="rv-formula"><b>ƒx</b> Цена = (Себестоимость + Транспорт) × (1 + %Пост. + %Перем. + %Врачам + %Продавцам + %Прибыль)</div>
+    <div class="rv-fgrid">
+      <div>${ln('Себестоимость (за пару)', cost)}${ln('Транспорт', tr)}${ln(`Постоянные (${Number(it.fixed_cost_pct) || 0}%)`, a(it.fixed_cost_pct), 1)}${ln(`Переменные (${Number(it.variable_cost_pct) || 0}%)`, a(it.variable_cost_pct), 1)}</div>
+      <div>${ln(`Врачу (${Number(it.doctor_pct) || 0}%)`, a(it.doctor_pct), 1)}${ln(`Продавцу (${Number(it.seller_pct) || 0}%)`, a(it.seller_pct), 1)}${ln(`Прибыль (${Number(it.profit_pct) || 0}%)`, a(it.profit_pct), 1)}
+        <div class="rv-fl rv-fl-res"><span>Рекомендуемая цена</span><b>${fmtNum(sale)} ${CUR}</b></div>
+        ${Math.abs(eff - sale) > 0.009 ? `<div class="rv-fl rv-fl-ov"><span>Установлена вручную</span><b>${fmtNum(eff)} ${CUR}</b></div>` : ''}
       </div>
-      <div>${sizesHTML}</div>
-      <div class="recv-cost">
-        <div class="recv-cost-lbl">за пару (${CUR})</div>
-        <input class="recv-cost-inp" data-uid="${it.uid}" type="number" min="0" value="${esc(String(it.cost_price || ''))}" placeholder="0">
-        <div class="recv-cost-total">Итого: <b>${fmtNum(recvItemCost(it))} ${CUR}</b></div>
-      </div>
-      <div class="c recv-actions">
-        <button class="recv-icon-btn recv-calc-open" data-uid="${it.uid}" title="Калькулятор цены">🧮</button>
-        <button class="recv-icon-btn recv-del" data-uid="${it.uid}" title="Удалить">🗑</button>
-      </div>
-    </div>`;
+    </div>
+  </div>`;
+}
+
+
+// v1.7.7 — живое обновление строки позиции (цена, сумма, кол-во, мини-калькулятор)
+function recvUpdateRowLive(it, skipPriceInput) {
+  const tr = document.querySelector(`.rv-row[data-uid="${it.uid}"]`);
+  if (tr) {
+    const pi = tr.querySelector('.recv-row-price');
+    if (pi && !skipPriceInput && document.activeElement !== pi) pi.value = String(recvEffPrice(it));
+    if (pi) pi.classList.toggle('rv-price-ov', it.sale_price_override != null && it.sale_price_override !== '' && Number(it.sale_price_override) > 0);
+    const sm = tr.querySelector('.rv-sum'); if (sm) sm.textContent = fmtNum(recvItemRetail(it));
+    const q = tr.querySelector('.rv-qty'); if (q) q.innerHTML = recvQtyLabel(it);
+  }
+  const tot = document.querySelector(`.rv-sz-totv[data-tot="${it.uid}"]`); if (tot) tot.textContent = fmtInt(recvItemQty(it));
+  const det = document.querySelector(`.rv-det[data-uid="${it.uid}"] .rv-det-calc`);
+  if (det) det.outerHTML = recvRowCalcHTML(it);
+  document.querySelectorAll(`.recv-size-price[data-uid="${it.uid}"]`).forEach(inp => { inp.placeholder = fmtNum(recvEffPrice(it)); });
+  const r = $('recvTotRet'); if (r) r.textContent = fmtNum(recvRetailTotal()) + ' ' + CUR;
+}
+
+// ── v1.7.7 — Окно редактирования номенклатуры (имя, артикул, категория, тип) ──
+// Можно вызвать из поступления и из карточки товара. seed — что уже известно о товаре.
+async function recvEditNomDialog(pid, seed, onSaved) {
+  if (!pid) { alert('У позиции нет привязки к номенклатуре.'); return; }
+  let host = document.getElementById('rvNomEditHost');
+  if (!host) { host = document.createElement('div'); host.id = 'rvNomEditHost'; document.body.appendChild(host); }
+  const close = () => { host.innerHTML = ''; };
+  host.innerHTML = `<div class="fin-modal-bg rv-modal-bg" id="rvNeBg"><div class="fin-modal rv-ne">
+    <div class="fin-modal-head"><h3>Редактирование номенклатуры</h3><button class="fin-modal-x" id="rvNeX">✕</button></div>
+    <div class="fin-modal-body" id="rvNeBody"><div class="loading">⏳ Загружаю карточку…</div></div>
+    <div class="fin-modal-foot"><span id="rvNeMsg"></span><div><button class="btn btn-ghost btn-sm" id="rvNeCancel">Отмена</button> <button class="btn btn-primary btn-sm" id="rvNeSave" disabled>Сохранить</button></div></div>
+  </div></div>`;
+  $('rvNeX').onclick = close; $('rvNeCancel').onclick = close;
+  $('rvNeBg').onclick = (e) => { if (e.target.id === 'rvNeBg') close(); };
+  let p = Object.assign({}, seed || {});
+  try {
+    const d = await posApi('?action=recv-product-info&id=' + encodeURIComponent(pid), { method: 'GET' });
+    if (d && d.product) p = Object.assign(p, d.product);
+  } catch (e) { $('rvNeBody').innerHTML = errBar('Не удалось загрузить товар: ' + (e.message || e)); return; }
+  const cats = RECV_NOM_CATS.slice(); if (p.category && !cats.includes(p.category)) cats.unshift(p.category);
+  const curType = p.shopCategoryManual ? p.shopCategory : '';
+  $('rvNeBody').innerHTML = `
+    <label class="fld"><span>Наименование товара *</span><input id="rvNeName" value="${esc(p.name || '')}" maxlength="300"></label>
+    <label class="fld"><span>Артикул</span><input id="rvNeSku" value="${esc(p.sku || '')}" placeholder="необязательно"></label>
+    <label class="fld"><span>Категория (РМК, размерная сетка)</span><select id="rvNeCat">${cats.map(c => `<option value="${esc(c)}"${c === p.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+    <label class="fld"><span>Тип товара (раздел в ОртоШопе и ОртоБоте)</span><select id="rvNeType">
+      <option value="">Авто — по категории и названию${!p.shopCategoryManual && p.shopCategory ? ' (сейчас: ' + esc(p.shopCategory) + ')' : ''}</option>
+      ${RECV_SHOP_CATS.map(c => `<option value="${esc(c)}"${c === curType ? ' selected' : ''}>${esc(c)}</option>`).join('')}
+    </select></label>
+    <div class="rv-ne-info">ℹ Новое название сразу будет на кассе, в этикетках при печати, в ОртоШопе и ОртоБоте (до 1 минуты), а также во всех документах поступления этого товара.</div>`;
+  const save = $('rvNeSave'); save.disabled = false;
+  $('rvNeName').focus();
+  save.onclick = async () => {
+    const name = $('rvNeName').value.trim();
+    if (!name) { $('rvNeMsg').innerHTML = '<span class="rv-err">Укажите наименование</span>'; return; }
+    const body = { id: pid, name, sku: $('rvNeSku').value.trim(), category: $('rvNeCat').value, shopCategory: $('rvNeType').value };
+    if (!RECV_NOM_CATS.includes(body.category)) delete body.category; // нестандартную категорию не трогаем
+    save.disabled = true; save.textContent = 'Сохраняю…';
+    try {
+      const d = await posApi('?action=recv-product-update', { method: 'POST', body: JSON.stringify(body) });
+      if (!d || !d.ok) throw new Error((d && d.error) || 'Ошибка сохранения');
+      const np = d.product || {};
+      // обновляем позиции текущего документа поступления
+      (recv.items || []).forEach(it => { if (it.product_id === pid) { it.product_name = np.name; it.sku = np.sku || ''; it.category = np.category || ''; it.shopCategory = np.shopCategory || null; } });
+      recv.docsList = null;
+      try { recvPersist(); } catch (_) {}
+      close();
+      try { docToast('Номенклатура сохранена' + (d.renamedRows ? ` · обновлено строк в документах: ${d.renamedRows}` : '')); } catch (_) {}
+      if (typeof onSaved === 'function') onSaved(np);
+      else if ($('recvTabBody')) recvPaint();
+    } catch (e) {
+      save.disabled = false; save.textContent = 'Сохранить';
+      $('rvNeMsg').innerHTML = '<span class="rv-err">' + esc(e.message || String(e)) + '</span>';
+    }
+  };
 }
 
 // ── Калькулятор цены (правая колонка) ──
@@ -9593,7 +9763,22 @@ function recvBindHead() {
   const saveDraft = $('recvSaveDraft'); if (saveDraft) saveDraft.onclick = () => recvSubmit(false);
   const post = $('recvPost'); if (post) post.onclick = () => recvSubmit(true);
   const newDoc = $('recvNewDoc'); if (newDoc) newDoc.onclick = () => { recvResetForm(); recvPaint(); };
-  const printTop = $('recvPrintLabelsTop'); if (printTop) printTop.onclick = recvPrintLabels;
+  // v1.7.7 — кнопки шапки/быстрых действий
+  document.querySelectorAll('[data-ract]').forEach(b => {
+    const a = b.dataset.ract;
+    b.onclick = () => {
+      if (a === 'save') recvSubmit(false);
+      else if (a === 'post' || a === 'gen') recvSubmit(true);
+      else if (a === 'print') recvPrintLabels();
+      else if (a === 'newdoc') { recvResetForm(); recvPaint(); }
+      else if (a === 'nom') recvCreateNomForm();
+    };
+  });
+  const note = $('recvNote'); if (note) note.oninput = () => { recv.note = note.value; const c = $('recvNoteCnt'); if (c) c.textContent = note.value.length + ' / 500'; recvPersist(); };
+  const qa = $('recvApplyAllQ'); if (qa) qa.onclick = () => {
+    if (!recvActiveItem()) { alert('Сначала откройте позицию в калькуляторе (кнопка 🧮 в строке), её параметры применятся ко всем.'); return; }
+    recvApplyToAll();
+  };
   const createNom = $('recvCreateNom'); if (createNom) createNom.onclick = recvCreateNomForm;
   const addRow = $('recvAddRow'); if (addRow) addRow.onclick = () => { const s = $('recvSearch'); if (s) s.focus(); };
 }
@@ -9634,6 +9819,7 @@ function recvCreateNomForm() {
         <div class="fin-modal-body">
           <label class="fld"><span>Наименование товара *</span><input id="rnName" placeholder="Напр. Ortosalon 3349-5A черн."></label>
           <label class="fld"><span>Категория *</span><select id="rnCat">${catOpts}</select></label>
+          <label class="fld"><span>Тип товара (раздел в ОртоШопе)</span><select id="rnType"><option value="">Авто — по категории и названию</option>${RECV_SHOP_CATS.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></label>
           <label class="fld"><span>Артикул (необязательно)</span><input id="rnSku" placeholder="напр. 3349-5A"></label>
           <label class="fld"><span>Цена продажи, ${CUR} (необязательно)</span><input id="rnPrice" type="number" step="0.01" min="0" placeholder="можно задать позже в поступлении"></label>
           <div class="fld" id="rnSizesFld">
@@ -9754,7 +9940,7 @@ function recvCreateNomForm() {
     try {
       const d = await posApi('?action=recv-create-product', {
         method: 'POST',
-        body: JSON.stringify({ name, category, sku: sku || null, price, sizes }),
+        body: JSON.stringify({ name, category, sku: sku || null, price, sizes, shopCategory: ($('rnType') && $('rnType').value) || '' }),
       });
       if (!d || !d.ok || !d.product) throw new Error((d && d.error) || 'Не удалось создать номенклатуру');
       close();
@@ -9804,7 +9990,15 @@ function recvAddProduct(p) {
   const it = { uid: recvNewUid(), product_id: p.id, product_name: p.name, sku: p.sku || '', category: p.category || '', productSizes: Array.isArray(p.sizeGrid) ? p.sizeGrid.slice() : [], sizeGrid: [], sizes: {},
     // v1.2.73 — актуальные цены по размерам из базы { <размер>: цена } — подставляются при добавлении размера
     productPrices: (p.pricesBySize && typeof p.pricesBySize === 'object') ? { ...p.pricesBySize } : {},
+    photo: p.photo || null, shopCategory: p.shopCategory || null, shopCategoryManual: !!p.shopCategoryManual,
     ...recvDefaultCalc() };
+  // v1.7.7 — себестоимость и параметры из прошлого поступления (редактируемые)
+  const last = p.last;
+  if (last && Number(last.cost_price) > 0) {
+    ['cost_price', 'transport_cost', 'fixed_cost_pct', 'variable_cost_pct', 'doctor_pct', 'seller_pct', 'profit_pct'].forEach(k => { if (last[k] != null && last[k] !== '') it[k] = Number(last[k]) || 0; });
+    const dt = String(last.at || '').slice(0, 10);
+    it.cost_auto = dt ? 'поступления ' + dt.slice(8, 10) + '.' + dt.slice(5, 7) + '.' + dt.slice(0, 4) : 'прошлого поступления';
+  }
   // v1.2.30 — если у товара уже есть цена в базе — подставляем её как редактируемую
   if (p.basePrice != null && Number(p.basePrice) > 0) {
     it.base_price = Math.round(Number(p.basePrice) * 100) / 100;
@@ -9822,7 +10016,8 @@ function recvBindItems() {
     inp.oninput = () => {
       const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
       it.sizes = it.sizes || {};
-      const v = Math.max(0, Math.round(Number(inp.value) || 0));
+      let v = Math.max(0, Math.round(Number(inp.value) || 0));
+      if (v > 999) { v = 999; inp.value = '999'; }
       if (v > 0) it.sizes[inp.dataset.size] = v; else delete it.sizes[inp.dataset.size];
       recvPersist();
       recvUpdateTotalsLive(it);
@@ -9838,6 +10033,7 @@ function recvBindItems() {
       if (v === '' || Number(v) <= 0) { delete it.pricesBySize[sz]; inp.classList.remove('recv-size-price-set'); }
       else { it.pricesBySize[sz] = Math.round(Number(v) * 100) / 100; inp.classList.add('recv-size-price-set'); }
       recvPersist();
+      recvUpdateRowLive(it);
     };
   });
   // Кнопка × у размера: убрать размер из сетки позиции
@@ -9871,6 +10067,7 @@ function recvBindItems() {
     inp.oninput = () => {
       const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
       it.cost_price = Number(inp.value) || 0;
+      if (it.cost_auto) { it.cost_auto = null; const a = inp.parentNode.querySelector('.rv-auto'); if (a) a.remove(); }
       recvPersist();
       recvUpdateTotalsLive(it);
       // если позиция открыта в калькуляторе — синхронизируем поле себестоимости
@@ -9887,6 +10084,54 @@ function recvBindItems() {
   document.querySelectorAll('.recv-calc-open').forEach(b => {
     b.onclick = () => { recv.activeCalcUid = b.dataset.uid; recvPaint(); };
   });
+  // v1.7.7 — раскрыть/свернуть строку (размеры + мини-калькулятор)
+  document.querySelectorAll('.recv-toggle').forEach(b => {
+    b.onclick = () => {
+      const it = recv.items.find(x => x.uid === b.dataset.uid); if (!it) return;
+      it.open = it.open === false; recvPersist(); recvPaint();
+    };
+  });
+  // степпер количества −/+ (0…999)
+  document.querySelectorAll('.recv-step').forEach(b => {
+    b.onclick = () => {
+      const it = recv.items.find(x => x.uid === b.dataset.uid); if (!it) return;
+      const sz = b.dataset.size; it.sizes = it.sizes || {};
+      const v = Math.min(999, Math.max(0, (Math.round(Number(it.sizes[sz]) || 0)) + Number(b.dataset.d)));
+      if (v > 0) it.sizes[sz] = v; else delete it.sizes[sz];
+      const inp = b.parentNode.querySelector('.recv-size-inp'); if (inp) inp.value = v ? String(v) : '';
+      recvPersist(); recvUpdateTotalsLive(it);
+    };
+  });
+  // параметры калькулятора прямо в строке (транспорт и проценты)
+  document.querySelectorAll('.recv-row-inp').forEach(inp => {
+    inp.oninput = () => {
+      const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
+      it[inp.dataset.fld] = Number(inp.value) || 0;
+      recvPersist();
+      recvUpdateRowLive(it);
+      if (it.uid === recv.activeCalcUid) { const cf = document.querySelector(`.recv-calc-inp[data-fld="${inp.dataset.fld}"]`); if (cf) cf.value = it[inp.dataset.fld]; recvRecalcSale(); }
+    };
+  });
+  // продажная цена в строке — ручная (пусто = расчёт)
+  document.querySelectorAll('.recv-row-price').forEach(inp => {
+    inp.oninput = () => {
+      const it = recv.items.find(x => x.uid === inp.dataset.uid); if (!it) return;
+      const v = inp.value;
+      if (v === '' || Number(v) <= 0) delete it.sale_price_override;
+      else it.sale_price_override = Math.round(Number(v) * 100) / 100;
+      recvPersist();
+      recvUpdateRowLive(it, true);
+      if (it.uid === recv.activeCalcUid) { const si = $('recvSaleInp'); if (si) si.value = v; recvUpdateSaleFlags(); }
+    };
+    inp.onblur = () => { const it = recv.items.find(x => x.uid === inp.dataset.uid); if (it) inp.value = String(recvEffPrice(it)); };
+  });
+  // ✏ редактирование номенклатуры
+  document.querySelectorAll('.recv-nom-edit').forEach(b => {
+    b.onclick = () => {
+      const it = recv.items.find(x => x.uid === b.dataset.uid); if (!it) return;
+      recvEditNomDialog(it.product_id, { name: it.product_name, sku: it.sku, category: it.category, shopCategory: it.shopCategory });
+    };
+  });
 }
 
 // живое обновление итогов без полной перерисовки
@@ -9894,11 +10139,9 @@ function recvUpdateTotalsLive(it) {
   const t = recvTotals();
   const p = $('recvTotPos'), q = $('recvTotQty'), c = $('recvTotCost');
   if (p) p.textContent = fmtInt(t.positions);
-  if (q) q.textContent = fmtInt(t.qty) + ' пар';
+  if (q) q.textContent = fmtInt(t.qty);
   if (c) c.innerHTML = fmtNum(t.cost) + ' ' + CUR;
-  // обновляем «Итого» строки позиции
-  const row = document.querySelector(`.recv-row[data-uid="${it.uid}"] .recv-cost-total b`);
-  if (row) row.textContent = fmtNum(recvItemCost(it)) + ' ' + CUR;
+  if (it) recvUpdateRowLive(it);
 }
 
 // ── Калькулятор: инпуты и пересчёт ──
@@ -9909,8 +10152,10 @@ function recvBindCalc() {
       it[inp.dataset.fld] = Number(inp.value) || 0;
       // если меняли себестоимость — синхронизируем в строке позиции
       if (inp.dataset.fld === 'cost_price') { const ci = document.querySelector(`.recv-cost-inp[data-uid="${it.uid}"]`); if (ci) ci.value = it.cost_price; recvUpdateTotalsLive(it); }
+      else { const ri = document.querySelector(`.recv-row-inp[data-uid="${it.uid}"][data-fld="${inp.dataset.fld}"]`); if (ri) ri.value = it[inp.dataset.fld] || ''; }
       recvPersist();
       recvRecalcSale();
+      recvUpdateRowLive(it);
     };
   });
   const applyAll = $('recvApplyAll'); if (applyAll) applyAll.onclick = recvApplyToAll;
@@ -9926,6 +10171,7 @@ function recvBindCalc() {
     else it.sale_price_override = Math.round(Number(v) * 100) / 100;
     recvPersist();
     recvUpdateSaleFlags();
+    recvUpdateRowLive(it);
   };
   // кнопка «использовать расчёт калькулятора» — сбрасывает ручную цену
   const useCalc = $('recvUseCalc');
@@ -10025,7 +10271,7 @@ async function recvCreateSupplier() {
 // ── Отмена документа ──
 function recvCancelDoc() {
   if (!confirm('Очистить текущий документ поступления? Несохранённые данные будут потеряны.')) return;
-  recv.docId = null; recv.postKey = null; recv.status = 'draft'; recv.items = []; recv.docNumber = ''; recv.activeCalcUid = null;
+  recv.docId = null; recv.postKey = null; recv.status = 'draft'; recv.items = []; recv.docNumber = ''; recv.activeCalcUid = null; recv.note = '';
   recv.docDate = new Date().toISOString().slice(0, 10);
   try { localStorage.removeItem(RECV_LS_KEY); } catch (_) {}
   recvPaint();
@@ -10054,6 +10300,7 @@ async function recvSubmit(isPost) {
     docId: recv.docId, docNumber: recv.docNumber || null, docDate: recv.docDate,
     supplierId: recv.supplierId || null, supplierName: supName,
     warehouseId: recv.warehouseId || null, warehouseName: whName,
+    note: (recv.note || '').trim() || null,
     items: recv.items.map(it => ({
       product_id: it.product_id, product_name: it.product_name, sku: it.sku,
       sizes: it.sizeGrid && it.sizeGrid.length ? it.sizes : {}, // товары без сетки — количество в поле '_' пойдёт как есть? нет: для без-сетки используем sizes['_']
@@ -10138,7 +10385,7 @@ async function recvSubmit(isPost) {
 // Сброс формы нового документа (без подтверждения) — после проведения/нового документа
 function recvResetForm() {
   recv.postKey = null;
-  recv.docId = null; recv.status = 'draft'; recv.items = []; recv.docNumber = '';
+  recv.docId = null; recv.status = 'draft'; recv.items = []; recv.docNumber = ''; recv.note = '';
   recv.activeCalcUid = null; recv.lastBarcodes = []; recv.docMode = 'new';
   recv.docDate = new Date().toISOString().slice(0, 10);
   if (recv.warehouses && recv.warehouses[0]) recv.warehouseId = recv.warehouses[0].id;
@@ -10147,64 +10394,166 @@ function recvResetForm() {
 }
 
 // ══════════════════════════════════════════════════════
-//  ВКЛАДКА «ДОКУМЕНТЫ ПОСТУПЛЕНИЯ»
+//  ВКЛАДКА «ДОКУМЕНТЫ ПОСТУПЛЕНИЯ» — v1.7.7: KPI, фильтры, поиск по товару, раскрытие строки
 // ══════════════════════════════════════════════════════
+function recvDocLow(s) { return String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/\s+/g, ' ').trim(); }
+function recvDocLblState(dc) {
+  if (dc.status !== 'posted') return null;
+  const tq = Number(dc.total_qty) || 0, pc = Number(dc.labels_printed) || 0;
+  if (!pc) return { cls: 'wait', t: 'Ожидает печати' };
+  if (tq && pc < tq) return { cls: 'half', t: `Распечатано ${fmtInt(pc)} из ${fmtInt(tq)}` };
+  return { cls: 'ok', t: 'Этикетки распечатаны' };
+}
+// фильтрация списка документов
+function recvDocsFiltered() {
+  const f = recv.df || (recv.df = { q: '', sup: '', wh: '', st: '', from: '', to: '' });
+  const q = recvDocLow(f.q);
+  const words = q ? q.split(' ').filter(Boolean) : [];
+  const out = [];
+  for (const dc of (recv.docsList || [])) {
+    if (f.sup && (dc.supplier_id || '') !== f.sup) continue;
+    if (f.wh && (dc.warehouse_id || '') !== f.wh) continue;
+    if (f.st === 'wait') { const l = recvDocLblState(dc); if (!l || l.cls === 'ok') continue; }
+    else if (f.st && dc.status !== f.st) continue;
+    const dd = String(dc.doc_date || '').slice(0, 10);
+    if (f.from && dd < f.from) continue;
+    if (f.to && dd > f.to) continue;
+    let hits = [];
+    if (words.length) {
+      const head = recvDocLow([dc.doc_number, dc.supplier_name, dc.warehouse_name, dc.note].join(' '));
+      hits = (dc.items || []).filter(it => { const t = recvDocLow(it.n + ' ' + (it.old || '') + ' ' + (it.sku || '')); return words.every(w => t.includes(w)); });
+      if (!hits.length && !words.every(w => head.includes(w))) continue;
+    }
+    out.push({ dc, hits });
+  }
+  const s = recv.dsort || { k: 'date', dir: -1 };
+  const val = (r) => ({ num: r.dc.doc_number || '', date: String(r.dc.doc_date || '') + String(r.dc.created_at || ''), pos: Number(r.dc.positions_count) || 0, qty: Number(r.dc.total_qty) || 0, cost: Number(r.dc.total_cost) || 0 })[s.k];
+  out.sort((a, b) => { const x = val(a), y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * s.dir; });
+  return out;
+}
+
 async function recvPaintDocs() {
   const root = $('recvTabBody');
   if (!root) return;
-  root.innerHTML = `<div class="loading">⏳ Загрузка документов…</div>`;
   if (!recv.docsList) {
+    root.innerHTML = `<div class="loading">⏳ Загрузка документов…</div>`;
     try {
       const d = await posApi('?action=recv-docs', { method: 'GET' });
       recv.docsList = d.docs || [];
     } catch (e) { root.innerHTML = errBar('Не удалось загрузить документы: ' + (e.message || e)); return; }
   }
-  const docs = recv.docsList || [];
-  const rows = docs.map(dc => {
-    const st = dc.status === 'posted'
-      ? `<span class="recv-badge recv-badge-ok">Проведён</span>`
-      : (dc.status === 'cancelled' ? `<span class="recv-badge recv-badge-off">Отменён</span>` : `<span class="recv-badge">Черновик</span>`);
-    return `<tr data-docid="${dc.id}">
-      <td class="recv-dl-num">${esc(dc.doc_number || '—')}</td>
-      <td>${esc((dc.doc_date || '').slice(0, 10))}</td>
+  const f = recv.df || (recv.df = { q: '', sup: '', wh: '', st: '', from: '', to: '' });
+  const sups = [...new Map((recv.docsList || []).filter(d => d.supplier_id).map(d => [d.supplier_id, d.supplier_name || '—'])).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'ru'));
+  const whs = [...new Map((recv.docsList || []).filter(d => d.warehouse_id).map(d => [d.warehouse_id, d.warehouse_name || '—'])).entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'ru'));
+  const opt = (list, sel, first) => `<option value="">${first}</option>` + list.map(([id, n]) => `<option value="${esc(id)}"${id === sel ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  root.innerHTML = `
+    <div class="rv-kpis" id="recvKpis"></div>
+    <div class="rv-card rv-filters">
+      <label class="recv-field rv-f-q"><span class="recv-lbl">Поиск</span><input class="finput" id="rdQ" value="${esc(f.q)}" placeholder="🔍 № документа, поставщик или товар (напр. коврик)" autocomplete="off"></label>
+      <label class="recv-field"><span class="recv-lbl">Поставщик</span><select class="finput" id="rdSup">${opt(sups, f.sup, 'Все поставщики')}</select></label>
+      <label class="recv-field"><span class="recv-lbl">Склад / магазин</span><select class="finput" id="rdWh">${opt(whs, f.wh, 'Все склады')}</select></label>
+      <label class="recv-field"><span class="recv-lbl">Статус</span><select class="finput" id="rdSt">
+        ${[['', 'Все статусы'], ['posted', 'Проведён'], ['draft', 'Черновик'], ['cancelled', 'Отменён'], ['wait', 'Ожидают печати этикеток']].map(([v, l]) => `<option value="${v}"${v === f.st ? ' selected' : ''}>${l}</option>`).join('')}
+      </select></label>
+      <label class="recv-field rv-f-per"><span class="recv-lbl">Период</span><div class="recv-inline"><input class="finput" type="date" id="rdFrom" value="${esc(f.from)}"><span class="rv-muted">—</span><input class="finput" type="date" id="rdTo" value="${esc(f.to)}"></div></label>
+      <div class="rv-f-btns"><button class="btn btn-ghost" id="rdReset">Сбросить</button><button class="btn btn-primary" id="rdApply">Применить</button></div>
+    </div>
+    <div class="rv-card">
+      <div class="rv-comp-head">
+        <div class="rv-card-t">📄 Документы поступления <span class="rv-muted" id="rdCount"></span></div>
+        <div class="rv-comp-tools"><button class="btn btn-ghost" id="recvDocsRefresh">↻ Обновить</button><button class="btn btn-primary" id="recvDocsNew">+ Новый документ</button></div>
+      </div>
+      <div id="rdHint"></div>
+      <div id="rdTable"></div>
+    </div>`;
+  const read = () => { f.q = $('rdQ').value; f.sup = $('rdSup').value; f.wh = $('rdWh').value; f.st = $('rdSt').value; f.from = $('rdFrom').value; f.to = $('rdTo').value; };
+  let tm = null;
+  $('rdQ').oninput = () => { clearTimeout(tm); tm = setTimeout(() => { read(); recvPaintDocsTable(); }, 220); };
+  ['rdSup', 'rdWh', 'rdSt', 'rdFrom', 'rdTo'].forEach(id => { $(id).onchange = () => { read(); recvPaintDocsTable(); }; });
+  $('rdApply').onclick = () => { read(); recvPaintDocsTable(); };
+  $('rdQ').onkeydown = (e) => { if (e.key === 'Enter') { read(); recvPaintDocsTable(); } };
+  $('rdReset').onclick = () => { recv.df = { q: '', sup: '', wh: '', st: '', from: '', to: '' }; recvPaintDocs(); };
+  const rf = $('recvDocsRefresh'); if (rf) rf.onclick = () => { recv.docsList = null; recvPaintDocs(); };
+  const nw = $('recvDocsNew'); if (nw) nw.onclick = () => { recvResetForm(); recv.tab = 'new'; recvPaint(); };
+  recvPaintDocsTable();
+}
+
+function recvPaintDocsTable() {
+  const box = $('rdTable'); if (!box) return;
+  const rows = recvDocsFiltered();
+  const f = recv.df || {};
+  // KPI по отфильтрованным
+  const posted = rows.filter(r => r.dc.status === 'posted');
+  const uniq = new Set(); rows.forEach(r => (r.dc.items || []).forEach(it => it.pid && uniq.add(it.pid)));
+  const k = { docs: rows.length, pos: uniq.size, qty: rows.reduce((a, r) => a + (Number(r.dc.total_qty) || 0), 0), cost: rows.reduce((a, r) => a + (Number(r.dc.total_cost) || 0), 0), wait: posted.filter(r => { const l = recvDocLblState(r.dc); return l && l.cls !== 'ok'; }).length };
+  const kpi = (ic, l, v, s) => `<div class="rv-kpi"><span class="rv-kpi-ic">${ic}</span><div><small>${l}</small><b>${v}</b><em>${s}</em></div></div>`;
+  const per = f.from || f.to ? 'за выбранный период' : 'всего в журнале';
+  $('recvKpis').innerHTML = kpi('📄', 'Документов', fmtInt(k.docs), per) + kpi('📦', 'Поставлено позиций', fmtInt(k.pos), 'уникальных товаров') + kpi('👟', 'Всего пар / шт', fmtInt(k.qty), 'на склады') + kpi('💰', 'Сумма себестоимости', fmtNum(k.cost) + ' ' + CUR, 'по документам') + kpi('🏷', 'Ожидают печати этикеток', fmtInt(k.wait), plural3(k.wait, 'документ', 'документа', 'документов'));
+  const cnt = $('rdCount'); if (cnt) cnt.textContent = `(${fmtInt(rows.length)})`;
+  // подсказка при поиске по товару
+  const hint = $('rdHint');
+  if (hint) {
+    const hitDocs = rows.filter(r => r.hits.length);
+    if (f.q && hitDocs.length) {
+      const q = hitDocs.reduce((a, r) => a + r.hits.reduce((b, h) => b + h.q, 0), 0);
+      const dates = hitDocs.map(r => String(r.dc.doc_date || '').slice(0, 10)).filter(Boolean).sort();
+      hint.innerHTML = `<div class="rv-hint">🔎 Товар «<b>${esc(f.q.trim())}</b>» приходовался в <b>${fmtInt(hitDocs.length)}</b> ${plural3(hitDocs.length, 'документе', 'документах', 'документах')} · всего <b>${fmtInt(q)}</b> пар/шт${dates.length ? ` · первый раз ${esc(dates[0])}, последний ${esc(dates[dates.length - 1])}` : ''}</div>`;
+    } else if (f.q && !rows.length) hint.innerHTML = `<div class="rv-hint rv-hint-no">Ничего не найдено по запросу «${esc(f.q.trim())}».</div>`;
+    else hint.innerHTML = '';
+  }
+  if (!rows.length) { box.innerHTML = `<div class="recv-empty">${(recv.docsList || []).length ? 'Нет документов под выбранные фильтры.' : 'Пока нет документов поступления. Создайте новый во вкладке «Новый документ».'}</div>`; return; }
+  const s = recv.dsort || { k: 'date', dir: -1 };
+  const th = (key, l, cls) => `<th class="${cls || ''} rv-sortable" data-sk="${key}">${l}${s.k === key ? (s.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`;
+  const open = recv.docOpen || (recv.docOpen = {});
+  const hl = (txt) => {
+    let out = esc(txt); const w = recvDocLow(f.q).split(' ').filter(x => x.length >= 2);
+    w.forEach(x => { out = out.replace(new RegExp('(' + x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); });
+    return out;
+  };
+  const body = rows.map(({ dc, hits }) => {
+    const st = dc.status === 'posted' ? `<span class="rv-st ok">Проведён</span>` : (dc.status === 'cancelled' ? `<span class="rv-st off">Отменён</span>` : `<span class="rv-st draft">Черновик</span>`);
+    const l = recvDocLblState(dc);
+    const lbl = l ? `<span class="rv-lbl ${l.cls}" title="${dc.labels_printed_at ? 'Последняя печать: ' + esc(dushTime(dc.labels_printed_at, true)) : ''}">🖨 ${l.t}</span>` : '<span class="rv-muted">—</span>';
+    const isOpen = !!open[dc.id];
+    const hitLine = hits.length ? `<div class="rv-hits">${hits.slice(0, 2).map(h => `<span title="${esc(h.n)}">${hl(h.n)} × ${fmtInt(h.q)}</span>`).join('')}${hits.length > 2 ? `<span>ещё ${hits.length - 2}</span>` : ''}</div>` : '';
+    const main = `<tr class="rv-drow${isOpen ? ' rv-open' : ''}" data-docid="${dc.id}">
+      <td class="rv-c-n"><button type="button" class="rv-caret rd-toggle" data-docid="${dc.id}">${isOpen ? '▾' : '▸'}</button></td>
+      <td class="recv-dl-num">${esc(dc.doc_number || '—')}${hitLine}</td>
+      <td class="nw">${esc((dc.doc_date || '').slice(0, 10))}</td>
       <td>${esc(dc.supplier_name || '—')}</td>
       <td>${esc(dc.warehouse_name || '—')}</td>
       <td class="c">${fmtInt(dc.positions_count || 0)}</td>
       <td class="c">${fmtInt(dc.total_qty || 0)}</td>
-      <td class="r">${fmtNum(dc.total_cost || 0)} ${CUR}</td>
-      <td class="c">${st}${dc.status === 'posted' ? (() => {
-        const tq = Number(dc.total_qty) || 0, pc = Number(dc.labels_printed) || 0;
-        if (!pc) return `<div class="rlb-docpr"><span class="rlb-pr">этикетки не распечатаны</span></div>`;
-        const cls = tq && pc >= tq ? 'on' : 'half';
-        return `<div class="rlb-docpr"><span class="rlb-pr ${cls}" title="Последняя печать">🖨 ${tq && pc >= tq ? 'распечатаны' : 'распечатано ' + fmtInt(pc) + ' из ' + fmtInt(tq)} · ${dushTime(dc.labels_printed_at, true)}</span></div>`;
-      })() : ''}</td>
-      <td class="c" style="white-space:nowrap"><button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">Открыть</button>${dc.status === 'posted' ? ` <button class="btn btn-outline btn-sm recv-doc-lbl" data-docid="${dc.id}" data-docno="${esc(dc.doc_number || '')}" title="Печать этикеток: все, по товарам, по размерам или по одной">🖨 Этикетки</button>` : ''}</td>
+      <td class="r nw">${fmtNum(dc.total_cost || 0)} ${CUR}</td>
+      <td>${lbl}</td>
+      <td>${st}</td>
+      <td class="nw rv-dact"><button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">↗ Открыть</button>${dc.status === 'posted' ? ` <button class="btn btn-outline btn-sm recv-doc-lbl" data-docid="${dc.id}" data-docno="${esc(dc.doc_number || '')}" title="Печать этикеток: все, по товарам, по размерам или по одной">🖨</button>` : ''}</td>
     </tr>`;
-  }).join('');
-  root.innerHTML = `
-    <div class="recv-head">
-      <div class="recv-title">Документы поступления</div>
-      <div class="recv-head-actions">
-        <button class="btn btn-ghost" id="recvDocsRefresh">↻ Обновить</button>
-        <button class="btn btn-primary" id="recvDocsNew">+ Новый документ</button>
+    if (!isOpen) return main;
+    const its = (dc.items || []);
+    const hitSet = new Set(hits);
+    const list = its.length ? `<div class="rv-ditems">${its.map(it => `<div class="rv-ditem${hitSet.has(it) ? ' hit' : ''}"><span class="rv-di-n">${hl(it.n)}${it.old ? ` <small class="rv-muted" title="Название на момент поступления">(было: ${esc(it.old)})</small>` : ''}</span><span class="rv-di-q">${fmtInt(it.q)} шт</span><span class="rv-di-c">${it.c ? fmtNum(it.c) + ' ' + CUR + '/шт' : '—'}</span>${it.pid ? `<button type="button" class="rv-edit rd-nom-edit" data-pid="${esc(it.pid)}" title="Редактировать номенклатуру">✏</button>` : ''}</div>`).join('')}</div>` : '';
+    return main + `<tr class="rv-ddet"><td colspan="11"><div class="rv-ddet-in">
+      <div class="rv-dd-sum">
+        <div><small>Поставщик</small><b>${esc(dc.supplier_name || '—')}</b></div>
+        <div><small>Склад</small><b>${esc(dc.warehouse_name || '—')}</b></div>
+        <div><small>Позиций</small><b>${fmtInt(dc.positions_count || 0)}</b></div>
+        <div><small>Кол-во (пар)</small><b>${fmtInt(dc.total_qty || 0)}</b></div>
+        <div><small>Сумма себестоимости</small><b>${fmtNum(dc.total_cost || 0)} ${CUR}</b></div>
+        <div class="rv-dd-act"><small>Быстрые действия</small><span>${dc.status === 'posted' ? `<button class="btn btn-outline btn-sm recv-doc-lbl" data-docid="${dc.id}" data-docno="${esc(dc.doc_number || '')}">🖨 Печать этикеток</button> ` : ''}<button class="btn btn-outline btn-sm recv-doc-open" data-docid="${dc.id}">📄 Открыть документ</button></span></div>
       </div>
-    </div>
-    ${docs.length ? `<div class="recv-docs-tablewrap"><table class="recv-docs-table">
-      <thead><tr>
-        <th>№ документа</th><th>Дата</th><th>Поставщик</th><th>Склад</th>
-        <th class="c">Позиций</th><th class="c">Кол-во</th><th class="r">Себестоимость</th><th class="c">Статус</th><th class="c"></th>
-      </tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>` : `<div class="recv-empty">Пока нет документов поступления. Создайте новый во вкладке «Новый документ».</div>`}
-  `;
-  const rf = $('recvDocsRefresh'); if (rf) rf.onclick = () => { recv.docsList = null; recvPaintDocs(); };
-  const nw = $('recvDocsNew'); if (nw) nw.onclick = () => { recvResetForm(); recv.tab = 'new'; recvPaint(); };
-  root.querySelectorAll('.recv-doc-open').forEach(b => {
-    b.onclick = () => recvOpenDoc(b.getAttribute('data-docid'));
-  });
-  root.querySelectorAll('.recv-doc-lbl').forEach(b => {
-    b.onclick = () => recvLabelsDialog({ docId: b.getAttribute('data-docid'), docNumber: b.getAttribute('data-docno') });
-  });
+      ${dc.note ? `<div class="rv-dd-note">💬 ${esc(dc.note)}</div>` : ''}
+      ${list}
+    </div></td></tr>`;
+  }).join('');
+  box.innerHTML = `<div class="rv-tblw"><table class="recv-docs-table rv-dtbl"><thead><tr>
+      <th></th>${th('num', '№ документа')}${th('date', 'Дата')}<th>Поставщик</th><th>Склад</th>${th('pos', 'Позиций', 'c')}${th('qty', 'Кол-во', 'c')}${th('cost', 'Себестоимость', 'r')}<th>Этикетки</th><th>Статус</th><th>Действия</th>
+    </tr></thead><tbody>${body}</tbody></table></div>`;
+  box.querySelectorAll('.rv-sortable').forEach(h => h.onclick = () => { const k2 = h.dataset.sk; recv.dsort = { k: k2, dir: (s.k === k2 ? -s.dir : -1) }; recvPaintDocsTable(); });
+  box.querySelectorAll('.rd-toggle').forEach(b => b.onclick = () => { const id = b.dataset.docid; const tr = b.closest('tr'); open[id] = !tr.classList.contains('rv-open'); recvPaintDocsTable(); });
+  box.querySelectorAll('.recv-doc-open').forEach(b => { b.onclick = () => recvOpenDoc(b.getAttribute('data-docid')); });
+  box.querySelectorAll('.recv-doc-lbl').forEach(b => { b.onclick = () => recvLabelsDialog({ docId: b.getAttribute('data-docid'), docNumber: b.getAttribute('data-docno') }); });
+  box.querySelectorAll('.rd-nom-edit').forEach(b => { b.onclick = () => recvEditNomDialog(b.dataset.pid, null, () => { recv.docsList = null; recvPaintDocs(); }); });
 }
 
 // Открыть существующий документ для просмотра/редактирования
@@ -10214,30 +10563,38 @@ async function recvOpenDoc(id) {
     const d = await posApi('?action=recv-doc&id=' + encodeURIComponent(id), { method: 'GET' });
     if (!d.doc) { alert('Документ не найден.'); return; }
     const doc = d.doc;
+    const prods = d.products || {};
     recv.docId = doc.id;
     recv.status = doc.status || 'draft';
     recv.docNumber = doc.doc_number || '';
     recv.docDate = (doc.doc_date || '').slice(0, 10) || recv.docDate;
     recv.supplierId = doc.supplier_id || '';
     recv.warehouseId = doc.warehouse_id || '';
+    recv.note = doc.note || '';
     recv.docMode = 'view';
     recv.lastBarcodes = [];
     recv.activeCalcUid = null;
-    // восстанавливаем позиции из receiving_items
-    recv.items = (d.items || []).map(it => {
+    // восстанавливаем позиции из receiving_items (с актуальным именем товара и сохранёнными ценами)
+    recv.items = (d.items || []).map((it, i) => {
       const sizesRaw = (it.sizes && typeof it.sizes === 'object') ? it.sizes : {};
-      // определяем сетку: если единственный ключ «без размера» — товар без сетки
       const keys = Object.keys(sizesRaw);
       const noGrid = keys.length === 1 && keys[0] === 'без размера';
-      let sizes = sizesRaw, sizeGrid = keys.filter(k => k !== 'без размера');
+      let sizes = sizesRaw, sizeGrid = recvSortGrid(keys.filter(k => k !== 'без размера'));
       if (noGrid) { sizes = { '_': sizesRaw['без размера'] }; sizeGrid = []; }
+      const p = prods[it.product_id] || {};
+      const sale = Number(it.sale_price) || 0;
+      const prices = (it.prices && typeof it.prices === 'object') ? it.prices : null;
       return {
-        uid: recvNewUid(), product_id: it.product_id, product_name: it.product_name || '',
-        sku: it.sku || '', category: '', sizeGrid, sizes,
+        uid: recvNewUid(), product_id: it.product_id, product_name: p.name || it.product_name || '',
+        sku: p.sku != null ? p.sku : (it.sku || ''), category: p.category || '', shopCategory: p.shopCategory || null, photo: p.photo || null,
+        sizeGrid, sizes, productSizes: sizeGrid.slice(), open: i < 3,
         cost_price: Number(it.cost_price) || 0, transport_cost: Number(it.transport_cost) || 0,
         fixed_cost_pct: Number(it.fixed_cost_pct) || 0, variable_cost_pct: Number(it.variable_cost_pct) || 0,
         doctor_pct: Number(it.doctor_pct) || 0, seller_pct: Number(it.seller_pct) || 0,
         profit_pct: Number(it.profit_pct) || 0,
+        // v1.7.7 — сохранённая цена документа (редактируемая), цены по размерам
+        sale_price_override: sale > 0 ? sale : undefined, base_price: sale > 0 ? sale : undefined,
+        pricesBySize: prices ? Object.fromEntries(Object.entries(prices).filter(([, v]) => Number(v) > 0 && Math.abs(Number(v) - sale) > 0.009).map(([k, v]) => [noGrid ? '_' : k, Number(v)])) : {},
       };
     });
     recv.tab = 'new';

@@ -172,3 +172,4 @@ body.ct-det-open{overflow:hidden}
   .ct-gal-main,.ct-gal .ct-noph{width:100%;height:220px}
 }
 .ct-tbl .mono{font-family:inherit}
+.ct-det-hb{display:flex;gap:8px;align-items:center;flex:0 0 auto}

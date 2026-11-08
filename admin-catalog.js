@@ -302,7 +302,7 @@ function ctPaintDet() {
   ].filter(r => r[1]);
   const TABS = [['stock', 'Остатки'], ['show', 'Витрина'], ['sales', 'Продажи'], ['recv', 'Поступления'], ['moves', 'Перемещения']];
   el.innerHTML = `
-    <div class="ct-det-h"><div><div class="ct-det-t">${esc(p.name)} ${ctBadge(p.badge)}</div><div class="ct-det-s">${esc(p.sub || '')}</div></div><button class="ct-x" id="ctX" title="Закрыть">${CT_I.x}</button></div>
+    <div class="ct-det-h"><div><div class="ct-det-t">${esc(p.name)} ${ctBadge(p.badge)}</div><div class="ct-det-s">${esc(p.sub || '')}</div></div><div class="ct-det-hb">${typeof recvEditNomDialog === 'function' ? `<button class="btn btn-outline btn-sm" id="ctEditNom" title="Изменить наименование, артикул, категорию и тип товара">✏ Редактировать</button>` : ''}<button class="ct-x" id="ctX" title="Закрыть">${CT_I.x}</button></div></div>
     <div class="ct-det-body"><div class="ct-det-l">
     <div class="ct-det-top">
       <div class="ct-gal">${ctPhoto(photos[0], 'ct-gal-main')}${photos.length > 1 ? `<div class="ct-thumbs">${photos.slice(0, 5).map((u, i) => `<button data-ph="${i}" class="${i === 0 ? 'on' : ''}"><img src="${esc(u)}" alt="" loading="lazy"></button>`).join('')}</div>` : ''}</div>
@@ -315,6 +315,8 @@ function ctPaintDet() {
     <div class="ct-tab" id="ctTab"></div>
     </div></div>`;
   $('ctX').onclick = ctClose;
+  // v1.7.7 — редактирование номенклатуры из карточки товара
+  const ed = $('ctEditNom'); if (ed) ed.onclick = () => recvEditNomDialog(p.id, { name: p.name, sku: p.sku, category: p.category }, () => { ctOpen(p.id); if (typeof renderCatalog === 'function') { try { renderCatalog(true); } catch (_) {} } });
   el.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => { CT.detTab = b.dataset.tab; el.querySelectorAll('[data-tab]').forEach(x => x.classList.toggle('on', x === b)); ctPaintTab(); }));
   el.querySelectorAll('[data-ph]').forEach(b => b.addEventListener('click', () => { const m = el.querySelector('.ct-gal-main'); if (m && m.tagName === 'IMG') m.src = photos[Number(b.dataset.ph)]; el.querySelectorAll('[data-ph]').forEach(x => x.classList.toggle('on', x === b)); }));
   el.querySelectorAll('[data-copy]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); navigator.clipboard && navigator.clipboard.writeText(b.dataset.copy).then(() => docToast('Штрихкод скопирован')); }));

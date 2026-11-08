@@ -10,7 +10,7 @@
 <link rel="icon" href="favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="planogram.css?v=20261109-p12">
+<link rel="stylesheet" href="planogram.css?v=20261109-p13">
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script type="importmap">
 { "imports": {
@@ -55,7 +55,7 @@
       <button class="pg-walk" id="pgWalk" title="Пройтись по магазину от первого лица">🚶 Прогулка по залу</button>
       <div class="pg-live" id="pgLive"></div>
       <div class="pg-walkui" id="pgWalkUi" hidden>
-        <div class="pg-walkbar"><span class="pg-walkhelp"><b>W A S D</b> / стрелки — идти · тяните мышью — смотреть · клик по полу — подойти · Shift — быстрее</span><span class="pg-walkhelp-m">Джойстик — идти · тяните экран — смотреть · нажмите на пол — подойти</span><button id="pgWalkExit">✕ Выйти</button></div>
+        <div class="pg-cross" id="pgCross" hidden></div><div class="pg-walkbar"><span class="pg-walkhelp"><b>W A S D</b> / стрелки — идти · «Обзор мышью» или M — смотреть мышью без зажатия · тяните мышью — смотреть · клик по полу — подойти · Shift — быстрее</span><span class="pg-walkhelp-m">Джойстик — идти · тяните экран — смотреть · нажмите на пол — подойти</span><span class="pg-walkbtns"><button id="pgWalkLook" title="Камера крутится за мышью без зажатия кнопки (клавиша M)">🖱 Обзор мышью</button><button id="pgWalkExit">✕ Выйти</button></span></div>
         <div class="pg-joy" id="pgJoy"><div class="pg-joy-k" id="pgJoyK"></div></div>
       </div>
       <div class="pg-tools" id="pgTools" style="display:none"></div>
@@ -66,6 +66,6 @@
 </div>
 <div class="pg-modal" id="pgModal" hidden></div>
 <div class="pg-toast" id="pgToast"></div>
-<script type="module" src="planogram.js?v=20261109-p12"></script>
+<script type="module" src="planogram.js?v=20261109-p13"></script>
 </body>
 </html>

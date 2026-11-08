@@ -279,3 +279,11 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .pg-hb-r b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pg-stage.heat-on .pg-legend{display:none}
 @media (max-width:760px){.pg-heatbox{width:auto;right:170px;max-height:45%}}
+
+/* v1.7.4: обзор мышью */
+.pg-walkbtns{display:flex;gap:8px;pointer-events:auto}
+.pg-cross{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px 0 0 -9px;pointer-events:none;z-index:7}
+.pg-cross[hidden]{display:none}
+.pg-cross::before,.pg-cross::after{content:'';position:absolute;background:#fff;box-shadow:0 0 0 1px rgba(15,23,42,.55)}
+.pg-cross::before{left:8px;top:0;width:2px;height:18px}.pg-cross::after{top:8px;left:0;height:2px;width:18px}
+@media (hover:none),(pointer:coarse){#pgWalkLook{display:none}}

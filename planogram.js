@@ -1280,7 +1280,7 @@ function bind3dPointer() {
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   let down = null;
-  const setNdc = (e) => { const r = el.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, G.cam); };
+  const setNdc = (e) => { if (G.walk && document.pointerLockElement === el) { ndc.set(0, 0); ray.setFromCamera(ndc, G.cam); return; } const r = el.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, G.cam); };
   el.addEventListener('pointerdown', (e) => {
     down = { x: e.clientX, y: e.clientY };
     if (!S.edit || G.walk) return;
@@ -1453,6 +1453,7 @@ function walkStart() {
 }
 function walkExit() {
   const w = G.walk; if (!w) return;
+  if (document.pointerLockElement) { try { document.exitPointerLock(); } catch (_) {} }
   G.walk = null; WK.keys.clear(); WK.joy.x = WK.joy.y = 0;
   G.cam.fov = w.save.fov; G.cam.near = 0.1; G.cam.updateProjectionMatrix();
   G.cam.position.copy(w.save.pos); G.ctl.target.copy(w.save.tgt); G.ctl.enabled = true; G.ctl.update();
@@ -1469,8 +1470,25 @@ function bindWalk() {
   const el = G.renderer.domElement;
   let look = null;
   el.addEventListener('pointerdown', (e) => { if (!G.walk) return; look = { id: e.pointerId, x: e.clientX, y: e.clientY }; });
+  // v1.7.4: обзор мышью без зажатия (pointer lock): курсор прячется, камера крутится за мышью
+  let unlockAt = 0;
+  const lookBtn = $('pgWalkLook'), cross = $('pgCross');
+  const mouseLook = () => { if (!G.walk) return; if (document.pointerLockElement === el) document.exitPointerLock(); else { try { const r = el.requestPointerLock(); if (r && r.catch) r.catch(() => toast('Браузер не дал захватить мышь — тяните мышью с зажатой кнопкой', true)); } catch (_) {} } };
+  if (lookBtn) lookBtn.addEventListener('click', (e) => { e.stopPropagation(); mouseLook(); });
+  document.addEventListener('pointerlockchange', () => {
+    const on = document.pointerLockElement === el;
+    if (!on) unlockAt = Date.now();
+    if (cross) cross.hidden = !on;
+    if (lookBtn) lookBtn.textContent = on ? 'Esc — отпустить мышь' : '🖱 Обзор мышью';
+  });
+  el.addEventListener('mousemove', (e) => {
+    if (!G.walk || document.pointerLockElement !== el) return;
+    G.walk.yaw -= (e.movementX || 0) * 0.0024; G.walk.pitch -= (e.movementY || 0) * 0.0024;
+    G.walk.pitch = Math.max(-1.15, Math.min(1.0, G.walk.pitch));
+  });
   el.addEventListener('pointermove', (e) => {
     if (!G.walk || !look || look.id !== e.pointerId) return;
+    if (document.pointerLockElement === el) return;
     const k = e.pointerType === 'touch' ? 0.006 : 0.0042;
     G.walk.yaw += (e.clientX - look.x) * k; G.walk.pitch += (e.clientY - look.y) * k;
     G.walk.pitch = Math.max(-1.15, Math.min(1.0, G.walk.pitch));
@@ -1486,7 +1504,8 @@ function bindWalk() {
   const CODES = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight']);
   document.addEventListener('keydown', (e) => {
     if (!G.walk || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || e.ctrlKey || e.metaKey) return;
-    if (e.code === 'Escape') { if ($('pgModal').hidden) walkExit(); return; }
+    if (e.code === 'Escape') { if (document.pointerLockElement || Date.now() - unlockAt < 400) return; if ($('pgModal').hidden) walkExit(); return; }
+    if (e.code === 'KeyM') { mouseLook(); e.preventDefault(); return; }
     if (CODES.has(e.code)) { WK.keys.add(e.code); e.preventDefault(); }
   });
   document.addEventListener('keyup', (e) => WK.keys.delete(e.code));
@@ -1618,6 +1637,15 @@ function bind2d(svg, pts) {
   let drag = null;
   svg.addEventListener('pointerdown', (e) => {
     const [x, y] = toPt(e);
+    if (S.doorPick) { // v1.7.4: ставим вход на ближайшую стену
+      const z = S.layout.zones[S.zone]; let best = null;
+      pts.forEach((p, i) => { const q = pts[(i + 1) % pts.length]; const dx = q[0] - p[0], dy = q[1] - p[1], L2 = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((x - p[0]) * dx + (y - p[1]) * dy) / L2)); const d = Math.hypot(x - (p[0] + t * dx), y - (p[1] + t * dy)); if (!best || d < best.d) best = { i, t, d, L: Math.sqrt(L2) }; });
+      if (!best || best.d > 1.2) { toast('Нажмите ближе к стене', true); return; }
+      const w = Math.min((z.door && z.door.w) || (S.zone === 'hall' ? 1.8 : 0.9), Math.max(0.6, best.L - 0.1));
+      const half = w / 2 / best.L; const t = Math.max(half, Math.min(1 - half, best.t));
+      z.door = { edge: best.i, t: Math.round(t * 100) / 100, w: Math.round(w * 10) / 10 };
+      S.doorPick = false; changed(true); toast('Вход поставлен на стену ' + (best.i + 1)); return;
+    }
     const vx = e.target.getAttribute('data-vx'), mid = e.target.getAttribute('data-mid'), rot = e.target.getAttribute('data-rot');
     if (vx != null) { S.vsel = Number(vx); drag = { k: 'vx', i: Number(vx) }; svg.setPointerCapture(e.pointerId); renderPanel(); return; }
     if (mid != null) {
@@ -1716,6 +1744,10 @@ function renderZonePanel(P) {
       ${S.shapeEdit ? `<div class="pg-info">Тяните синие точки — углы помещения. Зелёный «+» на стене добавляет новый угол (для Г-образной или сложной формы). Размеры стен подписаны на плане.</div>` : ''}
       ${S.shapeEdit && S.vsel != null ? `<div class="pg-grid2" style="margin-top:8px"><div class="pg-f"><label>Точка ${S.vsel + 1}: X, м</label><input id="vX" type="number" step="0.05" value="${z.polygon[S.vsel][0]}"></div><div class="pg-f"><label>Y, м</label><input id="vY" type="number" step="0.05" value="${z.polygon[S.vsel][1]}"></div></div>` : ''}
       <h4>Вход</h4>
+      <div class="pg-row" style="margin-bottom:8px">
+        <button class="pg-btn sm ${S.doorPick ? 'pri' : ''}" id="dPick">📍 ${S.doorPick ? 'Нажмите на стену на плане…' : (z.door ? 'Перенести вход' : 'Поставить вход')}</button>
+        ${z.door ? `<button class="pg-btn sm danger" id="dDel">🗑 Убрать вход</button>` : ''}
+      </div>
       <div class="pg-grid3">
         <div class="pg-f"><label>Стена №</label><select id="dEdge">${z.polygon.map((_, i) => `<option value="${i}" ${z.door && z.door.edge === i ? 'selected' : ''}>${i + 1}</option>`).join('')}<option value="-1" ${!z.door ? 'selected' : ''}>нет</option></select></div>
         <div class="pg-f"><label>Позиция, %</label><input id="dT" type="number" min="0" max="100" step="1" value="${z.door ? Math.round(z.door.t * 100) : 50}"></div>
@@ -1798,6 +1830,8 @@ function renderZonePanel(P) {
     changed(true);
   };
   ['dEdge', 'dT', 'dW'].forEach(id => on(id, 'change', doorUpd));
+  on('dDel', 'click', () => { z.door = null; S.doorPick = false; changed(true); toast('Вход убран — нажмите «Поставить вход», чтобы поставить в другом месте'); });
+  on('dPick', 'click', () => { S.doorPick = !S.doorPick; if (S.doorPick && S.view !== '2d') setView('2d'); else renderAll(false); if (S.doorPick) toast('Нажмите на стену на плане — там будет вход'); });
   on('zAllNp', 'click', () => openNotPlaced(notPlaced));
 }
 function addFx(type, preset) {
@@ -2254,6 +2288,7 @@ function hint() {
   const el = $('pgHint');
   let t = '';
   if (S.shapeEdit) t = 'Форма помещения: тяните синие углы, «+» на стене — добавить угол';
+  if (S.doorPick) t = 'Нажмите на стену — туда встанет вход';
   else if (S.view === '3d' && S.zone === 'hall' && G.walk) t = '';
   else if (S.view === '3d' && S.zone === 'hall') t = S.edit ? 'Тяните шкаф мышью/пальцем, чтобы переместить · камера — по пустому месту' : 'Чтобы двигать шкафы — включите «Редактирование»';
   else t = 'Тяните шкаф, чтобы переместить · синий кружок — поворот';
@@ -2618,9 +2653,9 @@ $('pgStore').addEventListener('change', (e) => {
   if (S.dirty && !confirm('Есть несохранённые изменения. Перейти без сохранения?')) { e.target.value = S.wh; return; }
   walkExit(); if (LV.on) liveToggle(false); if (HT.on) heatToggle(false); S.wh = e.target.value; S.sel = null; S.layout = null; G.built = false; loadAll();
 });
-document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
+document.querySelectorAll('#pgZoneSeg button').forEach(b => b.addEventListener('click', () => { if (b.dataset.zone !== 'hall') walkExit(); S.zone = b.dataset.zone; S.sel = null; S.shapeEdit = false; S.doorPick = false; if (S.zone === 'hall' && !S.view) S.view = '3d'; renderAll(true); }));
 document.querySelectorAll('#pgViewSeg button').forEach(b => b.addEventListener('click', () => { if (!b.disabled) setView(b.dataset.view); }));
-$('pgEdit').addEventListener('change', (e) => { S.edit = e.target.checked; if (!S.edit) S.shapeEdit = false; renderAll(true); });
+$('pgEdit').addEventListener('change', (e) => { S.edit = e.target.checked; if (!S.edit) { S.shapeEdit = false; S.doorPick = false; } renderAll(true); });
 $('pgSave').addEventListener('click', save);
 const qrBtn = $('pgQr');
 if (qrBtn) { qrBtn.classList.toggle('on', S.showQr); qrBtn.addEventListener('click', () => { S.showQr = !S.showQr; localStorage.setItem('pg_show_qr', S.showQr ? '1' : '0'); qrBtn.classList.toggle('on', S.showQr); renderAll(true); }); }

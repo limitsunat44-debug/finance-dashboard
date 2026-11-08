@@ -19,7 +19,7 @@ const LS_AUTH = 'orto_admin_rmk_auth';
 const STORES = [
   { wh: '5ca2d3e6-29c1-4d1a-aeee-832fa513e2e2', name: 'Ортосалон «Айни»', active: true },
   { wh: '19db06fa-deb5-47db-acd7-486c5bc679d0', name: 'Ортосалон «Сиёма»', active: true },
-  { wh: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Ортосалон «Худжанд»', active: false },
+  { wh: 'f9a506e7-c706-439e-aad3-dbfa9104fed2', name: 'Ортосалон «Худжанд»', active: true },
   { wh: '8f0bf6e3-1ffc-4267-8f4b-1e79179dd2a7', name: 'Ортосалон «Сити-Молл»', active: true },
 ];
 
@@ -51,6 +51,7 @@ const BGS = {
   yellow:   { label: 'Жёлтая',      color: '#e8e14b' },
   pink:     { label: 'Розовая',     color: '#f2a7c8' },
   blue:     { label: 'Голубая',     color: '#a9c8ef' },
+  wood:     { label: 'Дуб (дерево)', color: '#c79a5e' },
 };
 const PRESETS = {
   pinsC:  { label: 'Стена с держателями (бетон)',  look: 'pins',  bg: 'concrete', w: 1.8, n: 6, m: 3 },
@@ -62,6 +63,7 @@ const PRESETS = {
   longB:  { label: 'Полки на голубой стене',       look: 'long',  bg: 'blue',     w: 1.4, n: 6, m: 6 },
   niche:  { label: 'Ниша с полочками',             look: 'niche', bg: 'white',    w: 1.0, n: 6, m: 2 },
   hang:   { label: 'Стена с крючками (пакеты)',    look: 'hang',  bg: 'white',    w: 1.0, n: 6, m: 2 },
+  longW:  { label: 'Дубовая панель со стекл. полками', look: 'long', bg: 'wood', w: 1.1, n: 4, m: 3 },
 };
 const wallLook = (fx) => (fx && fx.type === 'wall' && LOOKS[fx.look] && fx.look) || '';
 const ST_COLOR = { ok: '#16a34a', low: '#f59e0b', out: '#dc2626', restock: '#7c3aed', slow: '#64748b', empty: '#cbd5e1' };
@@ -549,6 +551,7 @@ function concreteTex() {
 }
 function bgMat(bg) {
   const b = BGS[bg] ? bg : 'white';
+  if (b === 'wood') return pmat('bgWood', () => new THREE.MeshStandardMaterial({ map: woodTex(), roughness: 0.6, emissive: '#6b4a22', emissiveIntensity: 0.18 }));
   if (b === 'concrete') return pmat('bgConcrete', () => new THREE.MeshStandardMaterial({ map: concreteTex(), roughness: 0.92, emissive: '#9a9d9f', emissiveIntensity: 0.35 }));
   return pmat('bg' + b, () => new THREE.MeshStandardMaterial({ color: BGS[b].color, roughness: 0.85, emissive: BGS[b].color, emissiveIntensity: b === 'white' ? 0.15 : 0.4 }));
 }

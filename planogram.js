@@ -594,6 +594,7 @@ function bgMat(bg) {
 }
 // одна туфля в профиль (как на держателях/полочках в салоне)
 function shoeSide(p, ud, s) {
+  if (p.photo) { const o = shoePair(p, ud, s); o.children[0].rotation.y = Math.PI / 2; return o; }
   const { sole, upper } = shoeGeo();
   const g = new THREE.Group();
   const a = new THREE.Mesh(sole, mat('#f1f5f9', { roughness: 0.6 })); const b = new THREE.Mesh(upper, prodMat(p));
@@ -679,17 +680,94 @@ function prodMat(p) {
   return m;
 }
 const isShoe = (p) => /обув|кед|ботин|туфл|сандал|кросс|сапог|тапоч|шлеп|мокас|балет|босонож/i.test((p.category || '') + ' ' + (p.name || ''));
+// ── одна туфля на витрине (не пара): вырезка из фото товара, без фото — процедурная модель ──
+// Фото обрезается в браузере: фон (цвет рамки) убирается заливкой от краёв, затем кроп по контуру обуви.
+const CUT = new Map();
+function cutPhoto(url) {
+  if (CUT.has(url)) return CUT.get(url);
+  const c = { st: 'load', mat: null, aspect: 1 }; CUT.set(url, c);
+  const img = new Image(); img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const M = 360, k = Math.min(1, M / Math.max(img.width, img.height));
+      const w = Math.max(8, Math.round(img.width * k)), h = Math.max(8, Math.round(img.height * k));
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      const x = cv.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0, w, h);
+      const id = x.getImageData(0, 0, w, h), d = id.data, N = w * h;
+      let br = 0, bg = 0, bb = 0, bn = 0;
+      const eg = (p) => { const i = p * 4; br += d[i]; bg += d[i + 1]; bb += d[i + 2]; bn++; };
+      for (let X = 0; X < w; X++) { eg(X); eg((h - 1) * w + X); }
+      for (let Y = 0; Y < h; Y++) { eg(Y * w); eg(Y * w + w - 1); }
+      br /= bn; bg /= bn; bb /= bn;
+      const T = 34, bgm = new Uint8Array(N), q = new Int32Array(N); let qh = 0, qt = 0;
+      const push = (p) => { if (bgm[p]) return; const i = p * 4; if (d[i + 3] < 24 || Math.max(Math.abs(d[i] - br), Math.abs(d[i + 1] - bg), Math.abs(d[i + 2] - bb)) < T) { bgm[p] = 1; q[qt++] = p; } };
+      for (let X = 0; X < w; X++) { push(X); push((h - 1) * w + X); }
+      for (let Y = 0; Y < h; Y++) { push(Y * w); push(Y * w + w - 1); }
+      while (qh < qt) { const p = q[qh++], X = p % w, Y = (p / w) | 0; if (X > 0) push(p - 1); if (X < w - 1) push(p + 1); if (Y > 0) push(p - w); if (Y < h - 1) push(p + w); }
+      let x0 = w, y0 = h, x1 = -1, y1 = -1;
+      for (let p = 0; p < N; p++) {
+        if (bgm[p]) { d[p * 4 + 3] = 0; continue; }
+        const X = p % w, Y = (p / w) | 0;
+        if (X < x0) x0 = X; if (X > x1) x1 = X; if (Y < y0) y0 = Y; if (Y > y1) y1 = Y;
+        // мягкий край: пиксель рядом с фоном — полупрозрачный
+        if ((X > 0 && bgm[p - 1]) || (X < w - 1 && bgm[p + 1]) || (Y > 0 && bgm[p - w]) || (Y < h - 1 && bgm[p + w])) d[p * 4 + 3] = 150;
+      }
+      // фон не отделился (фото в интерьере) или обуви почти нет — оставляем модель-заглушку
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1, fill = (N - qt) / Math.max(1, bw * bh);
+      const edges = (x0 <= 1) + (y0 <= 1) + (x1 >= w - 2) + (y1 >= h - 2);
+      // фото в интерьере/на ноге: фон не отделился, контур — почти прямоугольник, упирается в края кадра или в верх (ноги)
+      if (qt < N * 0.08 || x1 < 0 || bw * bh < N * 0.03 || fill > 0.86 || edges >= 3 || y0 <= 1) { c.st = 'bad'; return; }
+      x.putImageData(id, 0, 0);
+      const pad = 2, cw = Math.min(w, x1 - x0 + 1 + pad * 2), ch = Math.min(h, y1 - y0 + 1 + pad * 2);
+      const out = document.createElement('canvas'); out.width = cw; out.height = ch;
+      out.getContext('2d').drawImage(cv, Math.max(0, x0 - pad), Math.max(0, y0 - pad), cw, ch, 0, 0, cw, ch);
+      const tex = new THREE.CanvasTexture(out); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+      c.mat = new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.35, color: '#f4f4f4' });
+      c.aspect = cw / ch; c.st = 'ok';
+      cutApply(url);
+    } catch (_) { c.st = 'bad'; }
+  };
+  img.onerror = () => { c.st = 'bad'; };
+  img.src = url;
+  return c;
+}
+function cutShow(sp, c) {
+  const L = 0.27; let w = L, h = L / c.aspect;
+  if (h > 0.2) { h = 0.2; w = h * c.aspect; }
+  sp.material = c.mat; sp.scale.set(w, h, 1); sp.visible = true;
+  if (sp.userData.proc) sp.userData.proc.visible = false;
+}
+function cutApply(url) {
+  const c = CUT.get(url); if (!G.root || !c || c.st !== 'ok') return;
+  G.root.traverse(o => { if (o.isSprite && o.userData.cutUrl === url && !o.visible) cutShow(o, c); });
+}
+const CUT_BLANK = new THREE.SpriteMaterial({ transparent: true, opacity: 0 });
 function shoePair(p, ud, s) {
   const { sole, upper } = shoeGeo();
   const g = new THREE.Group();
-  const um = prodMat(p);
-  const sm = mat('#f1f5f9', { roughness: 0.6 });
-  [[-0.05, 0.02, 0.12], [0.05, -0.02, -0.12]].forEach(([x, z, ry]) => {
-    const a = new THREE.Mesh(sole, sm); const b = new THREE.Mesh(upper, um);
-    [a, b].forEach(m => { m.position.set(x, 0, z); m.rotation.y = ry; m.castShadow = true; m.userData = ud; g.add(m); G.pick.push(m); });
-  });
+  const proc = new THREE.Group(); proc.rotation.y = Math.PI / 2 - 0.45; // три четверти: видно бок туфли
+  const a = new THREE.Mesh(sole, mat('#f1f5f9', { roughness: 0.6 })); const b = new THREE.Mesh(upper, prodMat(p));
+  [a, b].forEach(m => { m.castShadow = true; m.userData = ud; proc.add(m); G.pick.push(m); });
+  g.add(proc);
+  if (p.photo) {
+    const c = cutPhoto(p.photo);
+    const sp = new THREE.Sprite(CUT_BLANK); sp.center.set(0.5, 0); sp.scale.set(0.001, 0.001, 1); sp.visible = false;
+    sp.userData = { ...ud, cutUrl: p.photo, proc };
+    g.add(sp); G.pick.push(sp);
+    if (c.st === 'ok') cutShow(sp, c);
+  }
   g.scale.setScalar(s);
   return g;
+}
+// раскладка мест по сетке (подиум, тумба): несколько рядов, чтобы обувь не мельчала
+function slotGrid(m, W, D) {
+  let best = { cols: m, rows: 1, cx: W / m, cz: D, sc: 0 };
+  for (let r = 1; r <= Math.min(m, 6); r++) {
+    const cols = Math.ceil(m / r), cx = W / cols, cz = D / r;
+    const sc = Math.min(cx / 0.2, cz / 0.27);
+    if (sc > best.sc + 0.02) best = { cols, rows: r, cx, cz, sc };
+  }
+  return best;
 }
 function prodBox(p, ud, w, both) {
   const tex = p.photo ? photoTex(p.photo) : null;
@@ -705,7 +783,7 @@ function disposeRoot() {
   if (!G.root) return;
   G.root.traverse(o => {
     if (o.isCSS2DObject && o.element && o.element.parentNode) o.element.parentNode.removeChild(o.element);
-    if (o.geometry && !SHARED_GEO.has(o.geometry)) o.geometry.dispose();
+    if (o.geometry && !o.isSprite && !SHARED_GEO.has(o.geometry)) o.geometry.dispose();
   });
   G.scene.remove(G.root);
 }
@@ -976,7 +1054,7 @@ function lookRow3d(fx, g, add, sh, si, y, W, D) {
       const yy = y + 0.002;
       if (p) {
         let o;
-        if (lk === 'long') { if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.25, cw / 0.19, (D * 0.9) / 0.25)); o.rotation.y = 0.32; } else o = prodBox(p, ud, cw * 0.8, false); }
+        if (lk === 'long') { if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.25, cw / 0.2, (D * 0.9) / 0.27)); } else o = prodBox(p, ud, cw * 0.8, false); }
         else if (isShoe(p)) o = shoeSide(p, ud, Math.min(1.25, (cw * 0.95) / 0.25));
         else o = prodBox(p, ud, Math.min(cw * 0.7, 0.2), false);
         o.position.set(x, yy, zc); g.add(o);
@@ -1024,29 +1102,7 @@ function c2Boxes(g, add, W, D, y1, y2, topY) {
 // сторона тумбы: si=0 — спереди (+z), si=1 — сзади (−z); до 10 моделей в ряд
 function c2Side3d(fx, g, add, sh, si, y, W, D) {
   const sd = si === 0 ? 1 : -1;
-  const m = sh.slots.length || 1, cw = (W - 0.1) / m;
-  const zf = sd * D * 0.26;
-  sh.slots.forEach((sl, ki) => {
-    const st = slotStatus(sl);
-    const x = -W / 2 + 0.05 + cw * (ki + 0.5);
-    const ud = { fid: fx.id, si, ki, slot: true };
-    const isSel = S.sel && S.sel.k === 'slot' && S.sel.fid === fx.id && S.sel.si === si && S.sel.ki === ki;
-    const p = sl.p ? S.products.get(sl.p) : null;
-    if (p) {
-      let o;
-      if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.3, cw / 0.19, (D * 0.42) / 0.25)); o.rotation.y = (sd > 0 ? 0 : Math.PI) + 0.32; }
-      else { o = prodBox(p, ud, cw * 0.8, false); if (sd < 0) o.rotation.y = Math.PI; }
-      o.position.set(x, y, zf); g.add(o);
-    } else if (sl.p) {
-      const o = add(new THREE.BoxGeometry(cw * 0.6, 0.08, 0.18), mat('#94a3b8'), x, y + 0.04, zf); o.userData = ud;
-    } else {
-      const e = new THREE.Mesh(new THREE.PlaneGeometry(cw * 0.8, D * 0.36), pmat('emptySlot' + (S.edit ? 1 : 0), () => new THREE.MeshBasicMaterial({ color: '#94a3b8', transparent: true, opacity: S.edit ? 0.32 : 0.12, depthWrite: false })));
-      e.rotation.x = -Math.PI / 2; e.position.set(x, y + 0.002, zf); e.userData = ud; g.add(e); G.pick.push(e);
-    }
-    const tag = add(new THREE.BoxGeometry(0.06, 0.022, 0.006), mat(ST_COLOR[st], { emissive: ST_COLOR[st], emissiveIntensity: st === 'empty' ? 0 : 0.45 }), x, y - 0.03, sd * (D / 2 + 0.018));
-    tag.userData = ud; tag.castShadow = false;
-    if (isSel) { const hb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(cw * 0.95, 0.2, D * 0.4)), new THREE.LineBasicMaterial({ color: '#2563eb' })); hb.position.set(x, y + 0.1, zf); g.add(hb); }
-  });
+  gridItems3d(fx, g, add, sh, si, y, { W: W - 0.1, D: D / 2 - 0.06, zFront: sd * (D / 2 - 0.03), sd, tagZ: sd * (D / 2 + 0.018), tagY: y - 0.03 });
   if (S.showQr) {
     const key = 'qrM' + shelfSid(fx, si) + '|' + fx.name + '|' + fx.shelves.length;
     const qm = pmat(key, () => { const tx = new THREE.CanvasTexture(labelCanvas(fx, si, 6)); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 4; return new THREE.MeshBasicMaterial({ map: tx, toneMapped: false }); });
@@ -1055,6 +1111,39 @@ function c2Side3d(fx, g, add, sh, si, y, W, D) {
     qp.position.set(sd * (-W / 2 + 0.03 + qw / 2), y - 0.06 - qh / 2, sd * (D / 2 + 0.02)); if (sd < 0) qp.rotation.y = Math.PI;
     qp.userData = { fid: fx.id, si, qr: true }; g.add(qp); G.pick.push(qp);
   }
+}
+// места по сетке на горизонтальной поверхности: ряд 0 — у переднего края, далее вглубь
+function gridItems3d(fx, g, add, sh, si, y, R) {
+  const m = sh.slots.length || 1;
+  const gr = slotGrid(m, R.W, R.D);
+  const sc = Math.min(1.3, gr.sc);
+  sh.slots.forEach((sl, ki) => {
+    const st = slotStatus(sl);
+    const row = Math.floor(ki / gr.cols), col = ki % gr.cols;
+    const inRow = row === gr.rows - 1 ? m - row * gr.cols : gr.cols;
+    const x = -R.W / 2 + gr.cx * (col + 0.5) + (gr.cols - inRow) * gr.cx / 2;
+    const zf = R.zFront - R.sd * gr.cz * (row + 0.5);
+    const ud = { fid: fx.id, si, ki, slot: true };
+    const isSel = S.sel && S.sel.k === 'slot' && S.sel.fid === fx.id && S.sel.si === si && S.sel.ki === ki;
+    const p = sl.p ? S.products.get(sl.p) : null;
+    if (p) {
+      let o;
+      if (isShoe(p)) { o = shoePair(p, ud, sc); if (R.sd < 0) o.rotation.y = Math.PI; }
+      else { o = prodBox(p, ud, Math.min(gr.cx, gr.cz) * 0.8, false); if (R.sd < 0) o.rotation.y = Math.PI; }
+      o.position.set(x, y, zf); g.add(o);
+    } else if (sl.p) {
+      const o = add(new THREE.BoxGeometry(gr.cx * 0.6, 0.08, gr.cz * 0.6), mat('#94a3b8'), x, y + 0.04, zf); o.userData = ud;
+    } else {
+      const e = new THREE.Mesh(new THREE.PlaneGeometry(gr.cx * 0.8, gr.cz * 0.8), pmat('emptySlot' + (S.edit ? 1 : 0), () => new THREE.MeshBasicMaterial({ color: '#94a3b8', transparent: true, opacity: S.edit ? 0.32 : 0.12, depthWrite: false })));
+      e.rotation.x = -Math.PI / 2; e.position.set(x, y + 0.002, zf); e.userData = ud; g.add(e); G.pick.push(e);
+    }
+    // статус: на кромке, если ряд один; иначе — плашка на поверхности перед местом
+    const tag = gr.rows === 1
+      ? add(new THREE.BoxGeometry(0.06, 0.022, 0.006), mat(ST_COLOR[st], { emissive: ST_COLOR[st], emissiveIntensity: st === 'empty' ? 0 : 0.45 }), x, R.tagY, R.tagZ)
+      : add(new THREE.BoxGeometry(Math.min(0.05, gr.cx * 0.5), 0.004, 0.014), mat(ST_COLOR[st], { emissive: ST_COLOR[st], emissiveIntensity: st === 'empty' ? 0 : 0.45 }), x, y + 0.003, zf + R.sd * gr.cz * 0.42);
+    tag.userData = ud; tag.castShadow = false;
+    if (isSel) { const hb = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(gr.cx * 0.95, 0.2, gr.cz * 0.9)), new THREE.LineBasicMaterial({ color: '#2563eb' })); hb.position.set(x, y + 0.1, zf); g.add(hb); }
+  });
 }
 // упаковка стелек: тонкий пакет с фото спереди и белой «шапкой» с отверстием для крючка
 function pegPack(p, ud, w, h) {
@@ -1165,6 +1254,7 @@ function buildFx(fx) {
       if (isPeg(fx)) { pegRow3d(fx, g, add, sh, si, y, W, D); return; }
       if (isC2(fx)) { c2Side3d(fx, g, add, sh, si, base, W, D); return; }
       if (wallLook(fx)) { lookRow3d(fx, g, add, sh, si, y, W, D); return; }
+      if (fx.type === 'table') { gridItems3d(fx, g, add, sh, si, y + 0.011, { W: W - 0.1, D: D - 0.1, zFront: D / 2 - 0.05, sd: 1, tagZ: D / 2 - 0.01, tagY: y - 0.002 }); return; }
       const isBaseLevel = (fx.type === 'island' && si === 0) || fx.type === 'table';
       if (!isBaseLevel) {
         if (fx.type === 'island') {
@@ -1188,7 +1278,7 @@ function buildFx(fx) {
           const p = sl.p ? S.products.get(sl.p) : null;
           if (p) {
             let o;
-            if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.3, cw / 0.19, (D * 0.9) / 0.25)); o.rotation.y = (sd > 0 ? 0 : Math.PI) + 0.32; }
+            if (isShoe(p)) { o = shoePair(p, ud, Math.min(1.3, cw / 0.2, (D * 0.9) / 0.27)); o.rotation.y = sd > 0 ? 0 : Math.PI; }
             else { o = prodBox(p, ud, cw * 0.8, both); if (sd < 0) o.rotation.y = Math.PI; }
             o.position.set(x, yy, zf); g.add(o);
           } else if (sl.p) {

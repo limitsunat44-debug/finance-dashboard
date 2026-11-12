@@ -368,6 +368,7 @@ function atkSettingsHtml() {
       <div><label>1 балл = ? сомони (0 — только баллы)</label><input class="sms-in" type="number" min="0" step="0.1" id="atkSSom" value="${S.somPerPoint}"></div>
       <div><label>Проверок витрин в день</label><input class="sms-in" type="number" min="0" max="5" id="atkSDC" value="${S.dailyCheckCount}"></div>
       <div><label>«Отложить» на, мин</label><input class="sms-in" type="number" min="5" id="atkSSn" value="${S.snoozeMin}"></div>
+      <div><label>Задач на кассе у продавца (0 — все)</label><input class="sms-in" type="number" min="0" max="50" id="atkSLim" value="${S.cashierLimit != null ? S.cashierLimit : 5}"></div>
       <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSRe" ${S.restock ? 'checked' : ''}> Авто-задачи «Пополнить витрину» после продажи (по планограмме)</label></div>
       <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSDaily" ${S.dailyCheck ? 'checked' : ''}> Ежедневная задача «Проверить витрину» (после 9:00, секции по кругу)</label></div>
       <div class="full"><label class="sms-chk"><input type="checkbox" id="atkSAp" ${S.needApproval ? 'checked' : ''}> Ручные, ИИ-задачи и проверки витрин — баллы после подтверждения администратором</label></div>
@@ -451,7 +452,7 @@ function atkBind(root) {
     const n = (id) => ($(id) || {}).value; const c = (id) => !!($(id) || {}).checked;
     e.target.disabled = true;
     try {
-      const d = await atkApi('settings-save', { settings: { points: { low: n('atkSL'), mid: n('atkSM'), high: n('atkSH') }, typePoints: Object.fromEntries(['restock', 'check', 'arrival', 'storage', 'fix', 'complexMin', 'complexMax'].map(k => [k, n('atkST_' + k)])), bestPrize: n('atkSBest'), repeatDays: n('atkSRep'), somPerPoint: n('atkSSom'), dailyCheckCount: n('atkSDC'), snoozeMin: n('atkSSn'), restock: c('atkSRe'), dailyCheck: c('atkSDaily'), needApproval: c('atkSAp') } });
+      const d = await atkApi('settings-save', { settings: { points: { low: n('atkSL'), mid: n('atkSM'), high: n('atkSH') }, typePoints: Object.fromEntries(['restock', 'check', 'arrival', 'storage', 'fix', 'complexMin', 'complexMax'].map(k => [k, n('atkST_' + k)])), bestPrize: n('atkSBest'), repeatDays: n('atkSRep'), somPerPoint: n('atkSSom'), dailyCheckCount: n('atkSDC'), snoozeMin: n('atkSSn'), cashierLimit: n('atkSLim'), restock: c('atkSRe'), dailyCheck: c('atkSDaily'), needApproval: c('atkSAp') } });
       ATK.settings = d.settings; if (typeof RW !== 'undefined') RW.d = null; atkToast('Настройки сохранены'); atkDraw();
     } catch (err) { atkToast('Ошибка: ' + err.message); e.target.disabled = false; }
   });
